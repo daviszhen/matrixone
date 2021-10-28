@@ -14,7 +14,7 @@
 
 package restrict
 
-import "github.com/matrixorigin/matrixone/pkg/sql/colexec/extend"
+import "matrixone/pkg/sql/colexec/extend"
 
 type Argument struct {
 	Attrs []string

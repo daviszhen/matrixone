@@ -15,7 +15,7 @@
 package limit
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
+	"matrixone/pkg/sql/op"
 )
 
 type Limit struct {

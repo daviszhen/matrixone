@@ -15,8 +15,8 @@
 package node
 
 import (
-	buf "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
+	buf "matrixone/pkg/vm/engine/aoe/storage/buffer"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

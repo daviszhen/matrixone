@@ -15,35 +15,21 @@
 package db
 
 import (
-	"sync"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	bm "matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
+	"matrixone/pkg/vm/engine/aoe/storage/db/factories"
+	fb "matrixone/pkg/vm/engine/aoe/storage/db/factories/base"
+	dbsched "matrixone/pkg/vm/engine/aoe/storage/db/sched"
+	ldio "matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	table "matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	mt "matrixone/pkg/vm/engine/aoe/storage/memtable/v1"
+	mb "matrixone/pkg/vm/engine/aoe/storage/mutation/buffer"
+	w "matrixone/pkg/vm/engine/aoe/storage/worker"
 	"sync/atomic"
-
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	bm "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/factories"
-	dbsched "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/flusher"
-	ldio "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	table "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/logstore"
-	mt "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/memtable/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	mb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/buffer"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/wal"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/wal/shard"
-	w "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/worker"
 )
 
-func OpenWithWalBroker(dirname string, opts *storage.Options) (db *DB, err error) {
-	if opts.Wal != nil && opts.Wal.GetRole() != wal.BrokerRole {
-		return nil, ErrUnexpectedWalRole
-	}
-	opts.WalRole = wal.BrokerRole
-	return Open(dirname, opts)
-}
-
 func Open(dirname string, opts *storage.Options) (db *DB, err error) {
+	// opts.FactoryType = e.MUTABLE_FT
 	dbLocker, err := createDBLock(dirname)
 	if err != nil {
 		return nil, err
@@ -54,8 +40,9 @@ func Open(dirname string, opts *storage.Options) (db *DB, err error) {
 		}
 	}()
 	opts.FillDefaults(dirname)
+	replayHandle := NewReplayHandle(dirname, nil)
 
-	flushDriver := flusher.NewDriver()
+	opts.Meta.Info = replayHandle.RebuildInfo(&opts.Mu, opts.Meta.Info.Conf)
 
 	fsMgr := ldio.NewManager(dirname, false)
 	indexBufMgr := bm.NewBufferManager(dirname, opts.CacheCfg.IndexCapacity)
@@ -63,8 +50,15 @@ func Open(dirname string, opts *storage.Options) (db *DB, err error) {
 
 	mutNodeMgr := mb.NewNodeManager(opts.CacheCfg.InsertCapacity, nil)
 	mtBufMgr := bm.NewBufferManager(dirname, opts.CacheCfg.InsertCapacity)
-	memtblMgr := mt.NewManager(opts, flushDriver)
-	flushDriver.InitFactory(createFlusherFactory(memtblMgr))
+	var (
+		factory fb.MutFactory
+	)
+	if opts.FactoryType == storage.MUTABLE_FT {
+		factory = factories.NewMutFactory(mutNodeMgr, nil)
+	} else {
+		factory = factories.NewNormalFactory()
+	}
+	memtblMgr := mt.NewManager(opts, factory)
 
 	db = &DB{
 		Dir:            dirname,
@@ -75,50 +69,23 @@ func Open(dirname string, opts *storage.Options) (db *DB, err error) {
 		MTBufMgr:       mtBufMgr,
 		SSTBufMgr:      sstBufMgr,
 		MutationBufMgr: mutNodeMgr,
-		FlushDriver:    flushDriver,
 		ClosedC:        make(chan struct{}),
 		Closed:         new(atomic.Value),
 	}
 
 	db.Store.Mu = &opts.Mu
 	db.Store.DataTables = table.NewTables(&opts.Mu, db.FsMgr, db.MTBufMgr, db.SSTBufMgr, db.IndexBufMgr)
-	factory := factories.NewMutFactory(mutNodeMgr, nil)
 	db.Store.DataTables.MutFactory = factory
 
-	store, err := logstore.NewBatchStore(common.MakeMetaDir(dirname), "store", nil)
-	if err != nil {
-		return
-	}
-	if db.Opts.Wal == nil {
-		db.Opts.Wal = shard.NewManagerWithDriver(store, false, db.Opts.WalRole)
-	}
-	db.Wal = db.Opts.Wal
-
-	db.TimedFlusher = w.NewHeartBeater(DefaultFlushInterval, &timedFlusherHandle{
-		driver:   flushDriver,
-		producer: db.Wal,
-	})
-
-	catalogCfg := metadata.CatalogCfg{
-		Dir:              dirname,
-		BlockMaxRows:     opts.Meta.Conf.BlockMaxRows,
-		SegmentMaxBlocks: opts.Meta.Conf.SegmentMaxBlocks,
-	}
-	if opts.Meta.Catalog, err = metadata.OpenCatalogWithDriver(new(sync.RWMutex), &catalogCfg, store, db.Wal); err != nil {
-		return
-	}
-	db.Store.Catalog = opts.Meta.Catalog
-	db.Store.Catalog.Start()
-
+	db.Store.MetaInfo = opts.Meta.Info
+	db.Cleaner.MetaFiles = w.NewHeartBeater(db.Opts.MetaCleanerCfg.Interval, NewMetaFileCleaner(db.Opts.Meta.Info))
 	db.Opts.Scheduler = dbsched.NewScheduler(opts, db.Store.DataTables)
 	db.Scheduler = db.Opts.Scheduler
 
-	replayHandle := NewReplayHandle(dirname, opts.Meta.Catalog, db.Store.DataTables, nil)
-	if err = replayHandle.Replay(); err != nil {
-		opts.Meta.Catalog.Close()
-		return nil, err
-	}
+	replayHandle.Cleanup()
+	db.replayData()
 
+	db.startCleaner()
 	db.startWorkers()
 	db.DBLocker, dbLocker = dbLocker, nil
 	replayHandle.ScheduleEvents(db.Opts, db.Store.DataTables)

@@ -16,7 +16,7 @@ package compile
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/vm/pipeline"
+	"matrixone/pkg/vm/pipeline"
 )
 
 func Print(prefix []byte, ss []*Scope) {

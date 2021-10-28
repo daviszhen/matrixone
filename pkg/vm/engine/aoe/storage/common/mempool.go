@@ -16,7 +16,7 @@ package common
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"matrixone/pkg/logutil"
 	"sync"
 	"sync/atomic"
 )

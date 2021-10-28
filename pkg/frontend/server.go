@@ -17,8 +17,8 @@ package frontend
 import (
 	"fmt"
 	"log"
-	"github.com/matrixorigin/matrixone/pkg/config"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"matrixone/pkg/config"
+	"matrixone/pkg/logutil"
 	"sync/atomic"
 
 	"github.com/fagongzi/goetty"

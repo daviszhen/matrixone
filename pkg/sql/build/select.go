@@ -16,16 +16,16 @@ package build
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/errno"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/extend"
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/dedup"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/limit"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/offset"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/projection"
-	"github.com/matrixorigin/matrixone/pkg/sql/tree"
-	"github.com/matrixorigin/matrixone/pkg/sqlerror"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/errno"
+	"matrixone/pkg/sql/colexec/extend"
+	"matrixone/pkg/sql/op"
+	"matrixone/pkg/sql/op/dedup"
+	"matrixone/pkg/sql/op/limit"
+	"matrixone/pkg/sql/op/offset"
+	"matrixone/pkg/sql/op/projection"
+	"matrixone/pkg/sql/tree"
+	"matrixone/pkg/sqlerror"
 )
 
 func (b *build) buildSelectStatement(stmt tree.SelectStatement) (op.OP, error) {
@@ -85,7 +85,7 @@ func (b *build) buildSelectWithoutParens(stmt tree.SelectStatement, orderBy tree
 	}
 	if len(orderBy) > 0 {
 		if fetch != nil && fetch.Offset == nil && fetch.Count != nil {
-			e, err := b.buildProjectionExtend(o, fetch.Count)
+			e, err := b.buildExtend(o, fetch.Count)
 			if err != nil {
 				return nil, err
 			}
@@ -111,7 +111,7 @@ func (b *build) buildSelectWithoutParens(stmt tree.SelectStatement, orderBy tree
 	}
 	if fetch != nil {
 		if fetch.Offset != nil {
-			e, err := b.buildProjectionExtend(o, fetch.Offset)
+			e, err := b.buildExtend(o, fetch.Offset)
 			if err != nil {
 				return nil, err
 			}
@@ -125,7 +125,7 @@ func (b *build) buildSelectWithoutParens(stmt tree.SelectStatement, orderBy tree
 			o = offset.New(o, v.V.Col.([]int64)[0])
 		}
 		if fetch.Count != nil {
-			e, err := b.buildProjectionExtend(o, fetch.Count)
+			e, err := b.buildExtend(o, fetch.Count)
 			if err != nil {
 				return nil, err
 			}
@@ -241,7 +241,7 @@ func (b *build) buildSelectClauseWithoutSummarize(stmt *tree.SelectClause, order
 			}
 		}
 		for _, g := range stmt.GroupBy {
-			e, err := b.buildProjectionExtend(o, g)
+			e, err := b.buildExtend(o, g)
 			if err != nil {
 				return nil, nil, err
 			}

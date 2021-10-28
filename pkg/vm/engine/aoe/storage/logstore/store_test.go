@@ -17,7 +17,7 @@ package logstore
 import (
 	"encoding/binary"
 	"io"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
 	"os"
 	"sync"
 	"testing"
@@ -176,32 +176,40 @@ func TestStore(t *testing.T) {
 func TestBatchStore(t *testing.T) {
 	dir := "/tmp/testbatchstore"
 	os.RemoveAll(dir)
+	var wg sync.WaitGroup
 	cfg := &RotationCfg{
 		RotateChecker: &MaxSizeRotationChecker{MaxSize: 100 * int(common.M)},
 	}
-	s, err := NewBatchStore(dir, "basestore", cfg)
+	s, err := NewBatchStore(dir, "bstore", cfg)
 	assert.Nil(t, err)
 	s.Start()
-	defer s.Close()
-	var wg sync.WaitGroup
 	pool, _ := ants.NewPool(100)
 
 	f := func(i int) func() {
 		return func() {
 			defer wg.Done()
-			entry := NewAsyncBaseEntry()
-			entry.GetMeta().SetType(ETFlush)
-			err := s.AppendEntry(entry)
-			assert.Nil(t, err)
-			err = entry.WaitDone()
-			assert.Nil(t, err)
-			entry.Free()
+			if i%2 == 0 {
+				entry := NewAsyncBaseEntry()
+				entry.GetMeta().SetType(ETFlush)
+				err := s.AppendEntry(entry)
+				assert.Nil(t, err)
+				err = entry.WaitDone()
+				assert.Nil(t, err)
+				entry.Free()
+			} else {
+				entry := GetEmptyEntry()
+				entry.GetMeta().SetType(ETFlush)
+				err := s.AppendEntry(entry)
+				assert.Nil(t, err)
+			}
 		}
 	}
 
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 10000; i++ {
 		wg.Add(1)
 		pool.Submit(f(i))
 	}
+
 	wg.Wait()
+	s.Close()
 }

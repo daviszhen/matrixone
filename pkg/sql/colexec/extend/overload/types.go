@@ -15,9 +15,9 @@
 package overload
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/container/vector"
+	"matrixone/pkg/vm/process"
 )
 
 const (
@@ -54,7 +54,6 @@ const (
 
 var OpName = map[int]string{
 	UnaryMinus: "-",
-	Not: "!",
 
 	Or:    "or",
 	And:   "and",

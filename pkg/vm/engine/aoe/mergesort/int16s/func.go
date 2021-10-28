@@ -15,7 +15,7 @@
 package int16s
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
+	"matrixone/pkg/container/vector"
 
 	roaring "github.com/RoaringBitmap/roaring/roaring64"
 )

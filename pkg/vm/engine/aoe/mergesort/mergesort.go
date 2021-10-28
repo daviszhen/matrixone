@@ -1,34 +1,20 @@
-// Copyright 2021 Matrix Origin
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package mergesort
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/float32s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/float64s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/int16s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/int32s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/int64s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/int8s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/uint16s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/uint32s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/uint64s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/uint8s"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/mergesort/varchar"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/container/vector"
+	"matrixone/pkg/vm/engine/aoe/mergesort/float32s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/float64s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/int16s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/int32s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/int64s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/int8s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/uint16s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/uint32s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/uint64s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/uint8s"
+	"matrixone/pkg/vm/engine/aoe/mergesort/varchar"
 )
 
 func SortBlockColumns(cols []*vector.Vector) error {

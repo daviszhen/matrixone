@@ -20,13 +20,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"github.com/matrixorigin/matrixone/pkg/encoding"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/prefetch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/index"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/encoding"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/prefetch"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/index"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"os"
 	"path/filepath"
 )
@@ -178,7 +178,7 @@ func (sf *SortedSegmentFile) initPointers() {
 		}
 		if !bytes.Equal(idxBuf, []byte{}) {
 			preIndices[i] = &metadata.LogIndex{}
-			if err = preIndices[i].UnMarshal(idxBuf); err != nil {
+			if err = preIndices[i].UnMarshall(idxBuf); err != nil {
 				panic(err)
 			}
 		}
@@ -187,7 +187,7 @@ func (sf *SortedSegmentFile) initPointers() {
 		}
 		if !bytes.Equal(idxBuf, []byte{}) {
 			indices[i] = &metadata.LogIndex{}
-			if err = indices[i].UnMarshal(idxBuf); err != nil {
+			if err = indices[i].UnMarshall(idxBuf); err != nil {
 				panic(err)
 			}
 		}

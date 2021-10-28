@@ -1,4 +1,4 @@
-module github.com/matrixorigin/matrixone
+module matrixone
 
 go 1.17
 

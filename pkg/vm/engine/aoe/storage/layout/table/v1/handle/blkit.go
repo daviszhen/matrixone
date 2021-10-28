@@ -15,7 +15,7 @@
 package handle
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
 )
 
 var (

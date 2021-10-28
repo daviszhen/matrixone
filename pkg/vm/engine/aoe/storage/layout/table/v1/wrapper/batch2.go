@@ -15,8 +15,8 @@ package wrapper
 
 import (
 	"io"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
 )
 
 type batchWrapper2 struct {

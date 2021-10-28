@@ -15,9 +15,9 @@
 package sched
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/ops"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	"matrixone/pkg/vm/engine/aoe/storage/ops"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 
 	roaring "github.com/RoaringBitmap/roaring/roaring64"
 )

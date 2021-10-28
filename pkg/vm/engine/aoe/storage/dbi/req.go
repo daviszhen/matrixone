@@ -15,13 +15,12 @@
 package dbi
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"matrixone/pkg/container/batch"
 )
 
 type OnTableDroppedCB = func(error)
 
 type TableOpCtx struct {
-	ShardId   uint64
 	OpIndex   uint64
 	TableName string
 }
@@ -35,7 +34,6 @@ type GetSnapshotCtx struct {
 }
 
 type DropTableCtx struct {
-	ShardId    uint64
 	OpIndex    uint64
 	TableName  string
 	OnFinishCB OnTableDroppedCB
@@ -47,7 +45,6 @@ type GetSegmentsCtx struct {
 }
 
 type AppendCtx struct {
-	ShardId   uint64
 	OpIndex   uint64
 	OpOffset  int
 	OpSize    int

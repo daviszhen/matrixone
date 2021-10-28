@@ -16,9 +16,9 @@ package top
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/order"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/sql/op"
+	"matrixone/pkg/sql/op/order"
 )
 
 func New(prev op.OP, limit int64, gs []order.Attribute) *Top {

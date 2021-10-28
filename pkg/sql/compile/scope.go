@@ -18,24 +18,24 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/errno"
-	"github.com/matrixorigin/matrixone/pkg/rpcserver"
-	"github.com/matrixorigin/matrixone/pkg/rpcserver/message"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/transfer"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/createDatabase"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/createTable"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/dropDatabase"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/dropTable"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/insert"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/showDatabases"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/showTables"
-	"github.com/matrixorigin/matrixone/pkg/sql/protocol"
-	"github.com/matrixorigin/matrixone/pkg/sqlerror"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"github.com/matrixorigin/matrixone/pkg/vm/pipeline"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/container/vector"
+	"matrixone/pkg/errno"
+	"matrixone/pkg/rpcserver"
+	"matrixone/pkg/rpcserver/message"
+	"matrixone/pkg/sql/colexec/transfer"
+	"matrixone/pkg/sql/op/createDatabase"
+	"matrixone/pkg/sql/op/createTable"
+	"matrixone/pkg/sql/op/dropDatabase"
+	"matrixone/pkg/sql/op/dropTable"
+	"matrixone/pkg/sql/op/insert"
+	"matrixone/pkg/sql/op/showDatabases"
+	"matrixone/pkg/sql/op/showTables"
+	"matrixone/pkg/sql/protocol"
+	"matrixone/pkg/sqlerror"
+	"matrixone/pkg/vm/engine"
+	"matrixone/pkg/vm/pipeline"
 	"net"
 	"sync"
 	"time"
@@ -128,11 +128,9 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 
 	arg := s.Instructions[len(s.Instructions)-1].Arg.(*transfer.Argument)
 	defer func() {
-		if arg.Reg.Ch != nil {
-			arg.Reg.Wg.Add(1)
-			arg.Reg.Ch <- nil
-			arg.Reg.Wg.Wait()
-		}
+		arg.Reg.Wg.Add(1)
+		arg.Reg.Ch <- nil
+		arg.Reg.Wg.Wait()
 	}()
 	encoder, decoder := rpcserver.NewCodec(1 << 30)
 	conn := goetty.NewIOSession(goetty.WithCodec(encoder, decoder))
@@ -162,12 +160,6 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 		bat, _, err := protocol.DecodeBatch(val.(*message.Message).Data)
 		if err != nil {
 			return err
-		}
-		if arg.Reg.Ch == nil {
-			if bat != nil {
-				bat.Clean(s.Proc)
-			}
-			continue
 		}
 		arg.Reg.Wg.Add(1)
 		arg.Reg.Ch <- bat

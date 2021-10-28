@@ -15,17 +15,50 @@
 package base
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"io"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"sync"
 )
+
+type INodeHandle interface {
+	sync.Locker
+	io.Closer
+	common.IRef
+	RLock()
+	RUnlock()
+	GetID() common.ID
+	Unload()
+	Unloadable() bool
+	IsLoaded() bool
+	Load()
+	Destroy()
+	Size() uint64
+	Iteration() uint64
+	IncIteration() uint64
+	IsClosed() bool
+	GetState() iface.NodeState
+}
+
+type IMemTable interface {
+	common.IRef
+	Append(bat *batch.Batch, offset uint64, index *md.LogIndex) (n uint64, err error)
+	IsFull() bool
+	Flush() error
+	Unpin()
+	GetMeta() *md.Block
+	GetID() common.ID
+	String() string
+}
 
 type ICollection interface {
 	common.IRef
-	Append(bat *batch.Batch, index *metadata.LogIndex) (err error)
+	Append(bat *batch.Batch, index *md.LogIndex) (err error)
 	Flush() error
+	FetchImmuTable() IMemTable
 	String() string
-	GetMeta() *metadata.Table
 }
 
 type IManager interface {

@@ -15,8 +15,8 @@
 package memdata
 
 import (
-	imem "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/memtable/v1/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	imem "matrixone/pkg/vm/engine/aoe/storage/memtable/v1/base"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 )
 
 type createTableEvent struct {
@@ -40,14 +40,14 @@ func NewCreateTableEvent(ctx *Context) *createTableEvent {
 // 2. Create and register a TableData
 // 3. Register Collection to the memTable manager
 func (e *createTableEvent) Execute() error {
-	collection := e.Ctx.MTMgr.StrongRefCollection(e.Ctx.TableMeta.Id)
+	collection := e.Ctx.MTMgr.StrongRefCollection(e.Ctx.TableMeta.ID)
 	if collection != nil {
 		e.Collection = collection
 		return nil
 	}
 	meta := e.Ctx.TableMeta
 
-	tableData, err := e.Ctx.Tables.StrongRefTable(meta.Id)
+	tableData, err := e.Ctx.Tables.StrongRefTable(meta.ID)
 	if err != nil {
 		tableData, err = e.Ctx.Tables.RegisterTable(meta)
 		if err != nil {

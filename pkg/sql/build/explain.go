@@ -16,11 +16,11 @@ package build
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/errno"
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/explain"
-	"github.com/matrixorigin/matrixone/pkg/sql/tree"
-	"github.com/matrixorigin/matrixone/pkg/sqlerror"
+	"matrixone/pkg/errno"
+	"matrixone/pkg/sql/op"
+	"matrixone/pkg/sql/op/explain"
+	"matrixone/pkg/sql/tree"
+	"matrixone/pkg/sqlerror"
 )
 
 func (b *build) buildExplain(stmt tree.Explain) (op.OP, error) {

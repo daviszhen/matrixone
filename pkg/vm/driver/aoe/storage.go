@@ -15,15 +15,14 @@
 package aoe
 
 import (
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/vm/engine/aoe"
+	store "matrixone/pkg/vm/engine/aoe/storage"
+	adb "matrixone/pkg/vm/engine/aoe/storage/db"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/handle"
 	"os"
 	"sync/atomic"
-
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe"
-	store "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	adb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/handle"
 
 	"github.com/matrixorigin/matrixcube/pb/bhmetapb"
 	"github.com/matrixorigin/matrixcube/storage/stats"
@@ -52,7 +51,7 @@ func NewStorage(dir string) (*Storage, error) {
 
 // NewStorageWithOptions returns badger kv store
 func NewStorageWithOptions(dir string, opts *store.Options) (*Storage, error) {
-	db, err := adb.OpenWithWalBroker(dir, opts)
+	db, err := adb.Open(dir, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +66,7 @@ func (s *Storage) Stats() stats.Stats {
 }
 
 //Append appends batch in the table
-func (s *Storage) Append(tabletName string, bat *batch.Batch, shardId uint64, logIdx uint64, logOffset, logSize int) error {
+func (s *Storage) Append(tabletName string, bat *batch.Batch, logIdx uint64, logOffset, logSize int) error {
 	size := 0
 	for _, vec := range bat.Vecs {
 		size += len(vec.Data)
@@ -75,7 +74,6 @@ func (s *Storage) Append(tabletName string, bat *batch.Batch, shardId uint64, lo
 	atomic.AddUint64(&s.stats.WrittenKeys, uint64(bat.Vecs[0].Length()))
 	atomic.AddUint64(&s.stats.WrittenBytes, uint64(size))
 	return s.DB.Append(dbi.AppendCtx{
-		ShardId:   shardId,
 		OpIndex:   logIdx,
 		OpOffset:  logOffset,
 		OpSize:    logSize,
@@ -100,9 +98,16 @@ func (s *Storage) GetSegmentIds(ctx dbi.GetSegmentsCtx) (ids dbi.IDS) {
 	return s.DB.GetSegmentIds(ctx)
 }
 
-//GetShardPesistedId returns the smallest segmente id among the tables starts with prefix
-func (s *Storage) GetShardPesistedId(shardId uint64) uint64 {
-	return s.DB.GetShardCheckpointId(shardId)
+//GetSegmentedId returns the smallest segmente id among the tables starts with prefix
+func (s *Storage) GetSegmentedId(prefix string) (index uint64, err error) {
+	return s.DB.GetSegmentedId(dbi.GetSegmentedIdCtx{
+		Matchers: []*dbi.StringMatcher{
+			{
+				Type:    dbi.MTPrefix,
+				Pattern: prefix,
+			},
+		},
+	})
 }
 
 //CreateTable creates a table in the storage.

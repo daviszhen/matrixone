@@ -16,21 +16,19 @@ package driver
 
 import (
 	"encoding/json"
-	"time"
-
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/sql/protocol"
-	aoe2 "github.com/matrixorigin/matrixone/pkg/vm/driver/aoe"
-	pb3 "github.com/matrixorigin/matrixone/pkg/vm/driver/pb"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/codec"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/helper"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-
 	"github.com/fagongzi/util/protoc"
 	"github.com/matrixorigin/matrixcube/command"
 	"github.com/matrixorigin/matrixcube/pb"
 	"github.com/matrixorigin/matrixcube/pb/bhmetapb"
 	"github.com/matrixorigin/matrixcube/pb/raftcmdpb"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/sql/protocol"
+	aoe2 "matrixone/pkg/vm/driver/aoe"
+	pb3 "matrixone/pkg/vm/driver/pb"
+	"matrixone/pkg/vm/engine/aoe/common/codec"
+	"matrixone/pkg/vm/engine/aoe/common/helper"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"time"
 )
 
 //createTablet responses the requests whose CustemType is CreateTablet.
@@ -48,7 +46,6 @@ func (h *driver) createTablet(shard bhmetapb.Shard, req *raftcmdpb.Request, ctx 
 	}
 	store := h.store.DataStorageByGroup(shard.Group, shard.ID).(*aoe2.Storage)
 	id, err := store.CreateTable(&t, dbi.TableOpCtx{
-		ShardId:   shard.ID,
 		OpIndex:   ctx.LogIndex(),
 		TableName: customReq.Name,
 	})
@@ -73,7 +70,6 @@ func (h *driver) dropTablet(shard bhmetapb.Shard, req *raftcmdpb.Request, ctx co
 
 	store := h.store.DataStorageByGroup(shard.Group, shard.ID).(*aoe2.Storage)
 	id, err := store.DropTable(dbi.DropTableCtx{
-		ShardId:   shard.ID,
 		OpIndex:   ctx.LogIndex(),
 		TableName: customReq.Name,
 	})
@@ -105,7 +101,7 @@ func (h *driver) append(shard bhmetapb.Shard, req *raftcmdpb.Request, ctx comman
 		return 0, 0, resp
 	}
 	store := h.store.DataStorageByGroup(shard.Group, shard.ID).(*aoe2.Storage)
-	err = store.Append(customReq.TabletName, bat, shard.ID, ctx.LogIndex(), ctx.Offset(), ctx.BatchSize())
+	err = store.Append(customReq.TabletName, bat, ctx.LogIndex(), ctx.Offset(), ctx.BatchSize())
 	if err != nil {
 		resp.Value = errorResp(err)
 		return 0, 0, resp
@@ -115,7 +111,7 @@ func (h *driver) append(shard bhmetapb.Shard, req *raftcmdpb.Request, ctx comman
 	return writtenBytes, changedBytes, resp
 }
 
-//getSegmentedId responses the requests whose CustemType is GetShardPersistedId.
+//getSegmentedId responses the requests whose CustemType is GetSegmentedId.
 //It returns the id of one of the segments of the table.
 //If fail, it returns the err in resp.Value and returns 500.
 //If success, it returns the id in resp.Value and returns 0.
@@ -123,7 +119,11 @@ func (h *driver) getSegmentedId(shard bhmetapb.Shard, req *raftcmdpb.Request, ct
 	resp := pb.AcquireResponse()
 	customReq := &pb3.GetSegmentedIdRequest{}
 	protoc.MustUnmarshal(customReq, req.Cmd)
-	rsp := h.store.DataStorageByGroup(shard.Group, req.ToShard).(*aoe2.Storage).GetShardPesistedId(customReq.ShardId)
+	rsp, err := h.store.DataStorageByGroup(shard.Group, req.ToShard).(*aoe2.Storage).GetSegmentedId(codec.Uint642String(customReq.ShardId))
+	if err != nil {
+		resp.Value = errorResp(err)
+		return resp, 500
+	}
 	resp.Value = codec.Uint642Bytes(rsp)
 	return resp, 0
 }

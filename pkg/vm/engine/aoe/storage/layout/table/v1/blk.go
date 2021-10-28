@@ -18,17 +18,17 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-
-	ro "github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/col"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/wrapper"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	ro "matrixone/pkg/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/col"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/wrapper"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 )
 
 type block struct {
@@ -94,6 +94,13 @@ func (blk *block) Size(attr string) uint64 {
 	return blk.data.cols[idx].Size()
 }
 
+func (blk *block) GetSegmentedIndex() (id uint64, ok bool) {
+	if blk.typ == base.TRANSIENT_BLK {
+		return id, ok
+	}
+	return blk.meta.GetAppliedIndex()
+}
+
 func (blk *block) cloneWithUpgradeColumns(upgraded *block) {
 	for idx, colBlk := range blk.data.cols {
 		upgraded.Ref()
@@ -103,7 +110,7 @@ func (blk *block) cloneWithUpgradeColumns(upgraded *block) {
 	}
 }
 
-func (blk *block) CloneWithUpgrade(host iface.ISegment, meta *metadata.Block) (iface.IBlock, error) {
+func (blk *block) CloneWithUpgrade(host iface.ISegment, meta *md.Block) (iface.IBlock, error) {
 	defer host.Unref()
 	newBase, err := blk.upgrade(host, meta)
 	if err != nil {
@@ -133,7 +140,7 @@ func (blk *block) CloneWithUpgrade(host iface.ISegment, meta *metadata.Block) (i
 }
 
 func (blk *block) String() string {
-	s := fmt.Sprintf("<Blk[%d]>(ColBlk=%d)(RefCount=%d)", blk.meta.Id, len(blk.data.cols), blk.RefCount())
+	s := fmt.Sprintf("<Blk[%d]>(ColBlk=%d)(RefCount=%d)", blk.meta.ID, len(blk.data.cols), blk.RefCount())
 	// for _, colBlk := range blk.data.cols {
 	// 	s = fmt.Sprintf("%s\n\t%s", s, colBlk.String())
 	// }

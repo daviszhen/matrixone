@@ -15,11 +15,11 @@
 package main
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mock"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	"matrixone/pkg/vm/engine/aoe/storage/db"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/mock"
 	"os"
 	"sync"
 	"time"
@@ -42,14 +42,14 @@ func main() {
 		panic(err)
 	}
 
-	tableInfo := adaptor.MockTableInfo(colCnt)
+	tableInfo := md.MockTableInfo(colCnt)
 	tName := tableInfo.Name
 	_, err = inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: tName})
 	if err != nil {
 		panic(err)
 	}
 	rows := metaConf.BlockMaxRows / 8
-	tblMeta := inst.Opts.Meta.Catalog.SimpleGetTableByName(tName)
+	tblMeta, err := inst.Opts.Meta.Info.ReferenceTableByName(tName)
 	ck := mock.MockBatch(tblMeta.Schema.Types(), rows)
 	cols := make([]int, 0)
 	for i := 0; i < len(tblMeta.Schema.ColDefs); i++ {

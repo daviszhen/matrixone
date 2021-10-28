@@ -16,8 +16,8 @@ package createTable
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/vm/engine"
 )
 
 func New(flg bool, id string, defs []engine.TableDef, pdef *engine.PartitionBy, db engine.Database) *CreateTable {

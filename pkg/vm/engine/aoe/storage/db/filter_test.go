@@ -15,18 +15,18 @@
 package db
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	bmgr "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/index"
-	table2 "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mock"
-	"os"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/container/types"
+	bmgr "matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/index"
+	table2 "matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/mock"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -41,34 +41,34 @@ func TestAll(t *testing.T) {
 			dataio.FlushIndex = false
 		}()
 	}
-	path := "/tmp/testfilter"
-	os.RemoveAll(path)
+	mu := &sync.RWMutex{}
 	rowCount, blkCount := uint64(10), uint64(4)
-	catalog := metadata.MockCatalog(path, rowCount, blkCount)
-	schema := metadata.MockSchemaAll(14)
+	info := md.MockInfo(mu, rowCount, blkCount)
+	schema := md.MockSchemaAll(14)
 	segCnt, blkCnt := uint64(4), uint64(4)
-	table := metadata.MockTable(catalog, schema, segCnt*blkCnt, nil)
-	segment := table.SimpleCreateSegment()
-	assert.NotNil(t, segment)
+	table := md.MockTable(info, schema, segCnt*blkCnt)
+	segment, err := table.CreateSegment()
+	assert.Nil(t, err)
+	err = table.RegisterSegment(segment)
+	assert.Nil(t, err)
 	batches := make([]*batch.Batch, 0)
 	blkIds := make([]uint64, 0)
 	for i := 0; i < int(blkCount); i++ {
-		block := segment.SimpleCreateBlock()
-		assert.NotNil(t, block)
-		blkIds = append(blkIds, block.Id)
-		block.SetCount(rowCount)
-		batches = append(batches, mock.MockBatch(schema.Types(), rowCount))
-		err := block.SimpleUpgrade(nil)
+		block, err := segment.CreateBlock()
 		assert.Nil(t, err)
+		blkIds = append(blkIds, block.ID)
+		block.SetCount(rowCount)
+		err = segment.RegisterBlock(block)
+		assert.Nil(t, err)
+		batches = append(batches, mock.MockBatch(schema.Types(), rowCount))
 	}
-	err := segment.SimpleUpgrade(nil)
-	assert.Nil(t, err)
+	path := "/tmp/testfilter"
 	writer := dataio.NewSegmentWriter(batches, segment, path)
 	err = writer.Execute()
 	assert.Nil(t, err)
 	segFile := dataio.NewSortedSegmentFile(path, *segment.AsCommonID())
 	assert.NotNil(t, segFile)
-	tblHolder := index.NewTableHolder(bmgr.MockBufMgr(10000), table.Id)
+	tblHolder := index.NewTableHolder(bmgr.MockBufMgr(10000), table.ID)
 	segHolder := tblHolder.RegisterSegment(*segment.AsCommonID(), base.SORTED_SEG, nil)
 	segHolder.Unref()
 	id := common.ID{}
@@ -344,10 +344,8 @@ func TestAll(t *testing.T) {
 	// test filter
 	mockBM := roaring.NewBitmap()
 	mockBM.AddRange(0, 40)
-	res_, err := filter.Ne("mock_0", int8(-1))
-	assert.Nil(t, err)
-	assert.NotNil(t, res_)
-	assert.True(t, mockBM.Equals(res_))
+	res_, _ := filter.Ne("mock_0", int8(-1))
+	assert.Equal(t, true, mockBM.Equals(res_))
 	res_, _ = filter.Eq("mock_0", int8(-1))
 	assert.Equal(t, true, roaring.NewBitmap().Equals(res_))
 	res_, _ = filter.Eq("mock_0", int8(3))
@@ -1328,31 +1326,34 @@ func TestNotBuild(t *testing.T) {
 			dataio.FlushIndex = true
 		}()
 	}
-	path := "/tmp/testfilter"
-	os.RemoveAll(path)
+	mu := &sync.RWMutex{}
 	rowCount, blkCount := uint64(10), uint64(4)
-
-	catalog := metadata.MockCatalog(path, rowCount, blkCount)
-	schema := metadata.MockSchemaAll(14)
+	info := md.MockInfo(mu, rowCount, blkCount)
+	schema := md.MockSchemaAll(14)
 	segCnt, blkCnt := uint64(4), uint64(4)
-	table := metadata.MockTable(catalog, schema, segCnt*blkCnt, nil)
-	segment := table.SimpleCreateSegment()
-	assert.NotNil(t, segment)
+	table := md.MockTable(info, schema, segCnt*blkCnt)
+	segment, err := table.CreateSegment()
+	assert.Nil(t, err)
+	err = table.RegisterSegment(segment)
+	assert.Nil(t, err)
 	batches := make([]*batch.Batch, 0)
 	blkIds := make([]uint64, 0)
 	for i := 0; i < int(blkCount); i++ {
-		block := segment.SimpleCreateBlock()
-		assert.NotNil(t, block)
-		blkIds = append(blkIds, block.Id)
+		block, err := segment.CreateBlock()
+		assert.Nil(t, err)
+		blkIds = append(blkIds, block.ID)
 		block.SetCount(rowCount)
+		err = segment.RegisterBlock(block)
+		assert.Nil(t, err)
 		batches = append(batches, mock.MockBatch(schema.Types(), rowCount))
 	}
+	path := "/tmp/testfilter"
 	writer := dataio.NewSegmentWriter(batches, segment, path)
-	err := writer.Execute()
+	err = writer.Execute()
 	assert.Nil(t, err)
 	segFile := dataio.NewSortedSegmentFile(path, *segment.AsCommonID())
 	assert.NotNil(t, segFile)
-	tblHolder := index.NewTableHolder(bmgr.MockBufMgr(10000), table.Id)
+	tblHolder := index.NewTableHolder(bmgr.MockBufMgr(10000), table.ID)
 	segHolder := tblHolder.RegisterSegment(*segment.AsCommonID(), base.SORTED_SEG, nil)
 	segHolder.Unref()
 	id := common.ID{}

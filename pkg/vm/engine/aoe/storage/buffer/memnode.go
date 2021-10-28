@@ -16,7 +16,7 @@ package buf
 
 import (
 	"io"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
 )
 
 func RawMemoryNodeConstructor(vf common.IVFile, useCompress bool, freeFunc MemoryFreeFunc) IMemoryNode {

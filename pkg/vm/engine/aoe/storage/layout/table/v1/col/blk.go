@@ -16,15 +16,15 @@ package col
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	ro "github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/index"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/container/types"
+	ro "matrixone/pkg/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/index"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"sync"
 	"sync/atomic"
 )
@@ -32,7 +32,7 @@ import (
 type IColumnBlock interface {
 	common.IRef
 	GetID() uint64
-	GetMeta() *metadata.Block
+	GetMeta() *md.Block
 	GetRowCount() uint64
 	RegisterPart(part IColumnPart)
 	GetType() base.BlockType
@@ -54,7 +54,7 @@ type columnBlock struct {
 	sync.RWMutex
 	common.RefHelper
 	colIdx      int
-	meta        *metadata.Block
+	meta        *md.Block
 	segFile     base.ISegmentFile
 	indexHolder *index.BlockHolder
 	typ         base.BlockType
@@ -76,7 +76,7 @@ func (blk *columnBlock) GetColType() types.Type {
 	return blk.meta.Segment.Table.Schema.ColDefs[blk.colIdx].Type
 }
 
-func (blk *columnBlock) GetMeta() *metadata.Block {
+func (blk *columnBlock) GetMeta() *md.Block {
 	return blk.meta
 }
 
@@ -89,5 +89,5 @@ func (blk *columnBlock) GetRowCount() uint64 {
 }
 
 func (blk *columnBlock) GetID() uint64 {
-	return blk.meta.Id
+	return blk.meta.ID
 }

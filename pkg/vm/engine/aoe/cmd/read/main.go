@@ -16,6 +16,19 @@ package main
 
 import (
 	"bytes"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/vm/engine"
+	"matrixone/pkg/vm/engine/aoe"
+	"matrixone/pkg/vm/engine/aoe/local"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/db"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/mock"
+	w "matrixone/pkg/vm/engine/aoe/storage/worker"
+	"matrixone/pkg/vm/mmu/host"
+	"matrixone/pkg/vm/process"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -25,22 +38,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/local"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mock"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/wal"
-	w "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/worker"
-	"github.com/matrixorigin/matrixone/pkg/vm/mmu/host"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
 
 	log "github.com/sirupsen/logrus"
 
@@ -86,12 +83,11 @@ func init() {
 		Interval: time.Duration(1) * time.Second,
 	}
 	opts.Meta.Conf = mdCfg
-	opts.WalRole = wal.HolderRole
-	info := adaptor.MockTableInfo(colCnt)
+	info := md.MockTableInfo(colCnt)
 	table = info
 }
 
-func getInsertBatch(meta *metadata.Table) *batch.Batch {
+func getInsertBatch(meta *md.Table) *batch.Batch {
 	bat := mock.MockBatch(meta.Schema.Types(), batchInsertRows)
 	return bat
 }
@@ -122,13 +118,13 @@ func doRemove() {
 }
 
 func makeFiles(impl *db.DB) {
-	meta := impl.Opts.Meta.Catalog.SimpleGetTableByName(tableName)
-	if meta == nil {
-		panic(metadata.TableNotFoundErr)
+	meta, err := impl.Opts.Meta.Info.ReferenceTableByName(tableName)
+	if err != nil {
+		panic(err)
 	}
 	ibat := getInsertBatch(meta)
 	for i := uint64(0); i < insertCnt; i++ {
-		if err := impl.Append(dbi.AppendCtx{TableName: tableName, Data: ibat, OpIndex: uint64(i) + 1, OpSize: 1}); err != nil {
+		if err := impl.Append(dbi.AppendCtx{TableName: tableName, Data: ibat, OpIndex: uint64(i), OpSize: 1}); err != nil {
 			panic(err)
 		}
 	}
@@ -157,13 +153,12 @@ func readData() {
 		panic(err)
 	}
 	id, _ := impl.GetSegmentedId(*dbi.NewTabletSegmentedIdCtx(tableName))
-	safeId := impl.GetShardCheckpointId(0)
-	log.Infof("segmented id: %d, SafeId: %d", id, safeId)
+	log.Infof("segmented id: %d", id)
 	rel, err := dbase.Relation(tableName)
 	if err != nil {
 		panic(err)
 	}
-	tblMeta := impl.Opts.Meta.Catalog.SimpleGetTableByName(tableName)
+	tblMeta, _ := impl.Opts.Meta.Info.ReferenceTableByName(tableName)
 	var attrs []string
 	cols := make([]int, 0)
 	for i, colDef := range tblMeta.Schema.ColDefs {

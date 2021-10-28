@@ -15,8 +15,8 @@
 package int16s
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/nulls"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
+	"matrixone/pkg/container/nulls"
+	"matrixone/pkg/container/vector"
 )
 
 type compare struct {

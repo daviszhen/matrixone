@@ -15,12 +15,14 @@
 package table
 
 import (
-	bmgrif "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/index"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"fmt"
+	bmgrif "matrixone/pkg/vm/engine/aoe/storage/buffer/manager/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/index"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 )
 
 type sllnode = common.SLLNode
@@ -39,7 +41,7 @@ func newBaseBlock(host iface.ISegment, meta *metadata.Block) *baseBlock {
 		meta:    meta,
 		sllnode: *common.NewSLLNode(nil),
 	}
-	if meta.CommitInfo.Op < metadata.OpUpgradeFull {
+	if meta.DataState < metadata.FULL {
 		blk.typ = base.TRANSIENT_BLK
 	} else if host.GetType() == base.UNSORTED_SEG {
 		blk.typ = base.PERSISTENT_BLK
@@ -93,8 +95,8 @@ func (blk *baseBlock) preUpgradeAssert() {
 	if blk.typ == base.PERSISTENT_SORTED_BLK {
 		panic("logic error")
 	}
-	if blk.meta.CommitInfo.Op != metadata.OpUpgradeFull {
-		panic("blk not upgraded")
+	if blk.meta.DataState != md.FULL {
+		panic(fmt.Sprintf("blk data state is %d", blk.meta.DataState))
 	}
 }
 
@@ -108,7 +110,7 @@ func (blk *baseBlock) upgrade(host iface.ISegment, meta *metadata.Block) (*baseB
 		sllnode: *common.NewSLLNode(nil),
 	}
 
-	upgraded.indexholder = host.GetIndexHolder().StrongRefBlock(meta.Id)
+	upgraded.indexholder = host.GetIndexHolder().StrongRefBlock(meta.ID)
 	switch blk.typ {
 	case base.TRANSIENT_BLK:
 		upgraded.typ = base.PERSISTENT_BLK
@@ -116,7 +118,7 @@ func (blk *baseBlock) upgrade(host iface.ISegment, meta *metadata.Block) (*baseB
 			upgraded.indexholder = host.GetIndexHolder().RegisterBlock(id, upgraded.typ, nil)
 		} else if upgraded.indexholder.Type < upgraded.typ {
 			upgraded.indexholder.Unref()
-			upgraded.indexholder = host.GetIndexHolder().UpgradeBlock(meta.Id, upgraded.typ)
+			upgraded.indexholder = host.GetIndexHolder().UpgradeBlock(meta.ID, upgraded.typ)
 		}
 	case base.PERSISTENT_BLK:
 		upgraded.typ = base.PERSISTENT_SORTED_BLK
@@ -124,7 +126,7 @@ func (blk *baseBlock) upgrade(host iface.ISegment, meta *metadata.Block) (*baseB
 			upgraded.indexholder = host.GetIndexHolder().RegisterBlock(id, upgraded.typ, nil)
 		} else if upgraded.indexholder.Type < upgraded.typ {
 			upgraded.indexholder.Unref()
-			upgraded.indexholder = host.GetIndexHolder().UpgradeBlock(meta.Id, upgraded.typ)
+			upgraded.indexholder = host.GetIndexHolder().UpgradeBlock(meta.ID, upgraded.typ)
 		}
 	default:
 		panic("logic error")

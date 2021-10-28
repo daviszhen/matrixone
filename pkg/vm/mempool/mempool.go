@@ -15,7 +15,7 @@
 package mempool
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/malloc"
+	"matrixone/pkg/vm/malloc"
 )
 
 func New() *Mempool {
@@ -34,9 +34,6 @@ func Realloc(data []byte, size int64) int64 {
 		return size
 	}
 	n := int64(cap(data))
-	if size <= n {
-		return n
-	}
 	newcap := n
 	doublecap := n + n
 	if size > doublecap {

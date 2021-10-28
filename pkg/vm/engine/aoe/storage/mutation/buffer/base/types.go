@@ -15,8 +15,8 @@ package base
 
 import (
 	"io"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
 	"sync"
 )
 

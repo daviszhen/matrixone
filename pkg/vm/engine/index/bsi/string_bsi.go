@@ -17,7 +17,7 @@ package bsi
 import (
 	"bytes"
 
-	"github.com/matrixorigin/matrixone/pkg/encoding"
+	"matrixone/pkg/encoding"
 
 	"github.com/RoaringBitmap/roaring"
 )

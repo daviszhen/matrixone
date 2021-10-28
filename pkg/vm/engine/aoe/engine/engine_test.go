@@ -18,20 +18,20 @@ import (
 	"bytes"
 	"fmt"
 	stdLog "log"
-	catalog2 "github.com/matrixorigin/matrixone/pkg/catalog"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/sql/protocol"
-	aoe3 "github.com/matrixorigin/matrixone/pkg/vm/driver/aoe"
-	"github.com/matrixorigin/matrixone/pkg/vm/driver/config"
-	"github.com/matrixorigin/matrixone/pkg/vm/driver/testutil"
-	vengine "github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/codec"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/helper"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mock"
+	catalog2 "matrixone/pkg/catalog"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/sql/protocol"
+	aoe3 "matrixone/pkg/vm/driver/aoe"
+	"matrixone/pkg/vm/driver/config"
+	"matrixone/pkg/vm/driver/testutil"
+	vengine "matrixone/pkg/vm/engine"
+	"matrixone/pkg/vm/engine/aoe"
+	"matrixone/pkg/vm/engine/aoe/common/codec"
+	"matrixone/pkg/vm/engine/aoe/common/helper"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/mock"
 	"sync"
 
 	"github.com/fagongzi/log"
@@ -40,7 +40,7 @@ import (
 	"github.com/matrixorigin/matrixcube/raftstore"
 	"github.com/stretchr/testify/require"
 
-	"github.com/matrixorigin/matrixone/pkg/vm/metadata"
+	"matrixone/pkg/vm/metadata"
 	"testing"
 	"time"
 )
@@ -164,7 +164,7 @@ func TestAOEEngine(t *testing.T) {
 	tbls := db.Relations()
 	require.Equal(t, 0, len(tbls))
 
-	mockTbl := adaptor.MockTableInfo(colCnt)
+	mockTbl := md.MockTableInfo(colCnt)
 	mockTbl.Name = fmt.Sprintf("%s%d", tableName, time.Now().Unix())
 	_, _, _, _, comment, defs, pdef, _ := helper.UnTransfer(*mockTbl)
 
@@ -313,7 +313,7 @@ func testTableDDL(t *testing.T, c []*catalog2.Catalog) {
 	require.Nil(t, tbs)
 
 	colCnt := 4
-	t1 := adaptor.MockTableInfo(colCnt)
+	t1 := md.MockTableInfo(colCnt)
 	t1.Name = "t1"
 
 	tid, err := c[0].CreateTable(1, dbid, *t1)
@@ -325,7 +325,7 @@ func testTableDDL(t *testing.T, c []*catalog2.Catalog) {
 	require.NotNil(t, tb)
 	require.Equal(t, aoe.StatePublic, tb.State)
 
-	t2 := adaptor.MockTableInfo(colCnt)
+	t2 := md.MockTableInfo(colCnt)
 	t2.Name = "t2"
 	_, err = c[0].CreateTable(2, dbid, *t2)
 	require.NoError(t, err)

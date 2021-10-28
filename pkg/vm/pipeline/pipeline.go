@@ -16,12 +16,10 @@ package pipeline
 
 import (
 	"bytes"
-	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"github.com/matrixorigin/matrixone/pkg/vm/mempool"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"matrixone/pkg/vm"
+	"matrixone/pkg/vm/engine"
+	"matrixone/pkg/vm/mempool"
+	"matrixone/pkg/vm/process"
 )
 
 func New(cs []uint64, attrs []string, ins vm.Instructions) *Pipeline {
@@ -88,9 +86,6 @@ func (p *Pipeline) Run(segs []engine.Segment, proc *process.Process) (bool, erro
 }
 
 func (p *Pipeline) RunMerge(proc *process.Process) (bool, error) {
-	var end bool
-	var err error
-
 	proc.Mp = mempool.New()
 	defer func() {
 		proc.Reg.InputBatch = nil
@@ -101,13 +96,11 @@ func (p *Pipeline) RunMerge(proc *process.Process) (bool, error) {
 		vm.Clean(p.instructions, proc)
 		return false, err
 	}
+	i := 0
 	for {
+		i++
 		proc.Reg.InputBatch = nil
-		if end, err = vm.Run(p.instructions, proc); err != nil || end {
-			{
-				fmt.Printf("+++%p begin clean\n", p)
-			}
-			p.clean(proc)
+		if end, err := vm.Run(p.instructions, proc); err != nil || end {
 			return end, err
 		}
 	}
@@ -126,30 +119,6 @@ func (p *Pipeline) prefetch(segs []engine.Segment, proc *process.Process) *queue
 		}
 	}
 	return q
-}
-
-func (p *Pipeline) clean(proc *process.Process) {
-	for _, reg := range proc.Reg.MergeReceivers {
-		if reg.Ch != nil {
-			v := <-reg.Ch
-			switch {
-			case v == nil:
-				reg.Ch = nil
-				reg.Wg.Done()
-			default:
-				bat := v.(*batch.Batch)
-				if bat == nil || bat.Attrs == nil {
-					reg.Ch = nil
-					reg.Wg.Done()
-				} else {
-					bat.Clean(proc)
-					reg.Ch = nil
-					reg.Wg.Done()
-				}
-			}
-		}
-	}
-
 }
 
 // prefetch

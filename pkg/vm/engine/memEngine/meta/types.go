@@ -1,7 +1,7 @@
 package meta
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/metadata"
+	"matrixone/pkg/vm/metadata"
 )
 
 type Metadata struct {

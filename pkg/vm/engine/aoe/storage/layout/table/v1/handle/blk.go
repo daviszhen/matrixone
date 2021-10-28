@@ -15,7 +15,7 @@
 package handle
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
 )
 
 var (
@@ -40,11 +40,11 @@ func (blk *Block) GetID() uint64 {
 func (blk *Block) GetSegmentID() uint64 {
 	realBlk := blk.Host.Data.StrongRefBlock(blk.Id)
 	defer realBlk.Unref()
-	return realBlk.GetMeta().Segment.Id
+	return realBlk.GetMeta().Segment.ID
 }
 
 func (blk *Block) GetTableID() uint64 {
 	realBlk := blk.Host.Data.StrongRefBlock(blk.Id)
 	defer realBlk.Unref()
-	return realBlk.GetMeta().Segment.Table.Id
+	return realBlk.GetMeta().Segment.Table.ID
 }

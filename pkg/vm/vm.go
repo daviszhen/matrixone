@@ -16,7 +16,7 @@ package vm
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"matrixone/pkg/vm/process"
 )
 
 func String(ins Instructions, buf *bytes.Buffer) {

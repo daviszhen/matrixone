@@ -15,8 +15,8 @@
 package handle
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
 )
 
 var (
@@ -70,7 +70,7 @@ func (it *SegmentLinkIt) Valid() bool {
 
 func (it *SegmentLinkIt) GetHandle() dbi.ISegment {
 	seg := &Segment{
-		Data: it.Snapshot.TableData.WeakRefSegment(it.Cursor.GetMeta().Id),
+		Data: it.Snapshot.TableData.WeakRefSegment(it.Cursor.GetMeta().ID),
 		Attr: it.Snapshot.Attr,
 	}
 	return seg

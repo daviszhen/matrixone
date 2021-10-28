@@ -14,16 +14,16 @@
 package mutation
 
 import (
+	"matrixone/pkg/vm/engine/aoe/storage/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	mb "matrixone/pkg/vm/engine/aoe/storage/mutation/base"
+	"matrixone/pkg/vm/engine/aoe/storage/mutation/buffer"
+	"matrixone/pkg/vm/engine/aoe/storage/mutation/buffer/base"
 	"sync/atomic"
-
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	mb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/buffer"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/buffer/base"
+	// "matrixone/pkg/logutil"
 )
 
 type blockFlusher struct{}
@@ -34,12 +34,13 @@ func (f blockFlusher) flush(node base.INode, data batch.IBatch, meta *metadata.B
 
 type MutableBlockNode struct {
 	buffer.Node
-	TableData iface.ITableData
-	Meta      *metadata.Block
-	File      *dataio.TransientBlockFile
-	Data      batch.IBatch
-	Flusher   mb.BlockFlusher
-	Stale     *atomic.Value
+	TableData    iface.ITableData
+	Meta         *metadata.Block
+	File         *dataio.TransientBlockFile
+	Data         batch.IBatch
+	Flusher      mb.BlockFlusher
+	AppliedIndex uint64
+	Stale        *atomic.Value
 }
 
 func NewMutableBlockNode(mgr base.INodeManager, file *dataio.TransientBlockFile,
@@ -98,31 +99,28 @@ func (n *MutableBlockNode) Flush() error {
 	if err != nil {
 		return err
 	}
+	meta := n.Meta.Copy()
 	n.RUnlock()
-	meta := n.Meta.View()
 	if err := n.Flusher(n, data, meta, n.File); err != nil {
 		return err
 	}
-	meta.Segment.Table.UpdateFlushTS()
 	n.updateApplied(meta)
-	wal := n.Meta.Segment.Table.Catalog.IndexWal
-	if wal != nil {
-		snippet := n.Meta.ConsumeSnippet(false)
-		// logutil.Infof("Mutblock %d Count %d Snippet %s", n.Meta.Id, n.Meta.GetCount(), snippet.String())
-		wal.Checkpoint(snippet)
-	}
 	return nil
 }
 
 func (n *MutableBlockNode) updateApplied(meta *metadata.Block) {
-	applied, ok := meta.CommitInfo.GetAppliedIndex()
+	applied, ok := meta.GetAppliedIndex()
 	if ok {
-		n.Meta.SetSegmentedId(applied)
+		atomic.StoreUint64(&n.AppliedIndex, applied)
 	}
 }
 
 func (n *MutableBlockNode) GetSegmentedIndex() (uint64, bool) {
-	return n.Meta.GetAppliedIndex(nil)
+	idx := atomic.LoadUint64(&n.AppliedIndex)
+	if idx == uint64(0) {
+		return idx, false
+	}
+	return idx, true
 }
 
 func (n *MutableBlockNode) load() {
@@ -144,7 +142,7 @@ func (n *MutableBlockNode) unload() {
 		return
 	}
 	if ok := n.File.PreSync(uint32(n.Data.Length())); ok {
-		meta := n.Meta.View()
+		meta := n.Meta.Copy()
 		if err := n.Flusher(n, n.Data, meta, n.File); err != nil {
 			panic(err)
 		}

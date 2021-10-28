@@ -16,7 +16,7 @@ package top
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/compare"
+	"matrixone/pkg/compare"
 )
 
 // Direction for ordering results.

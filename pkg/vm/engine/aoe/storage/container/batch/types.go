@@ -16,8 +16,8 @@ package batch
 
 import (
 	"errors"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
 	"sync"
 
 	roaring "github.com/RoaringBitmap/roaring/roaring64"

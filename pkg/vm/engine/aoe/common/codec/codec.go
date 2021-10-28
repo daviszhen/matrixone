@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/encoding"
+	"matrixone/pkg/encoding"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -124,15 +124,9 @@ func Decode(data []byte) []interface{} {
 }
 
 func String2Bytes(v string) []byte {
-	if v == "" {
-		return nil
-	}
-	return unsafe.Slice(
-		(*byte)(unsafe.Pointer(
-			(*reflect.StringHeader)(unsafe.Pointer(&v)).Data,
-		)),
-		len(v),
-	)
+	hp := *(*reflect.StringHeader)(unsafe.Pointer(&v))
+	hq := reflect.SliceHeader{Data: hp.Data, Len: hp.Len, Cap: hp.Len}
+	return *(*[]byte)(unsafe.Pointer(&hq))
 }
 
 func Bytes2String(v []byte) string {

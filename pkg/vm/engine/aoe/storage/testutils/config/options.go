@@ -15,7 +15,7 @@
 package config
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
+	"matrixone/pkg/vm/engine/aoe/storage"
 )
 
 type CacheSizeType uint8
@@ -77,10 +77,8 @@ func NewOptions(dir string, cst CacheSizeType, bst BlockSizeType, sst SegmentSiz
 	return opts
 }
 
-func NewCustomizedMetaOptions(dir string, cst CacheSizeType, blockRows, blockCnt uint64, opts *storage.Options) *storage.Options {
-	if opts == nil {
-		opts = new(storage.Options)
-	}
+func NewCustomizedMetaOptions(dir string, cst CacheSizeType, blockRows, blockCnt uint64) *storage.Options {
+	opts := new(storage.Options)
 	metaCfg := &storage.MetaCfg{
 		BlockMaxRows:     blockRows,
 		SegmentMaxBlocks: blockCnt,

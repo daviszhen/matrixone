@@ -15,8 +15,8 @@
 package worker
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"github.com/matrixorigin/matrixone/pkg/vm/routines/task"
+	"matrixone/pkg/vm/process"
+	"matrixone/pkg/vm/routines/task"
 )
 
 type Worker interface {

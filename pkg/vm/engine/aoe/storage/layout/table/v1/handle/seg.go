@@ -15,8 +15,8 @@
 package handle
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
 )
 
 var (
@@ -33,11 +33,11 @@ func (seg *Segment) BlockIds() []uint64 {
 }
 
 func (seg *Segment) GetID() uint64 {
-	return seg.Data.GetMeta().Id
+	return seg.Data.GetMeta().ID
 }
 
 func (seg *Segment) GetTableID() uint64 {
-	return seg.Data.GetMeta().Table.Id
+	return seg.Data.GetMeta().Table.ID
 }
 
 func (seg *Segment) NewIt() dbi.IBlockIt {

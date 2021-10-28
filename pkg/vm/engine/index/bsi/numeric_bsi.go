@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/matrixorigin/matrixone/pkg/encoding"
+	"matrixone/pkg/encoding"
 
 	"github.com/RoaringBitmap/roaring"
 )

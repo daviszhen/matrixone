@@ -1,61 +1,34 @@
-// Copyright 2021 Matrix Origin
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package db
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/encoding"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	bmgr "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
-	ldio "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"os"
+	"github.com/stretchr/testify/assert"
+	"matrixone/pkg/encoding"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	bmgr "matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
+	ldio "matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestBlock(t *testing.T) {
-	segCnt := uint64(4)
-	blkCnt := uint64(4)
-	rowCount := uint64(64)
-	dir := "/tmp/testblock"
-	os.RemoveAll(dir)
-	schema := metadata.MockSchema(2)
+	schema := md.MockSchema(2)
 	opts := new(storage.Options)
-	cfg := &storage.MetaCfg{
-		BlockMaxRows:     rowCount,
-		SegmentMaxBlocks: blkCnt,
-	}
-	var err error
-	opts.Meta.Conf = cfg
-	opts.FillDefaults(dir)
-	opts.Meta.Catalog, err = opts.CreateCatalog(dir)
-	assert.Nil(t, err)
-	opts.Meta.Catalog.Start()
-
+	opts.FillDefaults("/tmp")
 	typeSize := uint64(schema.ColDefs[0].Type.Size)
+	rowCount := uint64(64)
 	capacity := typeSize * rowCount * 10000
 	bufMgr := bmgr.MockBufMgr(capacity)
 	fsMgr := ldio.NewManager("/tmp", true)
+	segCnt := uint64(4)
+	blkCnt := uint64(4)
 
 	tables := table.NewTables(new(sync.RWMutex), fsMgr, bufMgr, bufMgr, bufMgr)
-	tableMeta := metadata.MockTable(opts.Meta.Catalog, schema, segCnt*blkCnt, nil)
+	info := md.MockInfo(&opts.Mu, rowCount, blkCnt)
+	tableMeta := md.MockTable(info, schema, segCnt*blkCnt)
 	tableData, err := tables.RegisterTable(tableMeta)
 	assert.Nil(t, err)
 	segIds := table.MockSegments(tableMeta, tableData)
@@ -64,7 +37,7 @@ func TestBlock(t *testing.T) {
 	for _, id := range segIds {
 		seg := &Segment{
 			Data: tableData.StrongRefSegment(id),
-			Ids:  new(atomic.Value),
+			Ids: new(atomic.Value),
 		}
 		segs = append(segs, seg)
 	}
@@ -86,7 +59,7 @@ func TestBlock(t *testing.T) {
 	_, err = blk1.Read([]uint64{uint64(1)}, []string{"mock_0"}, []*bytes.Buffer{bytes.NewBuffer(nil)}, []*bytes.Buffer{bytes.NewBuffer(nil)})
 	assert.Nil(t, err)
 
-	segs[0].Data = table.NewSimpleSegment(segs[0].Data.GetType(), &metadata.Segment{}, nil, nil)
+	segs[0].Data = table.NewSimpleSegment(segs[0].Data.GetType(), &md.Segment{}, nil, nil)
 
 	_, err = blk1.Read([]uint64{uint64(1)}, []string{"mock_0"}, []*bytes.Buffer{bytes.NewBuffer(nil)}, []*bytes.Buffer{bytes.NewBuffer(nil)})
 	assert.NotNil(t, err)

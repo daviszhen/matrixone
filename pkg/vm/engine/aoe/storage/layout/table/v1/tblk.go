@@ -16,19 +16,19 @@ package table
 import (
 	"bytes"
 	"fmt"
+	gvec "matrixone/pkg/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/container/vector"
+	fb "matrixone/pkg/vm/engine/aoe/storage/db/factories/base"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/wrapper"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	mb "matrixone/pkg/vm/engine/aoe/storage/mutation/base"
+	bb "matrixone/pkg/vm/engine/aoe/storage/mutation/buffer/base"
 	"runtime"
-
-	gvec "github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/vector"
-	fb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/factories/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/wrapper"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	mb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/base"
-	bb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/buffer/base"
+	// "matrixone/pkg/logutil"
 )
 
 type tblock struct {
@@ -40,14 +40,18 @@ type tblock struct {
 }
 
 func newTBlock(host iface.ISegment, meta *metadata.Block, factory fb.NodeFactory, mockSize *mb.MockSize) (*tblock, error) {
+	clonedMeta := meta.Copy()
+	if clonedMeta.BoundSate != metadata.Detached {
+		clonedMeta.Detach()
+	}
 	blk := &tblock{
-		baseBlock:  *newBaseBlock(host, meta),
-		node:       factory.CreateNode(host.GetSegmentFile(), meta, mockSize).(mb.IMutableBlock),
+		baseBlock:  *newBaseBlock(host, clonedMeta),
+		node:       factory.CreateNode(host.GetSegmentFile(), clonedMeta, mockSize).(mb.IMutableBlock),
 		nodeMgr:    factory.GetManager(),
 		coarseSize: make(map[string]uint64),
 	}
-	for i, colDef := range meta.Segment.Table.Schema.ColDefs {
-		blk.coarseSize[colDef.Name] = metadata.EstimateColumnBlockSize(i, meta)
+	for i, colDef := range clonedMeta.Segment.Table.Schema.ColDefs {
+		blk.coarseSize[colDef.Name] = metadata.EstimateColumnBlockSize(i, clonedMeta)
 	}
 	blk.GetObject = func() interface{} { return blk }
 	blk.Pin = func(o interface{}) { o.(iface.IBlock).Ref() }
@@ -59,10 +63,6 @@ func newTBlock(host iface.ISegment, meta *metadata.Block, factory fb.NodeFactory
 }
 
 func (blk *tblock) close() {
-	if blk.meta.Segment.Table.IsDeleted() {
-		snip := blk.meta.ConsumeSnippet(true)
-		blk.meta.Segment.Table.Catalog.IndexWal.Checkpoint(snip)
-	}
 	blk.baseBlock.release()
 	blk.node.SetStale()
 	blk.node.Close()
@@ -111,7 +111,7 @@ func (blk *tblock) CloneWithUpgrade(host iface.ISegment, meta *metadata.Block) (
 }
 
 func (blk *tblock) String() string {
-	s := fmt.Sprintf("<TBlk[%d]>(Refs=%d)", blk.meta.Id, blk.RefCount())
+	s := fmt.Sprintf("<TBlk[%d]>(Refs=%d)", blk.meta.ID, blk.RefCount())
 	return s
 }
 

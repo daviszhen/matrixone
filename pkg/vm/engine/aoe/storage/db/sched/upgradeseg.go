@@ -15,16 +15,16 @@
 package sched
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 )
 
 type upgradeSegEvent struct {
 	BaseEvent
 	// Table data of the upgraded segment
-	TableData iface.ITableData
+	TableData  iface.ITableData
 	// Data of the upgraded segment
-	Segment iface.ISegment
+	Segment    iface.ISegment
 	// Data of the old segment
 	OldSegment iface.ISegment
 }
@@ -42,10 +42,10 @@ func NewUpgradeSegEvent(ctx *Context, old iface.ISegment, td iface.ITableData) *
 
 func (e *upgradeSegEvent) Execute() error {
 	var err error
-	sid := e.OldSegment.GetMeta().Id
+	sid := e.OldSegment.GetMeta().ID
 	e.Segment, err = e.TableData.UpgradeSegment(sid)
 	if err == nil {
-		e.Segment.GetMeta().SimpleUpgrade(nil)
+		e.Segment.GetMeta().TrySorted()
 	}
 	return err
 }

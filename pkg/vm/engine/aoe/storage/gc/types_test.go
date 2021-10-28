@@ -15,16 +15,16 @@
 package gc
 
 import (
-	// "github.com/matrixorigin/matrixone/pkg/container/types"
-	// bmgr "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
-	// "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	// "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/gc/gci"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/ops"
+	// "matrixone/pkg/container/types"
+	// bmgr "matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
+	// "matrixone/pkg/vm/engine/aoe/storage/common"
+	// "matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/gc/gci"
+	"matrixone/pkg/vm/engine/aoe/storage/ops"
 
 	"github.com/stretchr/testify/assert"
 
-	// iworker "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/worker/base"
+	// iworker "matrixone/pkg/vm/engine/aoe/storage/worker/base"
 	"sync"
 	"testing"
 	"time"

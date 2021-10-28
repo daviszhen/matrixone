@@ -16,7 +16,7 @@ package ops
 
 import (
 	"context"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/worker/base"
+	"matrixone/pkg/vm/engine/aoe/storage/worker/base"
 	"sync"
 	"time"
 )

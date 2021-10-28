@@ -15,8 +15,8 @@
 package insert
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/vm/engine"
 )
 
 type Insert struct {

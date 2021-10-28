@@ -15,12 +15,11 @@
 package handle
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	bmgr "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
-	ldio "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"os"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	bmgr "matrixone/pkg/vm/engine/aoe/storage/buffer/manager"
+	ldio "matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"sync"
 	"testing"
 	"time"
@@ -29,32 +28,21 @@ import (
 )
 
 func TestSnapshot(t *testing.T) {
-	dir := "/tmp/testss"
-	os.RemoveAll(dir)
-	schema := metadata.MockSchema(2)
+	schema := md.MockSchema(2)
+	opts := new(storage.Options)
+	opts.FillDefaults("/tmp")
+	typeSize := uint64(schema.ColDefs[0].Type.Size)
 	row_count := uint64(64)
 	seg_cnt := 4
 	blk_cnt := 2
-	cfg := storage.MetaCfg{
-		BlockMaxRows:     row_count,
-		SegmentMaxBlocks: uint64(blk_cnt),
-	}
-	opts := new(storage.Options)
-	opts.Meta.Conf = &cfg
-	opts.FillDefaults(dir)
-	opts.Meta.Catalog, _ = opts.CreateCatalog(dir)
-	opts.Meta.Catalog.Start()
-
-	typeSize := uint64(schema.ColDefs[0].Type.Size)
 	capacity := typeSize * row_count * uint64(seg_cnt) * uint64(blk_cnt) * 2
 	indexBufMgr := bmgr.MockBufMgr(capacity)
 	mtBufMgr := bmgr.MockBufMgr(capacity)
 	sstBufMgr := bmgr.MockBufMgr(capacity)
-	tables := table.NewTables(new(sync.RWMutex), ldio.NewManager(dir, false), mtBufMgr, sstBufMgr, indexBufMgr)
+	tables := table.NewTables(new(sync.RWMutex), ldio.NewManager("/tmp", false), mtBufMgr, sstBufMgr, indexBufMgr)
 
-	catalog := opts.Meta.Catalog
-	defer catalog.Close()
-	tableMeta := metadata.MockTable(catalog, schema, uint64(blk_cnt*seg_cnt), nil)
+	info := md.MockInfo(&opts.Mu, row_count, uint64(blk_cnt))
+	tableMeta := md.MockTable(info, schema, uint64(blk_cnt*seg_cnt))
 
 	tableData, err := tables.RegisterTable(tableMeta)
 	assert.Nil(t, err)

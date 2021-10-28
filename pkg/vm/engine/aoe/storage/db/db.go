@@ -18,37 +18,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"matrixone/pkg/vm/engine/aoe"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	bmgrif "matrixone/pkg/vm/engine/aoe/storage/buffer/manager/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	dbsched "matrixone/pkg/vm/engine/aoe/storage/db/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/events/memdata"
+	"matrixone/pkg/vm/engine/aoe/storage/events/meta"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/handle"
+	tiface "matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	mtif "matrixone/pkg/vm/engine/aoe/storage/memtable/v1/base"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	bb "matrixone/pkg/vm/engine/aoe/storage/mutation/buffer/base"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
+	iw "matrixone/pkg/vm/engine/aoe/storage/worker/base"
 	"os"
 	"sync"
 	"sync/atomic"
-
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	bmgrif "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager/iface"
-	dbsched "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/events/memdata"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/events/meta"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/flusher"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/handle"
-	tiface "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	mtif "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/memtable/v1/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	bb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/buffer/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/wal"
-	wb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/worker/base"
 )
 
 var (
-	ErrClosed            = errors.New("aoe: closed")
-	ErrUnsupported       = errors.New("aoe: unsupported")
-	ErrNotFound          = errors.New("aoe: notfound")
-	ErrUnexpectedWalRole = errors.New("aoe: unexpected wal role setted")
+	ErrClosed      = errors.New("aoe: closed")
+	ErrUnsupported = errors.New("aoe: unsupported")
+	ErrNotFound    = errors.New("aoe: notfound")
 )
 
 type DB struct {
@@ -70,16 +65,15 @@ type DB struct {
 	// MutationBufMgr is a replacement for MTBufMgr
 	MutationBufMgr bb.INodeManager
 
-	Wal wal.ShardWal
-
-	FlushDriver  flusher.Driver
-	TimedFlusher wb.IHeartbeater
-
 	// Internal data storage of DB.
 	Store struct {
 		Mu         *sync.RWMutex
-		Catalog    *metadata.Catalog
+		MetaInfo   *md.MetaInfo
 		DataTables *table.Tables
+	}
+
+	Cleaner struct {
+		MetaFiles iw.IHeartbeater
 	}
 
 	DataDir  *os.File
@@ -96,11 +90,11 @@ func (d *DB) Flush(name string) error {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	tbl := d.Store.Catalog.SimpleGetTableByName(name)
-	if tbl == nil {
-		return metadata.TableNotFoundErr
+	tbl, err := d.Store.MetaInfo.ReferenceTableByName(name)
+	if err != nil {
+		return err
 	}
-	collection := d.MemTableMgr.StrongRefCollection(tbl.Id)
+	collection := d.MemTableMgr.StrongRefCollection(tbl.GetID())
 	if collection == nil {
 		eCtx := &memdata.Context{
 			Opts:        d.Opts,
@@ -114,10 +108,10 @@ func (d *DB) Flush(name string) error {
 			Waitable:    true,
 		}
 		e := memdata.NewCreateTableEvent(eCtx)
-		if err := d.Scheduler.Schedule(e); err != nil {
+		if err = d.Scheduler.Schedule(e); err != nil {
 			panic(fmt.Sprintf("logic error: %s", err))
 		}
-		if err := e.WaitDone(); err != nil {
+		if err = e.WaitDone(); err != nil {
 			panic(fmt.Sprintf("logic error: %s", err))
 		}
 		collection = e.Collection
@@ -133,12 +127,12 @@ func (d *DB) Append(ctx dbi.AppendCtx) (err error) {
 	if ctx.OpOffset >= ctx.OpSize {
 		panic(fmt.Sprintf("bad index %d: offset %d, size %d", ctx.OpIndex, ctx.OpOffset, ctx.OpSize))
 	}
-	tbl := d.Store.Catalog.SimpleGetTableByName(ctx.TableName)
-	if tbl == nil {
-		return metadata.TableNotFoundErr
+	tbl, err := d.Store.MetaInfo.ReferenceTableByName(ctx.TableName)
+	if err != nil {
+		return err
 	}
 
-	collection := d.MemTableMgr.StrongRefCollection(tbl.Id)
+	collection := d.MemTableMgr.StrongRefCollection(tbl.GetID())
 	if collection == nil {
 		eCtx := &memdata.Context{
 			Opts:        d.Opts,
@@ -161,16 +155,20 @@ func (d *DB) Append(ctx dbi.AppendCtx) (err error) {
 		collection = e.Collection
 	}
 
-	index := adaptor.GetLogIndexFromAppendCtx(&ctx)
-	defer collection.Unref()
-	if err := d.Wal.SyncLog(index); err != nil {
-		return err
+	index := &md.LogIndex{
+		ID: md.LogBatchId{
+			Id:     ctx.OpIndex,
+			Offset: uint32(ctx.OpOffset),
+			Size:   uint32(ctx.OpSize),
+		},
+		Capacity: uint64(ctx.Data.Vecs[0].Length()),
 	}
+	defer collection.Unref()
 	return collection.Append(ctx.Data, index)
 }
 
-func (d *DB) getTableData(meta *metadata.Table) (tiface.ITableData, error) {
-	data, err := d.Store.DataTables.StrongRefTable(meta.Id)
+func (d *DB) getTableData(meta *md.Table) (tiface.ITableData, error) {
+	data, err := d.Store.DataTables.StrongRefTable(meta.ID)
 	if err != nil {
 		eCtx := &memdata.Context{
 			Opts:        d.Opts,
@@ -191,7 +189,7 @@ func (d *DB) getTableData(meta *metadata.Table) (tiface.ITableData, error) {
 			panic(fmt.Sprintf("logic error: %s", err))
 		}
 		collection := e.Collection
-		if data, err = d.Store.DataTables.StrongRefTable(meta.Id); err != nil {
+		if data, err = d.Store.DataTables.StrongRefTable(meta.ID); err != nil {
 			collection.Unref()
 			return nil, err
 		}
@@ -204,9 +202,9 @@ func (d *DB) Relation(name string) (*Relation, error) {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	meta := d.Store.Catalog.SimpleGetTableByName(name)
-	if meta == nil {
-		return nil, metadata.TableNotFoundErr
+	meta, err := d.Opts.Meta.Info.ReferenceTableByName(name)
+	if err != nil {
+		return nil, err
 	}
 	data, err := d.getTableData(meta)
 	if err != nil {
@@ -219,8 +217,8 @@ func (d *DB) HasTable(name string) bool {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	meta := d.Store.Catalog.SimpleGetTableByName(name)
-	return meta != nil
+	_, err := d.Store.MetaInfo.ReferenceTableByName(name)
+	return err == nil
 }
 
 func (d *DB) DropTable(ctx dbi.DropTableCtx) (id uint64, err error) {
@@ -232,7 +230,10 @@ func (d *DB) DropTable(ctx dbi.DropTableCtx) (id uint64, err error) {
 		Waitable: true,
 	}
 	e := meta.NewDropTableEvent(eCtx, ctx, d.MemTableMgr, d.Store.DataTables)
-	err = e.Execute()
+	if err = d.Scheduler.Schedule(e); err != nil {
+		return id, err
+	}
+	err = e.WaitDone()
 	return e.Id, err
 }
 
@@ -241,27 +242,25 @@ func (d *DB) CreateTable(info *aoe.TableInfo, ctx dbi.TableOpCtx) (id uint64, er
 		panic(err)
 	}
 	info.Name = ctx.TableName
-	schema := adaptor.TableInfoToSchema(d.Opts.Meta.Catalog, info)
-	index := adaptor.GetLogIndexFromTableOpCtx(&ctx)
-	if err = d.Wal.SyncLog(index); err != nil {
-		return
-	}
-	defer d.Wal.Checkpoint(index)
 
-	logutil.Infof("CreateTable %s", index.String())
-	tbl, err := d.Opts.Meta.Catalog.SimpleCreateTable(schema, index)
-	if err != nil {
+	eCtx := &dbsched.Context{Opts: d.Opts, Waitable: true}
+	e := meta.NewCreateTableEvent(eCtx, ctx, info)
+	if err = d.Opts.Scheduler.Schedule(e); err != nil {
 		return id, err
 	}
-	return tbl.Id, nil
+	if err = e.WaitDone(); err != nil {
+		return id, e.Err
+	}
+	id = e.GetTable().GetID()
+	return id, nil
 }
 
 func (d *DB) GetSegmentIds(ctx dbi.GetSegmentsCtx) (ids dbi.IDS) {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	meta := d.Store.Catalog.SimpleGetTableByName(ctx.TableName)
-	if meta == nil {
+	meta, err := d.Opts.Meta.Info.ReferenceTableByName(ctx.TableName)
+	if err != nil {
 		return ids
 	}
 	data, err := d.getTableData(meta)
@@ -277,14 +276,14 @@ func (d *DB) GetSnapshot(ctx *dbi.GetSnapshotCtx) (*handle.Snapshot, error) {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	tableMeta := d.Store.Catalog.SimpleGetTableByName(ctx.TableName)
-	if tableMeta == nil {
-		return nil, metadata.TableNotFoundErr
+	tableMeta, err := d.Store.MetaInfo.ReferenceTableByName(ctx.TableName)
+	if err != nil {
+		return nil, err
 	}
-	if tableMeta.SimpleGetSegmentCount() == 0 {
+	if tableMeta.GetSegmentCount() == uint64(0) {
 		return handle.NewEmptySnapshot(), nil
 	}
-	tableData, err := d.Store.DataTables.StrongRefTable(tableMeta.Id)
+	tableData, err := d.Store.DataTables.StrongRefTable(tableMeta.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +300,10 @@ func (d *DB) TableIDs() (ids []uint64, err error) {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	ids = d.Store.Catalog.SimpleGetTableIds()
+	tids := d.Store.MetaInfo.TableIDs()
+	for tid := range tids {
+		ids = append(ids, tid)
+	}
 	return ids, err
 }
 
@@ -309,11 +311,22 @@ func (d *DB) TableNames() []string {
 	if err := d.Closed.Load(); err != nil {
 		panic(err)
 	}
-	return d.Store.Catalog.SimpleGetTableNames()
+	return d.Opts.Meta.Info.TableNames()
 }
 
-func (d *DB) GetShardCheckpointId(shardId uint64) uint64 {
-	return d.Wal.GetShardCheckpointId(shardId)
+func (d *DB) TableSegmentIDs(tableID uint64) (ids []common.ID, err error) {
+	if err := d.Closed.Load(); err != nil {
+		panic(err)
+	}
+	sids, err := d.Store.MetaInfo.TableSegmentIDs(tableID)
+	if err != nil {
+		return ids, err
+	}
+	// TODO: Refactor metainfo to 1. keep order 2. use common.RelationName
+	for sid := range sids {
+		ids = append(ids, common.ID{TableID: tableID, SegmentID: sid})
+	}
+	return ids, err
 }
 
 func (d *DB) GetSegmentedId(ctx dbi.GetSegmentedIdCtx) (id uint64, err error) {
@@ -321,7 +334,7 @@ func (d *DB) GetSegmentedId(ctx dbi.GetSegmentedIdCtx) (id uint64, err error) {
 	for _, matcher := range ctx.Matchers {
 		switch matcher.Type {
 		case dbi.MTPrefix:
-			tbls := d.Store.Catalog.SimpleGetTablesByPrefix(matcher.Pattern)
+			tbls := d.Store.MetaInfo.GetTablesByNamePrefix(matcher.Pattern)
 			for _, tbl := range tbls {
 				data, err := d.getTableData(tbl)
 				defer data.Unref()
@@ -346,10 +359,25 @@ func (d *DB) GetSegmentedId(ctx dbi.GetSegmentedIdCtx) (id uint64, err error) {
 	return id, err
 }
 
+func (d *DB) replayData() {
+	err := d.Store.DataTables.Replay(d.FsMgr, d.IndexBufMgr, d.MTBufMgr, d.SSTBufMgr, d.Store.MetaInfo)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (d *DB) startCleaner() {
+	d.Cleaner.MetaFiles.Start()
+}
+
 func (d *DB) startWorkers() {
 	d.Opts.GC.Acceptor.Start()
-	d.FlushDriver.Start()
-	d.TimedFlusher.Start()
+}
+
+func (d *DB) EnsureNotClosed() {
+	if err := d.Closed.Load(); err != nil {
+		panic(err)
+	}
 }
 
 func (d *DB) IsClosed() bool {
@@ -360,9 +388,11 @@ func (d *DB) IsClosed() bool {
 }
 
 func (d *DB) stopWorkers() {
-	d.TimedFlusher.Stop()
-	d.FlushDriver.Stop()
 	d.Opts.GC.Acceptor.Stop()
+}
+
+func (d *DB) stopCleaner() {
+	d.Cleaner.MetaFiles.Stop()
 }
 
 func (d *DB) Close() error {
@@ -372,10 +402,9 @@ func (d *DB) Close() error {
 
 	d.Closed.Store(ErrClosed)
 	close(d.ClosedC)
-	d.Wal.Close()
 	d.Scheduler.Stop()
 	d.stopWorkers()
-	d.Opts.Meta.Catalog.Close()
+	d.stopCleaner()
 	err := d.DBLocker.Close()
 	return err
 }

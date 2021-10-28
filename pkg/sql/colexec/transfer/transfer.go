@@ -16,10 +16,10 @@ package transfer
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"github.com/matrixorigin/matrixone/pkg/vm/register"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/container/vector"
+	"matrixone/pkg/vm/process"
+	"matrixone/pkg/vm/register"
 )
 
 func String(_ interface{}, buf *bytes.Buffer) {
@@ -69,7 +69,7 @@ func Call(proc *process.Process, arg interface{}) (bool, error) {
 	vecs := n.vecs[:0]
 	for i := range bat.Vecs {
 		if bat.Vecs[i].Or {
-			vec, err := bat.Vecs[i].Dup(proc)
+			vec, err := bat.Vecs[i].Dup(n.Proc)
 			if err != nil {
 				clean(vecs, n.Proc)
 				return false, err

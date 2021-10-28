@@ -14,7 +14,7 @@
 
 package showDatabases
 
-import "github.com/matrixorigin/matrixone/pkg/vm/engine"
+import "matrixone/pkg/vm/engine"
 
 type ShowDatabases struct {
 	E engine.Engine

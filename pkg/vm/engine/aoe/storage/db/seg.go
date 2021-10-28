@@ -15,11 +15,11 @@
 package db
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/encoding"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"matrixone/pkg/encoding"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/vm/engine"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/process"
 	"sync/atomic"
 )
 
@@ -32,7 +32,7 @@ type Segment struct {
 
 // ID returns the string representation of this segment's id.
 func (seg *Segment) ID() string {
-	id := seg.Data.GetMeta().Id
+	id := seg.Data.GetMeta().GetID()
 	return string(encoding.EncodeUint64(id))
 }
 

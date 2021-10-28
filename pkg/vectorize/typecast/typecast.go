@@ -15,7 +15,7 @@
 package typecast
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"matrixone/pkg/container/types"
 	"strconv"
 
 	"golang.org/x/sys/cpu"

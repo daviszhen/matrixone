@@ -15,10 +15,12 @@
 package meta
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/testutils/config"
+	dbsched "matrixone/pkg/vm/engine/aoe/storage/db/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/testutils/config"
 	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -30,63 +32,90 @@ var (
 )
 
 func TestBasicOps(t *testing.T) {
-	os.RemoveAll(workDir)
 	opts := config.NewOptions(workDir, config.CST_Customize, config.BST_S, config.SST_S)
-	opts.Meta.Catalog, _ = opts.CreateCatalog(workDir)
-	opts.Meta.Catalog.Start()
-	defer opts.Meta.Catalog.Close()
-	opts.Scheduler = sched.NewScheduler(opts, nil)
+	opts.Scheduler = dbsched.NewScheduler(opts, nil)
 
 	now := time.Now()
 
-	catalog := opts.Meta.Catalog
-	schema := metadata.MockSchema(2)
-	tbl, err := catalog.SimpleCreateTable(schema, nil)
+	info := opts.Meta.Info
+	tabletInfo := md.MockTableInfo(2)
+	eCtx := &dbsched.Context{Opts: opts, Waitable: true}
+	createTblE := NewCreateTableEvent(eCtx, dbi.TableOpCtx{TableName: tabletInfo.Name}, tabletInfo)
+	opts.Scheduler.Schedule(createTblE)
+	err := createTblE.WaitDone()
 	assert.Nil(t, err)
+
+	tbl := createTblE.GetTable()
 	assert.NotNil(t, tbl)
 
-	eCtx := &sched.Context{Opts: opts, Waitable: true}
-	createBlkE := NewCreateBlkEvent(eCtx, tbl.Id, nil, nil)
+	t.Log(info.String())
+	createBlkE := NewCreateBlkEvent(eCtx, tbl.ID, nil)
 	opts.Scheduler.Schedule(createBlkE)
 	err = createBlkE.WaitDone()
 	assert.Nil(t, err)
 
 	blk1 := createBlkE.GetBlock()
 	assert.NotNil(t, blk1)
-	assert.Equal(t, metadata.OpCreate, blk1.CommitInfo.Op)
+	assert.Equal(t, blk1.GetBoundState(), md.Detached)
 
-	err = blk1.SimpleUpgrade(nil)
-	assert.NotNil(t, err)
+	assert.Equal(t, blk1.DataState, md.EMPTY)
+	blk1.SetCount(blk1.MaxRowCount)
+	assert.Equal(t, blk1.DataState, md.FULL)
 
-	blk1.SetCount(blk1.Segment.Table.Schema.BlockMaxRows)
-	err = blk1.SimpleUpgrade(nil)
+	blk2, err := info.ReferenceBlock(blk1.Segment.Table.ID, blk1.Segment.ID, blk1.ID)
 	assert.Nil(t, err)
-	assert.True(t, blk1.IsFull())
+	assert.Equal(t, blk2.DataState, md.EMPTY)
+	assert.Equal(t, blk2.Count, uint64(0))
 
-	schedCtx := &sched.Context{
+	schedCtx := &dbsched.Context{
 		Opts:     opts,
 		Waitable: true,
 	}
-	commitCtx := &sched.Context{Opts: opts, Waitable: true}
+	commitCtx := &dbsched.Context{Opts: opts, Waitable: true}
 	commitCtx.AddMetaScope()
-	commitE := sched.NewCommitBlkEvent(commitCtx, blk1)
+	commitE := dbsched.NewCommitBlkEvent(commitCtx, blk1)
 	opts.Scheduler.Schedule(commitE)
 	err = commitE.WaitDone()
 	assert.Nil(t, err)
 
-	blk2, err := tbl.SimpleGetBlock(blk1.Segment.Id, blk1.Id)
+	blk3, err := info.ReferenceBlock(blk1.Segment.Table.ID, blk1.Segment.ID, blk1.ID)
 	assert.Nil(t, err)
-	assert.True(t, blk2.IsFull())
+	assert.Equal(t, blk3.DataState, md.FULL)
+	assert.Equal(t, blk1.Count, blk3.Count)
 
 	for i := 0; i < 100; i++ {
-		createBlkE = NewCreateBlkEvent(schedCtx, blk1.Segment.Table.Id, nil, nil)
+		createBlkE = NewCreateBlkEvent(schedCtx, blk1.Segment.Table.ID, nil)
 		opts.Scheduler.Schedule(createBlkE)
 		err = createBlkE.WaitDone()
 		assert.Nil(t, err)
 	}
 	du := time.Since(now)
 	t.Log(du)
-	time.Sleep(time.Duration(100) * time.Millisecond)
+
+	ctx := md.CopyCtx{Attached: true}
+	info_copy := info.Copy(ctx)
+
+	fpath := path.Join(info.Conf.Dir, "tttttttt")
+	w, err := os.Create(fpath)
+	assert.Equal(t, err, nil)
+	err = info_copy.Serialize(w)
+	assert.Nil(t, err)
+	w.Close()
+
+	// r, err := os.OpenFile(fpath, os.O_RDONLY, 0666)
+	// assert.Equal(t, err, nil)
+
+	// de_info, err := md.Deserialize(r)
+	// assert.Nil(t, err)
+	// assert.NotNil(t, de_info)
+	// assert.Equal(t, info.Sequence.NextBlockID, de_info.Sequence.NextBlockID)
+	// assert.Equal(t, info.Sequence.NextSegmentID, de_info.Sequence.NextSegmentID)
+	// assert.Equal(t, info.Sequence.NextTableID, de_info.Sequence.NextTableID)
+
+	// r.Close()
+
+	du = time.Since(now)
+	t.Log(du)
 
 	opts.Scheduler.Stop()
 }

@@ -15,8 +15,8 @@
 package summarize
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/aggregation"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/sql/colexec/aggregation"
 )
 
 type Container struct {

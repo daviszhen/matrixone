@@ -16,8 +16,8 @@ package merge
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/vm/process"
 )
 
 func String(_ interface{}, buf *bytes.Buffer) {
@@ -34,9 +34,6 @@ func Call(proc *process.Process, _ interface{}) (bool, error) {
 	}
 	for i := 0; i < len(proc.Reg.MergeReceivers); i++ {
 		reg := proc.Reg.MergeReceivers[i]
-		if reg.Ch == nil {
-			continue
-		}
 		v := <-reg.Ch
 		if v == nil {
 			reg.Ch = nil

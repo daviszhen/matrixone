@@ -15,24 +15,24 @@
 package sched
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 )
 
 type upgradeBlkEvent struct {
 	BaseEvent
 	// Table data of the upgraded block
-	TableData iface.ITableData
+	TableData     iface.ITableData
 	// Metadata of the upgraded block
-	Meta *metadata.Block
+	Meta          *md.Block
 	// Data of the upgraded block
-	Data iface.IBlock
+	Data          iface.IBlock
 	// Is the segment that block belongs to already closed or not
 	SegmentClosed bool
 }
 
-func NewUpgradeBlkEvent(ctx *Context, meta *metadata.Block, td iface.ITableData) *upgradeBlkEvent {
+func NewUpgradeBlkEvent(ctx *Context, meta *md.Block, td iface.ITableData) *upgradeBlkEvent {
 	e := &upgradeBlkEvent{
 		TableData: td,
 		Meta:      meta,

@@ -15,10 +15,10 @@
 package build
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/extend"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/extend/overload"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/container/vector"
+	"matrixone/pkg/sql/colexec/extend"
+	"matrixone/pkg/sql/colexec/extend/overload"
 )
 
 func RewriteExtend(e extend.Extend) extend.Extend {
@@ -54,7 +54,7 @@ func rewriteNotUnary(e *extend.UnaryExtend) extend.Extend {
 	if e.Op != overload.Not {
 		return e
 	}
-	return negation(RewriteExtend(e.E), false)
+	return negation(e.E, false)
 }
 
 func rewriteNotBinary(e *extend.BinaryExtend) extend.Extend {
@@ -104,10 +104,7 @@ func negation(e extend.Extend, isParen bool) extend.Extend {
 		v.V = vec
 		return v
 	}
-	return &extend.UnaryExtend{
-		Op: overload.Not,
-		E:  e,
-	}
+	return e
 }
 
 func negationBinary(e *extend.BinaryExtend, isParen bool) extend.Extend {
@@ -125,8 +122,5 @@ func negationBinary(e *extend.BinaryExtend, isParen bool) extend.Extend {
 			Right: negation(e.Right, isParen),
 		}
 	}
-	return &extend.UnaryExtend{
-		Op: overload.Not,
-		E:  e,
-	}
+	return e
 }

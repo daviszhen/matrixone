@@ -15,7 +15,7 @@
 package tree
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/defines"
+	"matrixone/pkg/defines"
 )
 
 type Family int32

@@ -15,13 +15,12 @@
 package sched
 
 import (
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 	"sync"
-
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
 )
 
 type metablkCommiter struct {
@@ -29,7 +28,7 @@ type metablkCommiter struct {
 	opts       *storage.Options
 	scheduler  sched.Scheduler
 	pendings   []uint64
-	flushdones map[uint64]*metadata.Block
+	flushdones map[uint64]*md.Block
 }
 
 func newMetaBlkCommiter(opts *storage.Options, scheduler sched.Scheduler) *metablkCommiter {
@@ -37,7 +36,7 @@ func newMetaBlkCommiter(opts *storage.Options, scheduler sched.Scheduler) *metab
 		opts:       opts,
 		scheduler:  scheduler,
 		pendings:   make([]uint64, 0),
-		flushdones: make(map[uint64]*metadata.Block),
+		flushdones: make(map[uint64]*md.Block),
 	}
 	return c
 }
@@ -54,13 +53,13 @@ func (p *metablkCommiter) Register(blkid uint64) {
 	p.Unlock()
 }
 
-func (p *metablkCommiter) doSchedule(meta *metadata.Block) {
+func (p *metablkCommiter) doSchedule(meta *md.Block) {
 	ctx := &Context{Opts: p.opts}
 	commit := NewCommitBlkEvent(ctx, meta)
 	p.scheduler.Schedule(commit)
 }
 
-func (p *metablkCommiter) Accept(meta *metadata.Block) {
+func (p *metablkCommiter) Accept(meta *md.Block) {
 	// TODO: retry logic
 	// if err := e.GetError(); err != nil {
 	// 	panic(err)
@@ -69,8 +68,8 @@ func (p *metablkCommiter) Accept(meta *metadata.Block) {
 		return
 	}
 	p.Lock()
-	if p.pendings[0] != meta.Id {
-		p.flushdones[meta.Id] = meta
+	if p.pendings[0] != meta.ID {
+		p.flushdones[meta.ID] = meta
 	} else {
 		p.doSchedule(meta)
 		var i int
@@ -129,6 +128,7 @@ func NewScheduler(opts *storage.Options, tables *table.Tables) *scheduler {
 	// Register different events to its belonged handler
 	dispatcher.RegisterHandler(sched.StatelessEvent, statelessHandler)
 	dispatcher.RegisterHandler(sched.FlushSegTask, flushsegHandler)
+	dispatcher.RegisterHandler(sched.FlushMemtableTask, flushblkHandler)
 	dispatcher.RegisterHandler(sched.FlushBlkTask, flushblkHandler)
 	dispatcher.RegisterHandler(sched.CommitBlkTask, metaHandler)
 	dispatcher.RegisterHandler(sched.UpgradeBlkTask, memdataHandler)
@@ -144,6 +144,7 @@ func NewScheduler(opts *storage.Options, tables *table.Tables) *scheduler {
 	// Register dispatcher
 	s.RegisterDispatcher(sched.StatelessEvent, dispatcher)
 	s.RegisterDispatcher(sched.FlushSegTask, dispatcher)
+	s.RegisterDispatcher(sched.FlushMemtableTask, dispatcher)
 	s.RegisterDispatcher(sched.FlushBlkTask, dispatcher)
 	s.RegisterDispatcher(sched.CommitBlkTask, dispatcher)
 	s.RegisterDispatcher(sched.UpgradeBlkTask, dispatcher)
@@ -176,12 +177,27 @@ func (s *scheduler) onPrecommitBlkDone(e sched.Event) {
 func (s *scheduler) onFlushBlkDone(e sched.Event) {
 	event := e.(*flushMemblockEvent)
 	s.commiters.mu.RLock()
-	commiter := s.commiters.blkmap[event.Meta.Segment.Table.Id]
+	commiter := s.commiters.blkmap[event.Meta.Segment.Table.ID]
 	s.commiters.mu.RUnlock()
 	commiter.Accept(event.Meta)
 	s.commiters.mu.Lock()
 	if commiter.IsEmpty() {
-		delete(s.commiters.blkmap, event.Meta.Segment.Table.Id)
+		delete(s.commiters.blkmap, event.Meta.Segment.Table.ID)
+	}
+	s.commiters.mu.Unlock()
+}
+
+// onFlushMemtableDone handles the finished flush memtable event, and
+// adjusts some metadata if needed.
+func (s *scheduler) onFlushMemtableDone(e sched.Event) {
+	event := e.(*flushMemtableEvent)
+	s.commiters.mu.RLock()
+	commiter := s.commiters.blkmap[event.Meta.Segment.Table.ID]
+	s.commiters.mu.RUnlock()
+	commiter.Accept(event.Meta)
+	s.commiters.mu.Lock()
+	if commiter.IsEmpty() {
+		delete(s.commiters.blkmap, event.Meta.Segment.Table.ID)
 	}
 	s.commiters.mu.Unlock()
 }
@@ -189,22 +205,27 @@ func (s *scheduler) onFlushBlkDone(e sched.Event) {
 // onCommitBlkDone handles the finished commit block event, schedules a
 // new flush table event and an upgrade block event.
 func (s *scheduler) onCommitBlkDone(e sched.Event) {
-	if err := e.GetError(); err != nil {
-		s.opts.EventListener.BackgroundErrorCB(err)
-		return
-	}
 	event := e.(*commitBlkEvent)
+	newMeta := event.NewMeta
+	cpCtx := md.CopyCtx{Ts: md.NowMicro(), Attached: true}
+	newMeta.Segment.Table.RLock()
+	tblMetaCpy := newMeta.Segment.Table.Copy(cpCtx)
+	newMeta.Segment.Table.RUnlock()
+
+	ctx := &Context{Opts: s.opts}
+	flushEvent := NewFlushTableEvent(ctx, tblMetaCpy)
+	s.Schedule(flushEvent)
+
 	if !event.Ctx.HasDataScope() {
 		return
 	}
-	newMeta := event.Meta
 	mctx := &Context{Opts: s.opts}
-	tableData, err := s.tables.StrongRefTable(newMeta.Segment.Table.Id)
+	tableData, err := s.tables.StrongRefTable(newMeta.Segment.Table.ID)
 	if err != nil {
 		s.opts.EventListener.BackgroundErrorCB(err)
 		return
 	}
-	logutil.Infof(" %s | Block %d | UpgradeBlkEvent | Started", sched.EventPrefix, newMeta.Id)
+	logutil.Infof(" %s | Block %d | UpgradeBlkEvent | Started", sched.EventPrefix, newMeta.ID)
 	newevent := NewUpgradeBlkEvent(mctx, newMeta, tableData)
 	s.Schedule(newevent)
 }
@@ -225,12 +246,12 @@ func (s *scheduler) onUpgradeBlkDone(e sched.Event) {
 	if !event.SegmentClosed {
 		return
 	}
-	segment := event.TableData.StrongRefSegment(event.Meta.Segment.Id)
+	segment := event.TableData.StrongRefSegment(event.Meta.Segment.ID)
 	if segment == nil {
-		logutil.Warnf("Probably table %d is dropped", event.Meta.Segment.Table.Id)
+		logutil.Warnf("Probably table %d is dropped", event.Meta.Segment.Table.ID)
 		return
 	}
-	logutil.Infof(" %s | Segment %d | FlushSegEvent | Started", sched.EventPrefix, event.Meta.Segment.Id)
+	logutil.Infof(" %s | Segment %d | FlushSegEvent | Started", sched.EventPrefix, event.Meta.Segment.ID)
 	flushCtx := &Context{Opts: s.opts}
 	flushEvent := NewFlushSegEvent(flushCtx, segment)
 	s.Schedule(flushEvent)
@@ -247,13 +268,13 @@ func (s *scheduler) onFlushSegDone(e sched.Event) {
 	}
 	ctx := &Context{Opts: s.opts}
 	meta := event.Segment.GetMeta()
-	td, err := s.tables.StrongRefTable(meta.Table.Id)
+	td, err := s.tables.StrongRefTable(meta.Table.ID)
 	if err != nil {
 		// s.opts.EventListener.BackgroundErrorCB(err)
 		event.Segment.Unref()
 		return
 	}
-	logutil.Infof(" %s | Segment %d | UpgradeSegEvent | Started", sched.EventPrefix, meta.Id)
+	logutil.Infof(" %s | Segment %d | UpgradeSegEvent | Started", sched.EventPrefix, meta.ID)
 	newevent := NewUpgradeSegEvent(ctx, event.Segment, td)
 	s.Schedule(newevent)
 }
@@ -274,6 +295,8 @@ func (s *scheduler) onUpgradeSegDone(e sched.Event) {
 func (s *scheduler) OnExecDone(op interface{}) {
 	e := op.(sched.Event)
 	switch e.Type() {
+	case sched.FlushMemtableTask:
+		s.onFlushMemtableDone(e)
 	case sched.FlushBlkTask:
 		s.onFlushBlkDone(e)
 	case sched.CommitBlkTask:
@@ -292,12 +315,12 @@ func (s *scheduler) OnExecDone(op interface{}) {
 func (s *scheduler) onPreScheduleFlushBlkTask(e sched.Event) {
 	event := e.(*flushMemblockEvent)
 	s.commiters.mu.Lock()
-	commiter, ok := s.commiters.blkmap[event.Meta.Segment.Table.Id]
+	commiter, ok := s.commiters.blkmap[event.Meta.Segment.Table.ID]
 	if !ok {
 		commiter = newMetaBlkCommiter(s.opts, s)
-		s.commiters.blkmap[event.Meta.Segment.Table.Id] = commiter
+		s.commiters.blkmap[event.Meta.Segment.Table.ID] = commiter
 	}
-	commiter.Register(event.Meta.Id)
+	commiter.Register(event.Meta.ID)
 	s.commiters.mu.Unlock()
 }
 

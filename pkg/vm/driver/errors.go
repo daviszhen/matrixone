@@ -17,7 +17,7 @@ package driver
 import (
 	"bytes"
 	"errors"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/codec"
+	"matrixone/pkg/vm/engine/aoe/common/codec"
 )
 
 var (

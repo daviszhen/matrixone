@@ -15,16 +15,14 @@
 package storage
 
 import (
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/event"
+	"matrixone/pkg/vm/engine/aoe/storage/gc"
+	"matrixone/pkg/vm/engine/aoe/storage/gc/gci"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 	"sync"
 	"time"
-
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/event"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/gc"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/gc/gci"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/wal"
 )
 
 const (
@@ -50,6 +48,14 @@ type IterOptions struct {
 	SegmentIds []uint64
 }
 
+type FactoryType uint16
+
+const (
+	INVALID_FT FactoryType = iota
+	NORMAL_FT
+	MUTABLE_FT
+)
+
 type CacheCfg struct {
 	IndexCapacity  uint64 `toml:"index-cache-size"`
 	InsertCapacity uint64 `toml:"insert-cache-size"`
@@ -74,17 +80,17 @@ type MetaCleanerCfg struct {
 type Options struct {
 	EventListener event.EventListener
 
+	FactoryType FactoryType
+
 	Mu sync.RWMutex
 
 	Scheduler    sched.Scheduler
 	SchedulerCfg *SchedulerCfg `toml:"scheduler-cfg"`
 
-	WalRole wal.Role
-	Wal     wal.ShardWal
-
 	Meta struct {
-		Conf    *MetaCfg
-		Catalog *metadata.Catalog
+		CKFactory *checkpointerFactory
+		Conf      *MetaCfg
+		Info      *metadata.MetaInfo
 	}
 
 	GC struct {
@@ -102,6 +108,10 @@ func (o *Options) FillDefaults(dirname string) *Options {
 		o = &Options{}
 	}
 	o.EventListener.FillDefaults()
+
+	if o.FactoryType == INVALID_FT {
+		o.FactoryType = NORMAL_FT
+	}
 
 	if o.SchedulerCfg == nil {
 		o.SchedulerCfg = &SchedulerCfg{
@@ -121,11 +131,22 @@ func (o *Options) FillDefaults(dirname string) *Options {
 		}
 	}
 
-	if o.Meta.Conf == nil {
-		o.Meta.Conf = &MetaCfg{
-			BlockMaxRows:     DefaultBlockMaxRows,
-			SegmentMaxBlocks: DefaultBlocksPerSegment,
+	if o.Meta.Info == nil {
+		metaCfg := &metadata.Configuration{
+			Dir: dirname,
 		}
+		if o.Meta.Conf == nil {
+			metaCfg.BlockMaxRows = DefaultBlockMaxRows
+			metaCfg.SegmentMaxBlocks = DefaultBlocksPerSegment
+		} else {
+			metaCfg.BlockMaxRows = o.Meta.Conf.BlockMaxRows
+			metaCfg.SegmentMaxBlocks = o.Meta.Conf.SegmentMaxBlocks
+		}
+		o.Meta.Info = metadata.NewMetaInfo(&o.Mu, metaCfg)
+	}
+
+	if o.Meta.CKFactory == nil {
+		o.Meta.CKFactory = NewCheckpointerFactory(dirname)
 	}
 
 	if o.CacheCfg == nil {
@@ -151,13 +172,4 @@ func (o *Options) FillDefaults(dirname string) *Options {
 		}
 	}
 	return o
-}
-
-func (o *Options) CreateCatalog(dirname string) (*metadata.Catalog, error) {
-	catalog, err := metadata.OpenCatalog(&o.Mu, &metadata.CatalogCfg{
-		Dir:              dirname,
-		BlockMaxRows:     o.Meta.Conf.BlockMaxRows,
-		SegmentMaxBlocks: o.Meta.Conf.SegmentMaxBlocks,
-	})
-	return catalog, err
 }

@@ -28,10 +28,10 @@ import (
 	"database/sql"
 	"github.com/fagongzi/goetty"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/matrixorigin/matrixone/pkg/config"
-	"github.com/matrixorigin/matrixone/pkg/defines"
-	"github.com/matrixorigin/matrixone/pkg/vm/mempool"
-	"github.com/matrixorigin/matrixone/pkg/vm/mmu/host"
+	"matrixone/pkg/config"
+	"matrixone/pkg/defines"
+	"matrixone/pkg/vm/mempool"
+	"matrixone/pkg/vm/mmu/host"
 )
 
 type TestRoutineManager struct {

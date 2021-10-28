@@ -20,23 +20,18 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/internal/invariants"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/mock"
+	"matrixone/pkg/vm/engine/aoe/storage/testutils/config"
 	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/internal/invariants"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mock"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/testutils"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/testutils/config"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/wal"
 
 	"github.com/panjf2000/ants/v2"
 	"github.com/stretchr/testify/assert"
@@ -50,18 +45,17 @@ func initDBTest() {
 	os.RemoveAll(TEST_DB_DIR)
 }
 
-func initDB(walRole wal.Role) *DB {
+func initDB(ft storage.FactoryType) *DB {
 	rand.Seed(time.Now().UnixNano())
-	opts := new(storage.Options)
-	opts.WalRole = walRole
-	config.NewCustomizedMetaOptions(TEST_DB_DIR, config.CST_Customize, uint64(2000), uint64(2), opts)
+	opts := config.NewCustomizedMetaOptions(TEST_DB_DIR, config.CST_Customize, uint64(2000), uint64(2))
+	opts.FactoryType = ft
 	inst, _ := Open(TEST_DB_DIR, opts)
 	return inst
 }
 
 func TestCreateTable(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.HolderRole)
+	inst := initDB(storage.NORMAL_FT)
 	assert.NotNil(t, inst)
 	defer inst.Close()
 	tblCnt := rand.Intn(5) + 3
@@ -69,14 +63,12 @@ func TestCreateTable(t *testing.T) {
 	var wg sync.WaitGroup
 	names := make([]string, 0)
 	for i := 0; i < tblCnt; i++ {
-		tableInfo := adaptor.MockTableInfo(2)
+		tableInfo := md.MockTableInfo(2)
 		name := fmt.Sprintf("%s%d", prefix, i)
 		names = append(names, name)
 		wg.Add(1)
 		go func(w *sync.WaitGroup) {
-			_, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: name,
-				ShardId: common.NextGlobalSeqNum(),
-				OpIndex: common.NextGlobalSeqNum()})
+			_, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: name})
 			assert.Nil(t, err)
 			w.Done()
 		}(&wg)
@@ -88,43 +80,41 @@ func TestCreateTable(t *testing.T) {
 	for _, name := range names {
 		assert.True(t, inst.HasTable(name))
 	}
-	t.Log(inst.Store.Catalog.PString(metadata.PPL0))
+	t.Log(inst.Store.MetaInfo.String())
 }
 
 func TestCreateDuplicateTable(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.BrokerRole)
+	inst := initDB(storage.NORMAL_FT)
 	defer inst.Close()
 
-	tableInfo := adaptor.MockTableInfo(2)
-	_, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "t1", OpIndex: common.NextGlobalSeqNum()})
+	tableInfo := md.MockTableInfo(2)
+	_, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "t1"})
 	assert.Nil(t, err)
-	_, err = inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "t1", OpIndex: common.NextGlobalSeqNum()})
+	_, err = inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "t1"})
 	assert.NotNil(t, err)
 }
 
 func TestDropEmptyTable(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.BrokerRole)
+	inst := initDB(storage.NORMAL_FT)
 	defer inst.Close()
-	tableInfo := adaptor.MockTableInfo(2)
-	_, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: tableInfo.Name, OpIndex: common.NextGlobalSeqNum()})
+	tableInfo := md.MockTableInfo(2)
+	_, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: tableInfo.Name})
 	assert.Nil(t, err)
-	_, err = inst.DropTable(dbi.DropTableCtx{TableName: tableInfo.Name, OpIndex: common.NextGlobalSeqNum()})
+	_, err = inst.DropTable(dbi.DropTableCtx{TableName: tableInfo.Name})
 	assert.Nil(t, err)
+	time.Sleep(time.Duration(200) * time.Millisecond)
 }
 
 func TestDropTable(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.BrokerRole)
+	inst := initDB(storage.NORMAL_FT)
 	defer inst.Close()
 
 	name := "t1"
-	tableInfo := adaptor.MockTableInfo(2)
-	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{
-		OpIndex:   common.NextGlobalSeqNum(),
-		TableName: name,
-	})
+	tableInfo := md.MockTableInfo(2)
+	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: name})
 	assert.Nil(t, err)
 
 	ssCtx := &dbi.GetSnapshotCtx{
@@ -137,10 +127,7 @@ func TestDropTable(t *testing.T) {
 	assert.Nil(t, err)
 	ss.Close()
 
-	dropTid, err := inst.DropTable(dbi.DropTableCtx{
-		OpIndex:   common.NextGlobalSeqNum(),
-		TableName: name,
-	})
+	dropTid, err := inst.DropTable(dbi.DropTableCtx{TableName: name})
 	assert.Nil(t, err)
 	assert.Equal(t, tid, dropTid)
 
@@ -148,29 +135,25 @@ func TestDropTable(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Nil(t, ss)
 
-	tid2, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{
-		OpIndex:   common.NextGlobalSeqNum(),
-		TableName: name,
-	})
+	tid2, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: name})
 	assert.Nil(t, err)
 	assert.NotEqual(t, tid, tid2)
 
 	ss, err = inst.GetSnapshot(ssCtx)
 	assert.Nil(t, err)
 	ss.Close()
-	t.Log(inst.Wal.String())
 }
 
 func TestAppend(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.BrokerRole)
-	tableInfo := adaptor.MockTableInfo(2)
-	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mocktbl", OpIndex: common.NextGlobalSeqNum()})
+	inst := initDB(storage.NORMAL_FT)
+	tableInfo := md.MockTableInfo(2)
+	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mocktbl"})
 	assert.Nil(t, err)
-	tblMeta := inst.Store.Catalog.SimpleGetTable(tid)
-	assert.NotNil(t, tblMeta)
+	tblMeta, err := inst.Opts.Meta.Info.ReferenceTable(tid)
+	assert.Nil(t, err)
 	blkCnt := 2
-	rows := inst.Store.Catalog.Cfg.BlockMaxRows * uint64(blkCnt)
+	rows := inst.Store.MetaInfo.Conf.BlockMaxRows * uint64(blkCnt)
 	ck := mock.MockBatch(tblMeta.Schema.Types(), rows)
 	assert.Equal(t, int(rows), ck.Vecs[0].Length())
 	invalidName := "xxx"
@@ -186,7 +169,6 @@ func TestAppend(t *testing.T) {
 	insertCnt := 8
 	appendCtx.TableName = tblMeta.Schema.Name
 	for i := 0; i < insertCnt; i++ {
-		appendCtx.OpIndex = common.NextGlobalSeqNum()
 		err = inst.Append(appendCtx)
 		assert.Nil(t, err)
 		// tbl, err := inst.Store.DataTables.WeakRefTable(tid)
@@ -235,20 +217,21 @@ func TestAppend(t *testing.T) {
 	t.Log(inst.IndexBufMgr.String())
 	// t.Log(inst.FsMgr.String())
 	// t.Log(tbl.GetIndexHolder().String())
-	t.Log(inst.Wal.String())
 	inst.Close()
 }
 
+// TODO: When the capacity is not very big and the query concurrency is very high,
+// the db will be stuck due to no more space. Need intruduce timeout mechanism later
 func TestConcurrency(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.HolderRole)
-	tableInfo := adaptor.MockTableInfo(2)
-	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mockcon", OpIndex: common.NextGlobalSeqNum()})
+	inst := initDB(storage.NORMAL_FT)
+	tableInfo := md.MockTableInfo(2)
+	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mockcon"})
 	assert.Nil(t, err)
-	tblMeta := inst.Store.Catalog.SimpleGetTable(tid)
-	assert.NotNil(t, tblMeta)
-	blkCnt := inst.Store.Catalog.Cfg.SegmentMaxBlocks
-	rows := inst.Store.Catalog.Cfg.BlockMaxRows * blkCnt
+	tblMeta, err := inst.Opts.Meta.Info.ReferenceTable(tid)
+	assert.Nil(t, err)
+	blkCnt := inst.Store.MetaInfo.Conf.SegmentMaxBlocks
+	rows := inst.Store.MetaInfo.Conf.BlockMaxRows * blkCnt
 	baseCk := mock.MockBatch(tblMeta.Schema.Types(), rows)
 	insertCh := make(chan dbi.AppendCtx)
 	searchCh := make(chan *dbi.GetSnapshotCtx)
@@ -319,7 +302,7 @@ func TestConcurrency(t *testing.T) {
 			insertReq := dbi.AppendCtx{
 				TableName: tableInfo.Name,
 				Data:      baseCk,
-				OpIndex:   common.NextGlobalSeqNum(),
+				OpIndex:   uint64(i),
 				OpSize:    1,
 			}
 			insertCh <- insertReq
@@ -355,12 +338,12 @@ func TestConcurrency(t *testing.T) {
 	searchWg.Wait()
 	cancel()
 	wg.Wait()
+	time.Sleep(time.Duration(100) * time.Millisecond)
+	if invariants.RaceEnabled {
+		time.Sleep(time.Duration(250) * time.Millisecond)
+	}
 	tbl, _ := inst.Store.DataTables.WeakRefTable(tid)
 	root := tbl.WeakRefRoot()
-	testutils.WaitExpect(300, func() bool {
-		return int64(1) == root.RefCount()
-	})
-
 	assert.Equal(t, int64(1), root.RefCount())
 	opts := &dbi.GetSnapshotCtx{
 		TableName: tableInfo.Name,
@@ -434,23 +417,23 @@ func TestConcurrency(t *testing.T) {
 
 func TestMultiTables(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.HolderRole)
+	inst := initDB(storage.NORMAL_FT)
 	prefix := "mtable"
-	tblCnt := 8
+	tblCnt := 40
 	var names []string
 	for i := 0; i < tblCnt; i++ {
 		name := fmt.Sprintf("%s_%d", prefix, i)
-		tInfo := adaptor.MockTableInfo(2)
-		_, err := inst.CreateTable(tInfo, dbi.TableOpCtx{TableName: name, OpIndex: common.NextGlobalSeqNum()})
+		tInfo := md.MockTableInfo(2)
+		_, err := inst.CreateTable(tInfo, dbi.TableOpCtx{TableName: name})
 		assert.Nil(t, err)
 		names = append(names, name)
 	}
-	tblMeta := inst.Store.Catalog.SimpleGetTableByName(names[0])
-	assert.NotNil(t, tblMeta)
-	rows := uint64(tblMeta.Catalog.Cfg.BlockMaxRows / 2)
+	tblMeta, err := inst.Opts.Meta.Info.ReferenceTableByName(names[0])
+	assert.Nil(t, err)
+	rows := uint64(tblMeta.Conf.BlockMaxRows / 2)
 	baseCk := mock.MockBatch(tblMeta.Schema.Types(), rows)
-	p1, _ := ants.NewPool(4)
-	p2, _ := ants.NewPool(4)
+	p1, _ := ants.NewPool(10)
+	p2, _ := ants.NewPool(10)
 	attrs := []string{}
 	for _, colDef := range tblMeta.Schema.ColDefs {
 		attrs = append(attrs, colDef.Name)
@@ -527,7 +510,7 @@ func TestMultiTables(t *testing.T) {
 									// t.Logf("data[5000]=%d", data[5000])
 									// t.Logf("data[5001]=%d", data[5001])
 								}
-								assert.True(t, v.Length() <= int(tblMeta.Catalog.Cfg.BlockMaxRows))
+								assert.True(t, v.Length() <= int(tblMeta.Conf.BlockMaxRows))
 								// t.Logf("%s, seg=%v, blk=%v, attr=%s, len=%d", tname, segId, id, attr, v.Length())
 							}
 						}
@@ -575,21 +558,21 @@ func TestMultiTables(t *testing.T) {
 	}
 	t.Log(inst.MTBufMgr.String())
 	t.Log(inst.SSTBufMgr.String())
-	tbls := inst.Store.Catalog.SimpleGetTablesByPrefix(prefix)
+	tbls := inst.Store.MetaInfo.GetTablesByNamePrefix(prefix)
 	assert.Equal(t, tblCnt, len(tbls))
 	inst.Close()
 }
 
 func TestDropTable2(t *testing.T) {
 	initDBTest()
-	inst := initDB(wal.HolderRole)
-	tableInfo := adaptor.MockTableInfo(2)
-	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mockcon", OpIndex: common.NextGlobalSeqNum()})
+	inst := initDB(storage.NORMAL_FT)
+	tableInfo := md.MockTableInfo(2)
+	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mockcon"})
 	assert.Nil(t, err)
-	blkCnt := inst.Store.Catalog.Cfg.SegmentMaxBlocks
-	rows := inst.Store.Catalog.Cfg.BlockMaxRows * blkCnt
-	tblMeta := inst.Store.Catalog.SimpleGetTable(tid)
-	assert.NotNil(t, tblMeta)
+	blkCnt := inst.Store.MetaInfo.Conf.SegmentMaxBlocks
+	rows := inst.Store.MetaInfo.Conf.BlockMaxRows * blkCnt
+	tblMeta, err := inst.Opts.Meta.Info.ReferenceTable(tid)
+	assert.Nil(t, err)
 	baseCk := mock.MockBatch(tblMeta.Schema.Types(), rows)
 
 	insertCnt := uint64(1)
@@ -602,7 +585,7 @@ func TestDropTable2(t *testing.T) {
 				inst.Append(dbi.AppendCtx{
 					TableName: tableInfo.Name,
 					Data:      baseCk,
-					OpIndex:   common.NextGlobalSeqNum(),
+					OpIndex:   uint64(1),
 					OpSize:    1,
 				})
 				wg.Done()
@@ -610,16 +593,15 @@ func TestDropTable2(t *testing.T) {
 		}
 	}
 	wg.Wait()
-	// time.Sleep(time.Duration(100) * time.Millisecond)
-	// tbl, _ := inst.Store.DataTables.WeakRefTable(tid)
-	// t.Log(tbl.String())
-	testutils.WaitExpect(100, func() bool {
-		return int(blkCnt*insertCnt) == inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount()
-	})
+	time.Sleep(time.Duration(100) * time.Millisecond)
+	tbl, _ := inst.Store.DataTables.WeakRefTable(tid)
+	t.Log(tbl.String())
 
 	t.Log(inst.MTBufMgr.String())
 	t.Log(inst.SSTBufMgr.String())
-	assert.Equal(t, int(blkCnt*insertCnt), inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount())
+	if inst.Opts.FactoryType == storage.NORMAL_FT {
+		assert.Equal(t, int(blkCnt*insertCnt*2), inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount())
+	}
 	cols := make([]int, 0)
 	for i := 0; i < len(tblMeta.Schema.ColDefs); i++ {
 		cols = append(cols, i)
@@ -637,17 +619,13 @@ func TestDropTable2(t *testing.T) {
 	dropCB := func(err error) {
 		doneCh <- expectErr
 	}
-	inst.DropTable(dbi.DropTableCtx{TableName: tableInfo.Name, OnFinishCB: dropCB, OpIndex: common.NextGlobalSeqNum()})
-
-	testutils.WaitExpect(50, func() bool {
-		return int(blkCnt*insertCnt) == inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount()
-	})
-	assert.Equal(t, int(blkCnt*insertCnt), inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount())
+	inst.DropTable(dbi.DropTableCtx{TableName: tableInfo.Name, OnFinishCB: dropCB})
+	time.Sleep(time.Duration(50) * time.Millisecond)
+	if inst.Opts.FactoryType == storage.NORMAL_FT {
+		assert.Equal(t, int(blkCnt*insertCnt*2), inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount())
+	}
 	ss.Close()
-
-	testutils.WaitExpect(50, func() bool {
-		return inst.SSTBufMgr.NodeCount()+inst.MTBufMgr.NodeCount() == 0
-	})
+	time.Sleep(time.Duration(50) * time.Millisecond)
 	t.Log(inst.MTBufMgr.String())
 	t.Log(inst.SSTBufMgr.String())
 	t.Log(inst.IndexBufMgr.String())
@@ -670,14 +648,14 @@ func TestE2E(t *testing.T) {
 		waitTime *= 2
 	}
 	initDBTest()
-	inst := initDB(wal.HolderRole)
-	tableInfo := adaptor.MockTableInfo(2)
-	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mockcon", OpIndex: common.NextGlobalSeqNum()})
+	inst := initDB(storage.NORMAL_FT)
+	tableInfo := md.MockTableInfo(2)
+	tid, err := inst.CreateTable(tableInfo, dbi.TableOpCtx{TableName: "mockcon"})
 	assert.Nil(t, err)
-	tblMeta := inst.Store.Catalog.SimpleGetTable(tid)
-	assert.NotNil(t, tblMeta)
-	blkCnt := inst.Store.Catalog.Cfg.SegmentMaxBlocks
-	rows := inst.Store.Catalog.Cfg.BlockMaxRows * blkCnt
+	tblMeta, err := inst.Opts.Meta.Info.ReferenceTable(tid)
+	assert.Nil(t, err)
+	blkCnt := inst.Store.MetaInfo.Conf.SegmentMaxBlocks
+	rows := inst.Store.MetaInfo.Conf.BlockMaxRows * blkCnt
 	baseCk := mock.MockBatch(tblMeta.Schema.Types(), rows)
 
 	insertCnt := uint64(10)
@@ -690,7 +668,7 @@ func TestE2E(t *testing.T) {
 				inst.Append(dbi.AppendCtx{
 					TableName: tableInfo.Name,
 					Data:      baseCk,
-					OpIndex:   common.NextGlobalSeqNum(),
+					OpIndex:   uint64(1),
 					OpSize:    1,
 				})
 				wg.Done()
@@ -728,7 +706,7 @@ func TestE2E(t *testing.T) {
 	time.Sleep(waitTime)
 	t.Log(inst.IndexBufMgr.String())
 
-	_, err = inst.DropTable(dbi.DropTableCtx{TableName: tableInfo.Name, OpIndex: common.NextGlobalSeqNum()})
+	_, err = inst.DropTable(dbi.DropTableCtx{TableName: tableInfo.Name})
 	assert.Nil(t, err)
 	time.Sleep(waitTime / 2)
 

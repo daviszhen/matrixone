@@ -1,9 +1,9 @@
 package memEngine
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/memEngine/kv"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/memEngine/meta"
-	"github.com/matrixorigin/matrixone/pkg/vm/metadata"
+	"matrixone/pkg/vm/engine/memEngine/kv"
+	"matrixone/pkg/vm/engine/memEngine/meta"
+	"matrixone/pkg/vm/metadata"
 )
 
 // standalone memory engine

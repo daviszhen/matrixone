@@ -15,15 +15,19 @@
 package meta
 
 import (
-	dbsched "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/events/memdata"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	dbsched "matrixone/pkg/vm/engine/aoe/storage/db/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/events/memdata"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
+	// "matrixone/pkg/logutil"
 )
 
 type createBlkEvent struct {
 	dbsched.BaseEvent
+
+	// Whether a new segment is created
+	NewSegment bool
 
 	// TableID is Table's id, aoe is generated when the table is created
 	TableID uint64
@@ -33,16 +37,13 @@ type createBlkEvent struct {
 
 	// Block created by NewCreateBlkEvent
 	Block iface.IBlock
-
-	PrevMeta *metadata.Block
 }
 
 // NewCreateBlkEvent creates a logical Block event
-func NewCreateBlkEvent(ctx *dbsched.Context, tid uint64, prevBlock *metadata.Block, tableData iface.ITableData) *createBlkEvent {
+func NewCreateBlkEvent(ctx *dbsched.Context, tid uint64, tableData iface.ITableData) *createBlkEvent {
 	e := &createBlkEvent{
 		TableData: tableData,
 		TableID:   tid,
-		PrevMeta:  prevBlock,
 	}
 	e.BaseEvent = dbsched.BaseEvent{
 		Ctx:       ctx,
@@ -50,34 +51,76 @@ func NewCreateBlkEvent(ctx *dbsched.Context, tid uint64, prevBlock *metadata.Blo
 	}
 	return e
 }
+func (e *createBlkEvent) HasNewSegment() bool {
+	return e.NewSegment
+}
 
 // Return the block just created
-func (e *createBlkEvent) GetBlock() *metadata.Block {
+func (e *createBlkEvent) GetBlock() *md.Block {
 	if e.Err != nil {
 		return nil
 	}
-	return e.Result.(*metadata.Block)
+	return e.Result.(*md.Block)
 }
 
 func (e *createBlkEvent) Execute() error {
-	table := e.Ctx.Opts.Meta.Catalog.SimpleGetTable(e.TableID)
-	if table == nil {
-		return metadata.TableNotFoundErr
+	table, err := e.Ctx.Opts.Meta.Info.ReferenceTable(e.TableID)
+	if err != nil {
+		return err
 	}
 
-	blk := table.SimpleGetOrCreateNextBlock(e.PrevMeta)
-	e.Result = blk
-
-	if e.TableData != nil {
-		ctx := &memdata.Context{Opts: e.Ctx.Opts, Waitable: true}
-		event := memdata.NewCreateSegBlkEvent(ctx, blk, e.TableData)
-		if err := e.Ctx.Opts.Scheduler.Schedule(event); err != nil {
+	seg := table.GetActiveSegment()
+	if seg == nil {
+		seg = table.NextActiveSegment()
+	}
+	if seg == nil {
+		seg, err = table.CreateSegment()
+		if err != nil {
 			return err
 		}
-		if err := event.WaitDone(); err != nil {
+		err = table.RegisterSegment(seg)
+		if err != nil {
+			return err
+		}
+		e.NewSegment = true
+	}
+
+	var cloned *md.Block
+	blk := seg.GetActiveBlk()
+	if blk == nil {
+		blk = seg.NextActiveBlk()
+	} else {
+		seg.NextActiveBlk()
+	}
+	if blk == nil {
+		blk, err = seg.CreateBlock()
+		if err != nil {
+			return err
+		}
+		err = seg.RegisterBlock(blk)
+		if err != nil {
+			return err
+		}
+		ctx := md.CopyCtx{}
+		cloned, err = seg.CloneBlock(blk.ID, ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		cloned = blk.Copy()
+		cloned.Detach()
+	}
+	e.Result = cloned
+	if e.TableData != nil {
+		ctx := &memdata.Context{Opts: e.Ctx.Opts, Waitable: true}
+		event := memdata.NewCreateSegBlkEvent(ctx, e.NewSegment, cloned, e.TableData)
+		if err = e.Ctx.Opts.Scheduler.Schedule(event); err != nil {
+			return err
+		}
+		if err = event.WaitDone(); err != nil {
 			return err
 		}
 		e.Block = event.Block
 	}
-	return nil
+	return err
 }

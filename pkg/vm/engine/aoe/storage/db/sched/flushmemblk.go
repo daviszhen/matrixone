@@ -14,13 +14,14 @@
 package sched
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	mb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mutation/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/container/vector"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	mb "matrixone/pkg/vm/engine/aoe/storage/mutation/base"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
+	// "matrixone/pkg/logutil"
 )
 
 // flushMemblockEvent supports flushing not-full block.
@@ -29,7 +30,7 @@ type flushMemblockEvent struct {
 	// Block data node to be flushed
 	Block iface.IMutBlock
 	// Metadata of this block
-	Meta *metadata.Block
+	Meta  *metadata.Block
 }
 
 func NewFlushMemBlockEvent(ctx *Context, blk iface.IMutBlock) *flushMemblockEvent {
@@ -63,15 +64,13 @@ func (e *flushMemblockEvent) Execute() error {
 			vecs = append(vecs, ro)
 		}
 
-		bw := dataio.NewBlockWriter(vecs, meta, meta.Segment.Table.Catalog.Cfg.Dir)
+		bw := dataio.NewBlockWriter(vecs, meta, meta.Segment.Table.Conf.Dir)
 		bw.SetPreExecutor(func() {
 			logutil.Infof(" %s | Memtable | Flushing", bw.GetFileName())
 		})
 		bw.SetPostExecutor(func() {
 			logutil.Infof(" %s | Memtable | Flushed", bw.GetFileName())
 		})
-		err := bw.Execute()
-		meta.Segment.Table.UpdateFlushTS()
-		return err
+		return bw.Execute()
 	})
 }

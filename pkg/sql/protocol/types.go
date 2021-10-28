@@ -14,7 +14,7 @@
 
 package protocol
 
-import "github.com/matrixorigin/matrixone/pkg/vm"
+import "matrixone/pkg/vm"
 
 const ( // extend type
 	Attr = iota

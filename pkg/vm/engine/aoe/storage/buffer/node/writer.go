@@ -16,8 +16,8 @@ package node
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
 	"os"
 	"path/filepath"
 )

@@ -17,31 +17,31 @@ package table
 import (
 	"errors"
 	"fmt"
+	"matrixone/pkg/container/types"
+	bmgrif "matrixone/pkg/vm/engine/aoe/storage/buffer/manager/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	fb "matrixone/pkg/vm/engine/aoe/storage/db/factories/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/index"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"sync"
 	"sync/atomic"
-	"unsafe"
-
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	bmgrif "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/manager/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	fb "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/factories/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/index"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 )
 
 var (
 	NotExistErr = errors.New("not exist error")
 )
 
-func newTableData(host *Tables, meta *metadata.Table) *tableData {
+func newTableData(host *Tables, meta *md.Table) *tableData {
 	data := &tableData{
 		meta:        meta,
 		host:        host,
-		indexHolder: index.NewTableHolder(host.IndexBufMgr, meta.Id),
+		indexHolder: index.NewTableHolder(host.IndexBufMgr, meta.ID),
 	}
-	data.blkFactory = newBlockFactory(host.MutFactory, data)
+	if host.MutFactory != nil && host.MutFactory.GetType() == fb.MUTABLE {
+		data.blkFactory = newAltBlockFactory(host.MutFactory, data)
+	}
 	data.tree.segments = make([]iface.ISegment, 0)
 	data.tree.helper = make(map[uint64]int)
 	data.tree.ids = make([]uint64, 0)
@@ -61,10 +61,9 @@ type tableData struct {
 		rowCount   uint64
 	}
 	host        *Tables
-	meta        *metadata.Table
+	meta        *md.Table
 	indexHolder *index.TableHolder
 	blkFactory  iface.IBlockFactory
-	replayIndex *metadata.LogIndex
 }
 
 func (td *tableData) StrongRefLastBlock() iface.IBlock {
@@ -120,7 +119,7 @@ func (td *tableData) StongRefRoot() iface.ISegment {
 }
 
 func (td *tableData) GetID() uint64 {
-	return td.meta.Id
+	return td.meta.ID
 }
 
 func (td *tableData) GetName() string {
@@ -155,14 +154,14 @@ func (td *tableData) GetSegmentCount() uint32 {
 	return atomic.LoadUint32(&td.tree.segmentCnt)
 }
 
-func (td *tableData) GetMeta() *metadata.Table {
+func (td *tableData) GetMeta() *md.Table {
 	return td.meta
 }
 
 func (td *tableData) String() string {
 	td.tree.RLock()
 	defer td.tree.RUnlock()
-	s := fmt.Sprintf("<Table[%d]>(SegCnt=%d)(RefCount=%d)", td.meta.Id, td.tree.segmentCnt, td.RefCount())
+	s := fmt.Sprintf("<Table[%d]>(SegCnt=%d)(RefCount=%d)", td.meta.ID, td.tree.segmentCnt, td.RefCount())
 	for _, seg := range td.tree.segments {
 		s = fmt.Sprintf("%s\n\t%s", s, seg.String())
 	}
@@ -208,14 +207,14 @@ func (td *tableData) StrongRefBlock(segId, blkId uint64) iface.IBlock {
 	return seg.StrongRefBlock(blkId)
 }
 
-func (td *tableData) RegisterSegment(meta *metadata.Segment) (seg iface.ISegment, err error) {
+func (td *tableData) RegisterSegment(meta *md.Segment) (seg iface.ISegment, err error) {
 	seg, err = newSegment(td, meta)
 	if err != nil {
 		panic(err)
 	}
 	td.tree.Lock()
 	defer td.tree.Unlock()
-	_, ok := td.tree.helper[meta.Id]
+	_, ok := td.tree.helper[meta.ID]
 	if ok {
 		return nil, errors.New("Duplicate seg")
 	}
@@ -226,8 +225,8 @@ func (td *tableData) RegisterSegment(meta *metadata.Segment) (seg iface.ISegment
 	}
 
 	td.tree.segments = append(td.tree.segments, seg)
-	td.tree.ids = append(td.tree.ids, seg.GetMeta().Id)
-	td.tree.helper[meta.Id] = int(td.tree.segmentCnt)
+	td.tree.ids = append(td.tree.ids, seg.GetMeta().ID)
+	td.tree.helper[meta.ID] = int(td.tree.segmentCnt)
 	atomic.AddUint32(&td.tree.segmentCnt, uint32(1))
 	seg.Ref()
 	return seg, err
@@ -247,14 +246,34 @@ func (td *tableData) Size(attr string) uint64 {
 }
 
 func (td *tableData) GetSegmentedIndex() (id uint64, ok bool) {
-	return td.meta.GetAppliedIndex(nil)
+	ts := td.meta.Info.GetCheckpointTime()
+	id, ok = td.meta.CreatedIndex, true
+	if td.meta.IsDeleted(ts) {
+		return td.meta.DeletedIndex, true
+	}
+
+	segCnt := atomic.LoadUint32(&td.tree.segmentCnt)
+	for i := int(segCnt) - 1; i >= 0; i-- {
+		td.tree.RLock()
+		seg := td.tree.segments[i]
+		td.tree.RUnlock()
+		id, ok := seg.GetSegmentedIndex()
+		if ok {
+			return id, ok
+		}
+	}
+	return id, ok
+}
+
+func (td *tableData) GetReplayIndex() *md.LogIndex {
+	return td.meta.ReplayIndex
 }
 
 func (td *tableData) SegmentIds() []uint64 {
 	ids := make([]uint64, 0, atomic.LoadUint32(&td.tree.segmentCnt))
 	td.tree.RLock()
 	for _, seg := range td.tree.segments {
-		ids = append(ids, seg.GetMeta().Id)
+		ids = append(ids, seg.GetMeta().ID)
 	}
 	td.tree.RUnlock()
 	return ids
@@ -268,28 +287,18 @@ func (td *tableData) AddRows(rows uint64) uint64 {
 	return atomic.AddUint64(&td.tree.rowCount, rows)
 }
 
-func (td *tableData) GetReplayIndex() *metadata.LogIndex {
-	ptr := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&td.replayIndex)))
-	if ptr == nil {
-		return nil
-	}
-	return (*metadata.LogIndex)(ptr)
-}
-
-func (td *tableData) ResetReplayIndex() {
-	ptr := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&td.replayIndex)))
-	if ptr == nil {
-		panic("logic error")
-	}
-	var netIndex *metadata.LogIndex
-	nptr := (*unsafe.Pointer)(unsafe.Pointer(&netIndex))
-	if !atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&td.replayIndex)), ptr, *nptr) {
-		panic("logic error")
-	}
-}
-
 func (td *tableData) initReplayCtx() {
-	td.replayIndex = td.meta.GetReplayIndex()
+	if td.tree.segmentCnt == 0 {
+		return
+	}
+	var ctx *md.LogIndex
+	for segIdx := int(td.tree.segmentCnt) - 1; segIdx >= 0; segIdx-- {
+		seg := td.tree.segments[segIdx]
+		if ctx = seg.GetReplayIndex(); ctx != nil {
+			break
+		}
+	}
+	td.meta.ReplayIndex = ctx
 }
 
 func (td *tableData) InitReplay() {
@@ -303,20 +312,20 @@ func (td *tableData) initRowCount() {
 	}
 }
 
-func (td *tableData) RegisterBlock(meta *metadata.Block) (blk iface.IBlock, err error) {
+func (td *tableData) RegisterBlock(meta *md.Block) (blk iface.IBlock, err error) {
 	td.tree.RLock()
 	defer td.tree.RUnlock()
-	idx, ok := td.tree.helper[meta.Segment.Id]
+	idx, ok := td.tree.helper[meta.Segment.ID]
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("seg %d not found", meta.Segment.Id))
+		return nil, errors.New(fmt.Sprintf("seg %d not found", meta.Segment.ID))
 	}
 	seg := td.tree.segments[idx]
 	blk, err = seg.RegisterBlock(meta)
 	return blk, err
 }
 
-func (td *tableData) UpgradeBlock(meta *metadata.Block) (blk iface.IBlock, err error) {
-	idx, ok := td.tree.helper[meta.Segment.Id]
+func (td *tableData) UpgradeBlock(meta *md.Block) (blk iface.IBlock, err error) {
+	idx, ok := td.tree.helper[meta.Segment.ID]
 	if !ok {
 		return nil, errors.New("seg not found")
 	}
@@ -333,12 +342,12 @@ func (td *tableData) UpgradeSegment(id uint64) (seg iface.ISegment, err error) {
 	if old.GetType() != base.UNSORTED_SEG {
 		panic(fmt.Sprintf("old segment %d type is %d", id, old.GetType()))
 	}
-	if old.GetMeta().Id != id {
+	if old.GetMeta().ID != id {
 		panic("logic error")
 	}
-	meta := td.meta.SimpleGetSegment(id)
-	if meta == nil {
-		return nil, metadata.SegmentNotFoundErr
+	meta, err := td.meta.ReferenceSegment(id)
+	if err != nil {
+		return nil, err
 	}
 	upgradeSeg, err := old.CloneWithUpgrade(td, meta)
 	if err != nil {
@@ -364,21 +373,21 @@ func (td *tableData) UpgradeSegment(id uint64) (seg iface.ISegment, err error) {
 	return upgradeSeg, nil
 }
 
-func MockSegments(meta *metadata.Table, tblData iface.ITableData) []uint64 {
+func MockSegments(meta *md.Table, tblData iface.ITableData) []uint64 {
 	segs := make([]uint64, 0)
-	for _, segMeta := range meta.SegmentSet {
+	for _, segMeta := range meta.Segments {
 		seg, err := tblData.RegisterSegment(segMeta)
 		if err != nil {
 			panic(err)
 		}
-		for _, blkMeta := range segMeta.BlockSet {
+		for _, blkMeta := range segMeta.Blocks {
 			blk, err := seg.RegisterBlock(blkMeta)
 			if err != nil {
 				panic(err)
 			}
 			blk.Unref()
 		}
-		segs = append(segs, seg.GetMeta().Id)
+		segs = append(segs, seg.GetMeta().ID)
 		seg.Unref()
 	}
 
@@ -468,7 +477,7 @@ func (ts *Tables) StrongRefTable(tid uint64) (tbl iface.ITableData, err error) {
 	return tbl, err
 }
 
-func (ts *Tables) RegisterTable(meta *metadata.Table) (iface.ITableData, error) {
+func (ts *Tables) RegisterTable(meta *md.Table) (iface.ITableData, error) {
 	tbl := newTableData(ts, meta)
 	ts.Mu.Lock()
 	defer ts.Mu.Unlock()
@@ -486,5 +495,40 @@ func (ts *Tables) CreateTableNoLock(tbl iface.ITableData) (err error) {
 	}
 	ts.ids[tbl.GetID()] = true
 	ts.Data[tbl.GetID()] = tbl
+	return nil
+}
+
+func (ts *Tables) Replay(fsMgr base.IManager, indexBufMgr, mtBufMgr, sstBufMgr bmgrif.IBufferManager, info *md.MetaInfo) error {
+	for _, meta := range info.Tables {
+		tbl, err := ts.RegisterTable(meta)
+		if err != nil {
+			return err
+		}
+		activeSeg := meta.GetActiveSegment()
+		for _, segMeta := range meta.Segments {
+			if activeSeg != nil && activeSeg.ID < segMeta.ID {
+				break
+			}
+
+			seg, err := tbl.RegisterSegment(segMeta)
+			if err != nil {
+				panic(err)
+			}
+			defer seg.Unref()
+
+			activeBlk := segMeta.GetActiveBlk()
+			for _, blkMeta := range segMeta.Blocks {
+				if activeBlk != nil && activeBlk.ID <= blkMeta.ID {
+					break
+				}
+				blk, err := seg.RegisterBlock(blkMeta)
+				if err != nil {
+					panic(err)
+				}
+				defer blk.Unref()
+			}
+		}
+		tbl.InitReplay()
+	}
 	return nil
 }

@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"math"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"matrixone/pkg/container/types"
 	"reflect"
 	"unsafe"
 )

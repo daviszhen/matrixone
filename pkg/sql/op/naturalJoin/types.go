@@ -15,8 +15,8 @@
 package naturalJoin
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/sql/op"
 )
 
 type Join struct {

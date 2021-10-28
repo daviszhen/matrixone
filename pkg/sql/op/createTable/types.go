@@ -14,7 +14,7 @@
 
 package createTable
 
-import "github.com/matrixorigin/matrixone/pkg/vm/engine"
+import "matrixone/pkg/vm/engine"
 
 type CreateTable struct {
 	Flg  bool // flg = true, indicates no error is reported if table exists

@@ -16,7 +16,7 @@ package eq
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"matrixone/pkg/container/types"
 
 	roaring "github.com/RoaringBitmap/roaring/roaring64"
 )

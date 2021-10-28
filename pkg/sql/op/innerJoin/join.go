@@ -17,8 +17,8 @@ package innerJoin
 import (
 	"bytes"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/sql/op"
 )
 
 func New(r, s op.OP, rattrs, sattrs []string) *Join {

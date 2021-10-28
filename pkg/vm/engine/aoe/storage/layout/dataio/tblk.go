@@ -15,14 +15,14 @@ package dataio
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/compress"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/compress"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/container/vector"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/base"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"os"
 	"path/filepath"
 	"sync"
@@ -59,7 +59,7 @@ func (getter *tblkFileGetter) NameFactory(dir string, id common.ID) string {
 	return common.MakeTBlockFileName(dir, id.ToTBlockFileName(getter.version), false)
 }
 
-func (getter *tblkFileGetter) Getter(dir string, meta *metadata.Block) (*os.File, error) {
+func (getter *tblkFileGetter) Getter(dir string, meta *md.Block) (*os.File, error) {
 	id := meta.AsCommonID()
 	filename := common.MakeTBlockFileName(dir, id.ToTBlockFileName(getter.version), true)
 	fdir := filepath.Dir(filename)
@@ -140,15 +140,16 @@ func (f *TransientBlockFile) PreSync(pos uint32) bool {
 	return ret
 }
 
-func (f *TransientBlockFile) InitMeta(meta *metadata.Block) {
-	if len(f.files) > 0 {
-		meta.Count = f.files[0].Count
-		meta.CommitInfo.PrevIndex = f.files[0].PrevIdx
-		meta.CommitInfo.LogIndex = f.files[0].Idx
+func (f *TransientBlockFile) InitMeta(meta *md.Block) {
+	if meta.DataState != md.PARTIAL {
+		return
 	}
+	meta.Count = f.files[0].Count
+	meta.PrevIndex = f.files[0].PrevIdx
+	meta.Index = f.files[0].Idx
 }
 
-func (f *TransientBlockFile) LoadBatch(meta *metadata.Block) batch.IBatch {
+func (f *TransientBlockFile) LoadBatch(meta *md.Block) batch.IBatch {
 	f.mu.RLock()
 	if len(f.files) == 0 {
 		f.mu.RUnlock()
@@ -156,7 +157,7 @@ func (f *TransientBlockFile) LoadBatch(meta *metadata.Block) batch.IBatch {
 		attrs := make([]int, colcnt)
 		vecs := make([]vector.IVector, colcnt)
 		for i, colDef := range meta.Segment.Table.Schema.ColDefs {
-			vec := vector.NewVector(colDef.Type, meta.Segment.Table.Schema.BlockMaxRows)
+			vec := vector.NewVector(colDef.Type, meta.Segment.Table.Conf.BlockMaxRows)
 			vecs[i] = vec
 			attrs[i] = i
 		}
@@ -190,7 +191,7 @@ func (f *TransientBlockFile) LoadBatch(meta *metadata.Block) batch.IBatch {
 		}
 		switch colDef.Type.Oid {
 		case types.T_char, types.T_varchar, types.T_json:
-			vec := vector.NewStrVector(colDef.Type, meta.Segment.Table.Schema.BlockMaxRows)
+			vec := vector.NewStrVector(colDef.Type, meta.MaxRowCount)
 			err = vec.Unmarshal(obuf)
 			if err != nil {
 				panic(err)
@@ -198,7 +199,7 @@ func (f *TransientBlockFile) LoadBatch(meta *metadata.Block) batch.IBatch {
 			vec.ResetReadonly()
 			vecs[i] = vec
 		default:
-			vec := vector.NewStdVector(colDef.Type, meta.Segment.Table.Schema.BlockMaxRows)
+			vec := vector.NewStdVector(colDef.Type, meta.MaxRowCount)
 			err = vec.Unmarshal(obuf)
 			if err != nil {
 				panic(err)
@@ -219,8 +220,8 @@ func (f *TransientBlockFile) LoadBatch(meta *metadata.Block) batch.IBatch {
 	return bat
 }
 
-func (f *TransientBlockFile) Sync(data batch.IBatch, meta *metadata.Block) error {
-	writer := NewIBatchWriter(data, meta, meta.Segment.Table.Catalog.Cfg.Dir)
+func (f *TransientBlockFile) Sync(data batch.IBatch, meta *md.Block) error {
+	writer := NewIBatchWriter(data, meta, meta.Segment.Table.Conf.Dir)
 	version := f.nextVersion()
 	getter := tblkFileGetter{version: version}
 	writer.SetFileGetter(getter.Getter)

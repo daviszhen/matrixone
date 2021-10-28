@@ -17,8 +17,8 @@ package frontend
 import (
 	"fmt"
 	"github.com/stretchr/testify/require"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/sql/tree"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/sql/tree"
 	"os"
 	"testing"
 )

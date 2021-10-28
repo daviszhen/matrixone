@@ -15,8 +15,8 @@
 package process
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/mempool"
-	"github.com/matrixorigin/matrixone/pkg/vm/mmu/guest"
+	"matrixone/pkg/vm/mempool"
+	"matrixone/pkg/vm/mmu/guest"
 	"sync"
 )
 

@@ -15,15 +15,13 @@
 package meta
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/gcreqs"
-	dbsched "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/db/sched"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/dbi"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
-	mtif "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/memtable/v1/base"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/db/gcreqs"
+	dbsched "matrixone/pkg/vm/engine/aoe/storage/db/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/dbi"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1"
+	mtif "matrixone/pkg/vm/engine/aoe/storage/memtable/v1/base"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 )
 
 type dropTableEvent struct {
@@ -57,19 +55,20 @@ func NewDropTableEvent(ctx *dbsched.Context, reqCtx dbi.DropTableCtx, mtMgr mtif
 // 2. Modify the metadata file
 // 3. Modify the metadata info in the memeory and release resources
 func (e *dropTableEvent) Execute() error {
-	index := adaptor.GetLogIndexFromDropTableCtx(&e.reqCtx)
-	logutil.Infof("DropTable %s", index.String())
-	if err := e.Ctx.Opts.Wal.SyncLog(index); err != nil {
+	id, err := e.Ctx.Opts.Meta.Info.SoftDeleteTable(e.reqCtx.TableName, e.reqCtx.OpIndex)
+	if err != nil {
 		return err
 	}
-	defer e.Ctx.Opts.Wal.Checkpoint(index)
-	tbl := e.Ctx.Opts.Meta.Catalog.SimpleGetTableByName(e.reqCtx.TableName)
-	if tbl == nil {
-		return metadata.TableNotFoundErr
+	e.Id = id
+	ctx := md.CopyCtx{Ts: md.NowMicro() + 1, Attached: true}
+	info := e.Ctx.Opts.Meta.Info.Copy(ctx)
+	eCtx := &dbsched.Context{Opts: e.Ctx.Opts, Waitable: true}
+	flushEvent := NewFlushInfoEvent(eCtx, info)
+	e.Ctx.Opts.Scheduler.Schedule(flushEvent)
+	if err = flushEvent.WaitDone(); err != nil {
+		return err
 	}
-	e.Id = tbl.Id
-	tbl.SimpleSoftDelete(index)
-	gcReq := gcreqs.NewDropTblRequest(e.Ctx.Opts, tbl.Id, e.Tables, e.MTMgr, e.reqCtx.OnFinishCB)
+	gcReq := gcreqs.NewDropTblRequest(e.Ctx.Opts, id, e.Tables, e.MTMgr, e.reqCtx.OnFinishCB)
 	e.Ctx.Opts.GC.Acceptor.Accept(gcReq)
-	return nil
+	return err
 }

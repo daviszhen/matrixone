@@ -16,13 +16,13 @@ package build
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/errno"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/aggregation"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/extend"
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
-	"github.com/matrixorigin/matrixone/pkg/sql/op/projection"
-	"github.com/matrixorigin/matrixone/pkg/sql/tree"
-	"github.com/matrixorigin/matrixone/pkg/sqlerror"
+	"matrixone/pkg/errno"
+	"matrixone/pkg/sql/colexec/aggregation"
+	"matrixone/pkg/sql/colexec/extend"
+	"matrixone/pkg/sql/op"
+	"matrixone/pkg/sql/op/projection"
+	"matrixone/pkg/sql/tree"
+	"matrixone/pkg/sqlerror"
 	"strings"
 )
 
@@ -128,7 +128,7 @@ func (b *build) buildProjection(o op.OP, ns tree.SelectExprs) (op.OP, error) {
 	var es []*projection.Extend
 
 	for _, n := range ns {
-		e, err := b.buildProjectionExtend(o, n.Expr)
+		e, err := b.buildExtend(o, n.Expr)
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +144,7 @@ func (b *build) buildProjectionWithOrder(o op.OP, ns tree.SelectExprs, es []*pro
 	var pes []*projection.Extend
 
 	for _, n := range ns {
-		e, err := b.buildProjectionExtend(o, n.Expr)
+		e, err := b.buildExtend(o, n.Expr)
 		if err != nil {
 			return nil, nil, err
 		}

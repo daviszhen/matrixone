@@ -15,7 +15,7 @@
 package pb
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+	"matrixone/pkg/vm/engine"
 
 	"github.com/cockroachdb/pebble"
 )

@@ -14,7 +14,7 @@
 
 package sum
 
-import "github.com/matrixorigin/matrixone/pkg/container/types"
+import "matrixone/pkg/container/types"
 
 type intSum struct {
 	cnt int64

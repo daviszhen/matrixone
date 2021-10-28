@@ -15,8 +15,8 @@
 package vector
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/nulls"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"matrixone/pkg/container/nulls"
+	"matrixone/pkg/container/types"
 	"unsafe"
 )
 

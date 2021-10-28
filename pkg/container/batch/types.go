@@ -15,7 +15,7 @@
 package batch
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
+	"matrixone/pkg/container/vector"
 )
 
 // Batch represents a part of a relationship

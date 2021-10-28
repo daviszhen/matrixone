@@ -19,19 +19,19 @@ import (
 	"errors"
 	"fmt"
 	stdLog "log"
-	"github.com/matrixorigin/matrixone/pkg/container/types"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/sql/protocol"
-	aoe3 "github.com/matrixorigin/matrixone/pkg/vm/driver/aoe"
-	"github.com/matrixorigin/matrixone/pkg/vm/driver/config"
-	"github.com/matrixorigin/matrixone/pkg/vm/driver/pb"
-	"github.com/matrixorigin/matrixone/pkg/vm/driver/testutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/codec"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/common/helper"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/adaptor"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/mock"
+	"matrixone/pkg/container/types"
+	"matrixone/pkg/logutil"
+	"matrixone/pkg/sql/protocol"
+	aoe3 "matrixone/pkg/vm/driver/aoe"
+	"matrixone/pkg/vm/driver/config"
+	"matrixone/pkg/vm/driver/pb"
+	"matrixone/pkg/vm/driver/testutil"
+	"matrixone/pkg/vm/engine/aoe"
+	"matrixone/pkg/vm/engine/aoe/common/codec"
+	"matrixone/pkg/vm/engine/aoe/common/helper"
+	"matrixone/pkg/vm/engine/aoe/storage"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/mock"
 	"sync"
 	"testing"
 	"time"
@@ -55,7 +55,7 @@ const (
 var tableInfo *aoe.TableInfo
 
 func init() {
-	tableInfo = adaptor.MockTableInfo(colCnt)
+	tableInfo = md.MockTableInfo(colCnt)
 	tableInfo.Id = 100
 }
 

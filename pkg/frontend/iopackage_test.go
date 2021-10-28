@@ -20,7 +20,7 @@ import (
 	"github.com/fagongzi/goetty"
 	"github.com/fagongzi/goetty/codec"
 	"github.com/fagongzi/goetty/codec/simple"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"matrixone/pkg/logutil"
 	"sync"
 	"sync/atomic"
 	"testing"

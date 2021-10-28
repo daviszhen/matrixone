@@ -16,8 +16,8 @@ package mergetop
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/compare"
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"matrixone/pkg/compare"
+	"matrixone/pkg/container/batch"
 )
 
 const (

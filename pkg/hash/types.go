@@ -14,7 +14,7 @@
 
 package hash
 
-import "github.com/matrixorigin/matrixone/pkg/sql/colexec/aggregation"
+import "matrixone/pkg/sql/colexec/aggregation"
 
 type Group struct {
 	Is   []int

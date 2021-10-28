@@ -15,11 +15,11 @@
 package sched
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/container/batch"
+	"matrixone/pkg/vm/engine/aoe/storage/common"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/dataio"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
 )
 
 type flushSegEvent struct {
@@ -67,6 +67,6 @@ func (e *flushSegEvent) Execute() error {
 	}
 	defer release()
 
-	w := dataio.NewSegmentWriter(batches, meta, meta.Table.Catalog.Cfg.Dir)
+	w := dataio.NewSegmentWriter(batches, meta, meta.Table.Conf.Dir)
 	return w.Execute()
 }

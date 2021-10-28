@@ -15,9 +15,10 @@
 package memdata
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/sched"
+	"matrixone/pkg/vm/engine/aoe/storage/layout/table/v1/iface"
+	md "matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
+	"matrixone/pkg/vm/engine/aoe/storage/sched"
+	// "matrixone/pkg/logutil"
 )
 
 type createSegBlkEvent struct {
@@ -28,14 +29,17 @@ type createSegBlkEvent struct {
 
 	// BlkMeta is the metadata of the Block, which is
 	// created and registered during NewCreateBlkEvent
-	BlkMeta *metadata.Block
+	BlkMeta *md.Block
+
+	// Whether a new segment is created
+	NewSegment bool
 
 	// Block is an instance registered to segment
 	Block iface.IBlock
 }
 
-func NewCreateSegBlkEvent(ctx *Context, meta *metadata.Block, tableData iface.ITableData) *createSegBlkEvent {
-	e := &createSegBlkEvent{TableData: tableData, BlkMeta: meta}
+func NewCreateSegBlkEvent(ctx *Context, newSeg bool, meta *md.Block, tableData iface.ITableData) *createSegBlkEvent {
+	e := &createSegBlkEvent{TableData: tableData, NewSegment: newSeg, BlkMeta: meta}
 	e.BaseEvent = BaseEvent{
 		Ctx:       ctx,
 		BaseEvent: *sched.NewBaseEvent(e, sched.MemdataUpdateEvent, ctx.DoneCB, ctx.Waitable),
@@ -47,7 +51,7 @@ func NewCreateSegBlkEvent(ctx *Context, meta *metadata.Block, tableData iface.IT
 // 2. Create and register a Block in TableData
 func (e *createSegBlkEvent) Execute() error {
 	var err error
-	seg := e.TableData.StrongRefSegment(e.BlkMeta.Segment.Id)
+	seg := e.TableData.StrongRefSegment(e.BlkMeta.Segment.ID)
 	if seg == nil {
 		seg, err = e.TableData.RegisterSegment(e.BlkMeta.Segment)
 		if err != nil {

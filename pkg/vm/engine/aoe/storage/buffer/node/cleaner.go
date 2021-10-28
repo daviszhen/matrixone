@@ -15,7 +15,7 @@
 package node
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
+	"matrixone/pkg/vm/engine/aoe/storage/buffer/node/iface"
 	"os"
 )
 

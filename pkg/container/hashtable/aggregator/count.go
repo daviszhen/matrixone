@@ -15,7 +15,7 @@
 package aggregator
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/vectorize/add"
+	"matrixone/pkg/vectorize/add"
 	"unsafe"
 )
 

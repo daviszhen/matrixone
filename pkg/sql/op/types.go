@@ -15,7 +15,7 @@
 package op
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"matrixone/pkg/container/types"
 )
 
 // OP represents an action to be taken on a single relational algebra operator.

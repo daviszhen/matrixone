@@ -15,7 +15,7 @@
 package opt
 
 import (
-	"github.com/matrixorigin/matrixone/pkg/sql/op"
+	"matrixone/pkg/sql/op"
 )
 
 func Optimize(o op.OP) op.OP {
