@@ -418,7 +418,7 @@ shard-groups = 1
     [prophet.embed-etcd]
         join = ""
         client-urls = "http://localhost:2379"
-        peer-urls = "http://localhost:2379"
+        peer-urls = "http://localhost:2380"
         advertise-client-urls = ""
         advertise-peer-urls = ""
         initial-cluster = ""
@@ -462,7 +462,7 @@ shard-groups = 1
         container-limit-mode = ""
 
     [prophet.replication]
-        max-replicas = 3
+        max-replicas = 1
         strictly-match-label = true
         enable-placement-rules = true
         isolation-level = "rack"
