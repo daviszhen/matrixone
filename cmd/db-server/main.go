@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -241,7 +242,20 @@ func main() {
 	}
 	/*	log := logger.New(os.Stderr, "rpc"+strNodeId+": ")
 		log.SetLevel(logger.WARN)*/
-	srv, err := rpcserver.New(fmt.Sprintf("%s:%d", Host, 20100+NodeId), 1<<30, logutil.GetGlobalLogger())
+
+	li := strings.LastIndex(cfg.CubeConfig.ClientAddr,":")
+	if li == -1 {
+		logutil.Infof("There is no port in client addr")
+		os.Exit(LoadConfigExit)
+	}
+
+	cubePort, err := strconv.ParseInt(string(cfg.CubeConfig.ClientAddr[li+1:]),10,32)
+	if err != nil {
+		logutil.Infof("Invalid port")
+		os.Exit(LoadConfigExit)
+	}
+
+	srv, err := rpcserver.New(fmt.Sprintf("%s:%d", Host, cubePort+100+NodeId), 1<<30, logutil.GetGlobalLogger())
 	if err != nil {
 		logutil.Infof("Create rpcserver failed, %v", err)
 		os.Exit(CreateRPCExit)
