@@ -55,6 +55,9 @@ type Routine struct {
 
 	//channel of notify
 	notifyChan chan interface{}
+
+	//channel of output result set
+	resultSetChan chan *MysqlResultSet
 }
 
 func (routine *Routine) GetClientProtocol() Protocol {
@@ -124,6 +127,11 @@ func (routine *Routine) Quit() {
 	if routine.executor != nil {
 		routine.executor.Close()
 	}
+
+	if routine.protocol != nil {
+		routine.protocol.Quit()
+	}
+	close(routine.resultSetChan)
 }
 
 // Peer gets the address [Host:Port] of the client
@@ -159,6 +167,14 @@ func (routine *Routine) Establish(proto MysqlProtocol) {
 	routine.established = true
 }
 
+/*
+PushResultSet pushes nil denoting the
+ */
+func (routine *Routine) PushResultSet(mrs *MysqlResultSet) error {
+	routine.resultSetChan <- mrs
+	return nil
+}
+
 func NewRoutine(rs goetty.IOSession, protocol MysqlProtocol, executor CmdExecutor, session *Session) *Routine {
 	ri := &Routine{
 		protocol:    protocol,
@@ -168,6 +184,7 @@ func NewRoutine(rs goetty.IOSession, protocol MysqlProtocol, executor CmdExecuto
 		established: false,
 		requestChan: make(chan *Request,1),
 		notifyChan: make(chan interface{}),
+		resultSetChan: make(chan *MysqlResultSet,1),
 	}
 
 	if protocol != nil {
