@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"fmt"
+	"github.com/fagongzi/goetty/buf"
 	"github.com/huandu/go-clone"
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -1277,14 +1278,17 @@ func (mp *MysqlProtocolImpl) SendResultSetTextBatchRowSpeedup(mrs *MysqlResultSe
 	defer mp.GetLock().Unlock()
 	var err error = nil
 
-	var data []byte
+	mp.data = mp.data[:0]
+
+	//var data []byte
 	var rowGroupSize = mp.routine.ses.Pu.SV.GetCountOfRowsPerSendingToClient()
+	out := mp.routine.io
 
 	//make rows into the batch
 	for i := uint64(0); i < cnt; i++ {
-		begin1 := time.Now()
-		data,err = mp.makeResultSetTextRow(nil,mrs,i)
-		mp.makeTime += time.Since(begin1)
+		//begin1 := time.Now()
+		mp.data,err = mp.makeResultSetTextRow(mp.data,mrs,i)
+		//mp.makeTime += time.Since(begin1)
 
 		if err != nil {
 			//ERR_Packet in case of error
@@ -1295,11 +1299,10 @@ func (mp *MysqlProtocolImpl) SendResultSetTextBatchRowSpeedup(mrs *MysqlResultSe
 			return err
 		}
 
-		begin2 := time.Now()
-		//make one row into the big packet
-		err = mp.makePacket(data)
-		mp.makePacketTime += time.Since(begin2)
-
+		//output into outbuf
+		//begin2 := time.Now()
+		err = mp.outputRowIntoOutbuf(out.OutBuf(), mp.data)
+		//mp.makePacketTime += time.Since(begin2)
 		if err != nil {
 			return err
 		}
@@ -1313,13 +1316,68 @@ func (mp *MysqlProtocolImpl) SendResultSetTextBatchRowSpeedup(mrs *MysqlResultSe
 	//	cnt)
 	mp.speedupCount++
 	if int64(mp.speedupCount) == rowGroupSize {
-		err = mp.flushIntoNetwork()
+		//begin3 := time.Now()
+		//err = out.Flush()
+		//mp.sendTime += time.Since(begin3)
+		//if err != nil {
+		//	return err
+		//}
+
+		mp.speedupCount = 0
+	}
+	mp.data = mp.data[:0]
+	return err
+}
+
+func (mp *MysqlProtocolImpl) outputRowIntoOutbuf(outbuf *buf.ByteBuf,payload []byte) error {
+	//protocol header length
+	var headerLen = HeaderOffset
+	var header [4]byte
+
+	//position of the first data byte
+	var i = headerLen
+	var length = len(payload)
+	var curLen = 0
+	for ; i < length; i += curLen {
+		//var packet []byte = mp.packet[:0]
+		curLen = Min(int(MaxPayloadSize), length-i)
+
+		//make mysql client protocol header
+		//4 bytes
+		//int<3>    the length of payload
+		mp.io.WriteUint32(header[:], 0, uint32(curLen))
+
+		//int<1> sequence id
+		mp.io.WriteUint8(header[:], 3, mp.sequenceId)
+
+		//send packet
+		_, err := outbuf.Write(header[:])
 		if err != nil {
 			return err
 		}
-	}
 
-	return err
+		_, err = outbuf.Write(payload[i : i + curLen])
+		if err != nil {
+			return err
+		}
+		mp.sequenceId++
+
+		if i + curLen == length && curLen == int(MaxPayloadSize) {
+			//if the size of the last packet is exactly MaxPayloadSize, a zero-size payload should be sent
+			header[0] = 0
+			header[1] = 0
+			header[2] = 0
+			header[3] = mp.sequenceId
+
+			//send header / zero-sized packet
+			_, err = outbuf.Write(header[:])
+			if err != nil {
+				return err
+			}
+			mp.sequenceId++
+		}
+	}
+	return nil
 }
 
 /*
