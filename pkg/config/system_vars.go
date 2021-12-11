@@ -223,8 +223,8 @@ type SystemVariables struct{
 	Scope:	[global]
 	Access:	[file]
 	DataType:	int64
-	DomainType:	set
-	Values:	[10]
+	DomainType:	range
+	Values:	[1000 1 10000]
 	Comment:	send the count of rows to the client
 	UpdateMode:	dynamic
 	*/
@@ -593,8 +593,8 @@ type varsConfig struct{
 	Scope:	[global]
 	Access:	[file]
 	DataType:	int64
-	DomainType:	set
-	Values:	[10]
+	DomainType:	range
+	Values:	[1000 1 10000]
 	Comment:	send the count of rows to the client
 	UpdateMode:	dynamic
 	*/
@@ -837,7 +837,7 @@ func (ap *SystemVariables) PrepareDefinition(){
 	
 	ap.name2definition["processLimitationPartitionRows"] = "	Name:	processLimitationPartitionRows	Scope:	[global]	Access:	[file]	DataType:	int64	DomainType:	set	Values:	[42949672960]	Comment:	process.Limitation.PartitionRows. default: 10 << 32 = 42949672960	UpdateMode:	dynamic	"
 	
-	ap.name2definition["countOfRowsPerSendingToClient"] = "	Name:	countOfRowsPerSendingToClient	Scope:	[global]	Access:	[file]	DataType:	int64	DomainType:	set	Values:	[10]	Comment:	send the count of rows to the client	UpdateMode:	dynamic	"
+	ap.name2definition["countOfRowsPerSendingToClient"] = "	Name:	countOfRowsPerSendingToClient	Scope:	[global]	Access:	[file]	DataType:	int64	DomainType:	range	Values:	[1000 1 10000]	Comment:	send the count of rows to the client	UpdateMode:	dynamic	"
 	
 	ap.name2definition["periodOfEpochTimer"] = "	Name:	periodOfEpochTimer	Scope:	[global]	Access:	[file]	DataType:	int64	DomainType:	set	Values:	[5]	Comment:	the period of epoch timer in second	UpdateMode:	dynamic	"
 	
@@ -1135,7 +1135,7 @@ func (ap *SystemVariables) LoadInitialValues()error{
 	}
 	
 	countOfRowsPerSendingToClientchoices :=[]int64 {
-		10,
+		1000,1,10000,
 	}
 	if len(countOfRowsPerSendingToClientchoices) != 0 {
 		if err = ap.setCountOfRowsPerSendingToClient(countOfRowsPerSendingToClientchoices[0]) ; err != nil {
@@ -2226,13 +2226,11 @@ func (ap * SystemVariables ) setCountOfRowsPerSendingToClient(value int64)error 
 	
 	
 		choices :=[]int64 {
-			10,	
+			1000,1,10000,	
 		}
-		if len( choices ) != 0{
-			if !isInSliceInt64(value, choices){
-				return fmt.Errorf("setCountOfRowsPerSendingToClient,the value %d is not in set %v",value,choices)
-			}
-		}//else means any int64
+		if !(value >= choices[1] && value <= choices[2]){
+			return fmt.Errorf("setCountOfRowsPerSendingToClient,the value %d is not in the range [%d,%d]",value,choices[1],choices[2])
+		}
 	
 	
 	ap.countOfRowsPerSendingToClient = value

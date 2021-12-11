@@ -130,7 +130,7 @@ processLimitationSize=42949672960
 processLimitationBatchRows=42949672960
 processLimitationBatchSize=0
 processLimitationPartitionRows=42949672960
-countOfRowsPerSendingToClient=10
+countOfRowsPerSendingToClient=1000
 periodOfEpochTimer=5
 periodOfPersistence=20
 periodOfDDLDeleteTimer=20
@@ -168,7 +168,7 @@ ProcessLimitationSize:42949672960,
 ProcessLimitationBatchRows:42949672960,
 ProcessLimitationBatchSize:0,
 ProcessLimitationPartitionRows:42949672960,
-CountOfRowsPerSendingToClient:10,
+CountOfRowsPerSendingToClient:1000,
 PeriodOfEpochTimer:5,
 PeriodOfPersistence:20,
 PeriodOfDDLDeleteTimer:20,

@@ -122,7 +122,7 @@ func (o *outputQueue) flush() error {
 		return nil
 	}
 	//send group of row
-	if err := o.proto.SendResultSetTextBatchRow(o.mrs, o.rowIdx); err != nil {
+	if err := o.proto.SendResultSetTextBatchRowSpeedup(o.mrs, o.rowIdx); err != nil {
 		//return err
 		logutil.Errorf("flush error %v \n", err)
 		return err
@@ -165,7 +165,9 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	}
 
 	var rowGroupSize = ses.Pu.SV.GetCountOfRowsPerSendingToClient()
-	rowGroupSize = MaxInt64(rowGroupSize, 1)
+	rowGroupSize = 1
+
+	logutil.Infof("rowGroupSize %d",rowGroupSize)
 
 	goID := GetRoutineId()
 
@@ -176,6 +178,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	proto := rt.GetClientProtocol().(MysqlProtocol)
 	protoImpl := proto.(*MysqlProtocolImpl)
 	protoImpl.Reset()
+	protoImpl.speedupCount = 0
 
 	//Create a new temporary resultset per pipeline thread.
 	mrs := &MysqlResultSet{}

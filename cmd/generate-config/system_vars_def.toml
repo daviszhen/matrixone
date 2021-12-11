@@ -182,8 +182,8 @@ name = "countOfRowsPerSendingToClient"
 scope = ["global"]
 access = ["file"]
 type = "int64"
-domain-type = "set"
-values = ["10"]
+domain-type = "range"
+values = ["1000","1","10000"]
 comment = "send the count of rows to the client"
 update-mode = "dynamic"
 
