@@ -241,6 +241,10 @@ type MysqlProtocolImpl struct {
 	toClientPool *sync.Pool
 
 	speedupCount int
+
+	strconvBuffer []byte
+
+	lenEncBuffer []byte
 }
 
 func (mp *MysqlProtocolImpl) Quit() {
@@ -368,9 +372,9 @@ func (mp *MysqlProtocolImpl) writeIntLenEnc(data []byte, pos int, value uint64) 
 //append an int with length encoded to the buffer
 //return the buffer
 func (mp *MysqlProtocolImpl) appendIntLenEnc(data []byte, value uint64) []byte {
-	tmp := make([]byte, 9)
-	pos := mp.writeIntLenEnc(tmp, 0, value)
-	return append(data, tmp[:pos]...)
+	mp.lenEncBuffer = mp.lenEncBuffer[:9]
+	pos := mp.writeIntLenEnc(mp.lenEncBuffer, 0, value)
+	return append(data, mp.lenEncBuffer[:pos]...)
 }
 
 //read the count of bytes from the buffer at the position
@@ -478,25 +482,25 @@ func (mp *MysqlProtocolImpl) appendCountOfBytesLenEnc(data []byte, value []byte)
 //append an int64 value converted to string with length encoded to the buffer
 //return the buffer
 func (mp *MysqlProtocolImpl) appendStringLenEncOfInt64(data []byte, value int64) []byte {
-	var tmp []byte
-	tmp = strconv.AppendInt(tmp, value, 10)
-	return mp.appendCountOfBytesLenEnc(data, tmp)
+	mp.strconvBuffer = mp.strconvBuffer[:0]
+	mp.strconvBuffer = strconv.AppendInt(mp.strconvBuffer, value, 10)
+	return mp.appendCountOfBytesLenEnc(data, mp.strconvBuffer)
 }
 
 //append an uint64 value converted to string with length encoded to the buffer
 //return the buffer
 func (mp *MysqlProtocolImpl) appendStringLenEncOfUint64(data []byte, value uint64) []byte {
-	var tmp []byte
-	tmp = strconv.AppendUint(tmp, value, 10)
-	return mp.appendCountOfBytesLenEnc(data, tmp)
+	mp.strconvBuffer = mp.strconvBuffer[:0]
+	mp.strconvBuffer = strconv.AppendUint(mp.strconvBuffer, value, 10)
+	return mp.appendCountOfBytesLenEnc(data, mp.strconvBuffer)
 }
 
 //append an float32 value converted to string with length encoded to the buffer
 //return the buffer
 func (mp *MysqlProtocolImpl) appendStringLenEncOfFloat64(data []byte, value float64, bitSize int) []byte {
-	var tmp []byte
-	tmp = strconv.AppendFloat(tmp, value, 'f', 4, bitSize)
-	return mp.appendCountOfBytesLenEnc(data, tmp)
+	mp.strconvBuffer = mp.strconvBuffer[:0]
+	mp.strconvBuffer = strconv.AppendFloat(mp.strconvBuffer, value, 'f', 4, bitSize)
+	return mp.appendCountOfBytesLenEnc(data, mp.strconvBuffer)
 }
 
 //write the count of zeros into the buffer at the position
@@ -1380,6 +1384,21 @@ func (mp *MysqlProtocolImpl) outputRowIntoOutbuf(outbuf *buf.ByteBuf,payload []b
 	return nil
 }
 
+func (mp *MysqlProtocolImpl) append(_ []byte,elems ...byte) []byte{
+	outbuf := mp.routine.io.OutBuf()
+	n := len(elems)
+	outbuf.Expansion(n)
+	buf := outbuf.RawBuf()
+	writeIdx := outbuf.GetWriteIndex()
+	copy(buf[writeIdx:], elems)
+	writeIdx += n
+	err := outbuf.SetWriterIndex(writeIdx)
+	if err != nil {
+		panic(err)
+	}
+	return outbuf.RawBuf()
+}
+
 /*
 just make packets
  */
@@ -1798,6 +1817,8 @@ func NewMysqlClientProtocol(IO IOPackage, connectionID uint32) *MysqlProtocolImp
 		toClientBuffer: nil,
 		toClientWIdx: 0,
 		toClientPool: &sync.Pool{New: poolNew},
+		strconvBuffer: make([]byte,0,16*1024),
+		lenEncBuffer: make([]byte,0,10),
 	}
 
 	mysql.toClientBuffer = make([]byte,OneMB,OneMB)
