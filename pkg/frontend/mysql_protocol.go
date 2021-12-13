@@ -241,12 +241,6 @@ type MysqlProtocolImpl struct {
 	//the default database for the client
 	database string
 
-	//mysql proto buffer
-	data []byte
-
-	//network sending buffer
-	packet []byte
-
 	//for debug
 	debugStats
 
@@ -259,29 +253,7 @@ type MysqlProtocolImpl struct {
 	rowHandler
 }
 
-func (mp *MysqlProtocolImpl) Quit() {
-	mp.data = nil
-}
-
-func (mp *MysqlProtocolImpl) reset(data []byte)  {
-	mp.data = data
-}
-
-/*
-expandBufferIfNeeded will reset the length of the data buffer
-and expand the data buffer if needed.
- */
-func (mp *MysqlProtocolImpl) expandBufferIfNeeded(want int) []byte  {
-
-	if want > len(mp.data) {
-		mp.data = make([]byte,want)
-	}
-	mp.data = mp.data[:0]
-	//goID := GetRoutineId()
-	//
-	//logutil.Infof("goid in expand buffer %d \n", goID)
-	return mp.data
-}
+func (mp *MysqlProtocolImpl) Quit() {}
 
 //handshake response 41
 type response41 struct {
