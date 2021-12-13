@@ -39,13 +39,23 @@ type Attribute struct {
 
 type DefaultExpr struct {
 	Exist  bool
-	Value  interface{} // int64, float32, float64, string, types.Date
+	Value  interface{} // int64, float32, float64, string, types.Date, types.Datetime
 	IsNull bool
 }
 
 type PrimaryIndexDef struct {
 	TableDef
 	Names []string
+}
+
+type PropertiesDef struct {
+	TableDef
+	Properties []Property
+}
+
+type Property struct {
+	Key   string
+	Value string
 }
 
 type NodeInfo struct {
@@ -77,10 +87,18 @@ type PartitionByDef struct {
 }
 
 type IndexTableDef struct {
-	Typ      int
+	Typ      IndexT
 	ColNames []string
 	Name     string
 }
+
+type IndexT int
+
+const (
+	ZoneMap IndexT = iota
+	Invalid
+	BsiIndex
+)
 
 type AttributeDef struct {
 	Attr Attribute
@@ -98,6 +116,7 @@ func (*CommentDef) tableDef()     {}
 func (*AttributeDef) tableDef()   {}
 func (*IndexTableDef) tableDef()  {}
 func (*PartitionByDef) tableDef() {}
+func (*PropertiesDef) tableDef()  {}
 
 type Relation interface {
 	Statistics
@@ -184,10 +203,10 @@ func MakeDefaultExpr(exist bool, value interface{}, isNull bool) DefaultExpr {
 // EmptyDefaultExpr means there is no definition for default expr
 var EmptyDefaultExpr = DefaultExpr{Exist: false}
 
-func (attr Attribute) HasDefaultExpr() bool {
-	return attr.Default.Exist
+func (node Attribute) HasDefaultExpr() bool {
+	return node.Default.Exist
 }
 
-func (attr Attribute) GetDefaultExpr() (interface{}, bool) {
-	return attr.Default.Value, attr.Default.IsNull
+func (node Attribute) GetDefaultExpr() (interface{}, bool) {
+	return node.Default.Value, node.Default.IsNull
 }

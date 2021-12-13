@@ -803,7 +803,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) error {
 		switch stmt.(type) {
 		//produce result set
 		case *tree.Select,
-			*tree.ShowCreate, *tree.ShowCreateDatabase, *tree.ShowTables, *tree.ShowDatabases, *tree.ShowColumns,
+			*tree.ShowCreateTable, *tree.ShowCreateDatabase, *tree.ShowTables, *tree.ShowDatabases, *tree.ShowColumns,
 			*tree.ShowProcessList, *tree.ShowErrors, *tree.ShowWarnings, *tree.ShowVariables, *tree.ShowStatus,
 			*tree.ShowIndex,
 			*tree.ExplainFor, *tree.ExplainAnalyze, *tree.ExplainStmt:
@@ -1069,6 +1069,8 @@ func convertEngineTypeToMysqlType(engineType uint8, col *MysqlColumn) error {
 		col.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
 	case types.T_date:
 		col.SetColumnType(defines.MYSQL_TYPE_DATE)
+	case types.T_datetime:
+		col.SetColumnType(defines.MYSQL_TYPE_DATETIME)
 	default:
 		return fmt.Errorf("RunWhileSend : unsupported type %d \n", engineType)
 	}

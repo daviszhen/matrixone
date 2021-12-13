@@ -1,8 +1,21 @@
+// Copyright 2021 Matrix Origin
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package vector
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/assert"
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	v "github.com/matrixorigin/matrixone/pkg/container/vector"
 	buf "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer"
@@ -12,6 +25,8 @@ import (
 	"os"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStdVector(t *testing.T) {
@@ -56,8 +71,8 @@ func TestStdVector(t *testing.T) {
 	assert.False(t, ref.HasNull())
 
 	vvec := v.New(schema.ColDefs[1].Type)
-	assert.Nil(t, vvec.Append(make([]int16, 10010)))
-	vvec.Nsp.Add(2, 3)
+	assert.Nil(t, v.Append(vvec, make([]int16, 10010)))
+	nulls.Add(vvec.Nsp, 2, 3)
 	vec1 := vecs[1]
 	_, err = vec1.AppendVector(vvec, 0)
 	assert.Nil(t, err)
@@ -73,8 +88,8 @@ func TestStdVector(t *testing.T) {
 	assert.True(t, view.HasNull())
 
 	vvec = v.New(schema.ColDefs[2].Type)
-	assert.Nil(t, vvec.Append(make([]int32, 9999)))
-	vvec.Nsp.Add(0)
+	assert.Nil(t, v.Append(vvec,  make([]int32, 9999)))
+	nulls.Add(vvec.Nsp, 0)
 	vec2 := vecs[2]
 	_, err = vec2.AppendVector(vvec, 0)
 	assert.Nil(t, err)
@@ -95,18 +110,18 @@ func TestStdVector(t *testing.T) {
 	assert.True(t, ref1.HasNull())
 	rov, err := vec2.CopyToVector()
 	assert.Nil(t, err)
-	assert.Equal(t, 10000, rov.Length())
-	assert.True(t, rov.Nsp.Any())
+	assert.Equal(t, 10000, v.Length(rov))
+	assert.True(t, nulls.Any(rov.Nsp))
 	rov2, err := vec2.CopyToVectorWithBuffer(nil, bytes.NewBuffer(make([]byte, 0)))
 	assert.Nil(t, err)
-	assert.Equal(t, 10000, rov2.Length())
-	assert.True(t, rov2.Nsp.Any())
+	assert.Equal(t, 10000, v.Length(rov2))
+	assert.True(t, nulls.Any(rov2.Nsp))
 
 	newCap := uint64(1024 * 1024)
 	vvec = v.New(schema.ColDefs[2].Type)
-	err = vvec.Append([]int32{0, 1, 2, 3, 4})
+	err = v.Append(vvec,  []int32{0, 1, 2, 3, 4})
 	assert.Nil(t, err)
-	vvec.Nsp.Add(2, 3)
+	nulls.Add(vvec.Nsp, 2, 3)
 	var lens []int
 	var vals []int32
 	var ro []bool
@@ -140,7 +155,7 @@ func TestStdVector(t *testing.T) {
 
 	wg.Wait()
 	searchWg.Wait()
-	assert.Equal(t, vvec.Length()*loopCnt, vec01.Length())
+	assert.Equal(t, v.Length(vvec)*loopCnt, vec01.Length())
 	assert.False(t, vec01.IsReadonly())
 	node := StdVectorConstructor(common.NewMemFile(4*100), false, func(node buf.IMemoryNode) {
 		// do nothing
@@ -165,7 +180,7 @@ func TestStdVector(t *testing.T) {
 		vecs = append(vecs, vec)
 		rov, err := MockVector(colDef.Type, 1000).CopyToVector()
 		assert.Nil(t, err)
-		rov.Nsp.Add(0, 1)
+		nulls.Add(rov.Nsp, 0, 1)
 		_, err = vec.AppendVector(rov, 0)
 		assert.Nil(t, err)
 		_, err = vec.GetValue(999)

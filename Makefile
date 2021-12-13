@@ -3,6 +3,10 @@
 BIN_NAME := mo-server
 BUILD_CFG := gen_config
 UNAME_S := $(shell uname -s)
+GO_VERSION=$(shell go version)
+BRANCH_NAME=$(shell git rev-parse --abbrev-ref HEAD)
+LAST_COMMIT_ID=$(shell git rev-parse HEAD)
+BUILD_TIME=$(shell date)
 
 # generate files generated from .template and needs to delete when clean
 GENERATE_OVERLOAD_LOGIC := ./pkg/sql/colexec/extend/overload/and.go ./pkg/sql/colexec/extend/overload/or.go
@@ -24,19 +28,21 @@ config: cmd/generate-config/main.go cmd/generate-config/config_template.go cmd/g
 
 # Building mo-server binary
 .PHONY: build
-build: cmd/db-server/main.go
+build: cmd/db-server/$(wildcard *.go)
 	@go generate ./pkg/sql/colexec/extend/overload
 	$(info [Build binary])
-	@go build -o $(BIN_NAME) cmd/db-server/main.go
+	@go build -ldflags="-X 'main.GoVersion=$(GO_VERSION)' -X 'main.BranchName=$(BRANCH_NAME)' -X 'main.LastCommitId=$(LAST_COMMIT_ID)' -X 'main.BuildTime=$(BUILD_TIME)'" -o $(BIN_NAME) ./cmd/db-server/ 
+
 
 # Building mo-server binary for debugging, it uses the latest MatrixCube from master.
 .PHONY: debug
-debug: cmd/db-server/main.go
+debug: cmd/db-server/$(wildcard *.go)
 	@go generate ./pkg/sql/colexec/extend/overload
 	$(info [Build binary for debug])
 	go get github.com/matrixorigin/matrixcube
 	go mod tidy
-	go build -tags debug -o $(BIN_NAME) cmd/db-server/main.go
+	go build -tags debug -ldflags="-X 'main.GoVersion=$(GO_VERSION)' -X 'main.BranchName=$(BRANCH_NAME)' -X 'main.LastCommitId=$(LAST_COMMIT_ID)' -X 'main.BuildTime=$(BUILD_TIME)'" -o $(BIN_NAME) ./cmd/db-server/ 
+
 
 # Run Static Code Analysis
 .PHONY: sca

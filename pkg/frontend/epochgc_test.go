@@ -27,7 +27,6 @@ import (
 
 	"github.com/fagongzi/log"
 	"github.com/matrixorigin/matrixcube/components/prophet/storage"
-	//cube_prophet_util "github.com/matrixorigin/matrixcube/components/prophet/util"
 )
 
 var DC *DebugCounter = NewDebugCounter(32)

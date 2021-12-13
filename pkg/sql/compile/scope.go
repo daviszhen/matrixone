@@ -15,14 +15,17 @@
 package compile
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"runtime"
+	"strings"
+
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/errno"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/connector"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/merge"
 	"github.com/matrixorigin/matrixone/pkg/sql/errors"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/viewexec/plus"
@@ -35,8 +38,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/mmu/guest"
 	"github.com/matrixorigin/matrixone/pkg/vm/pipeline"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"runtime"
-	"strings"
 )
 
 const (
@@ -296,6 +297,73 @@ func (s *Scope) ShowColumns(u interface{}, fill func(interface{}, *batch.Batch) 
 	return fill(u, bat)
 }
 
+func (s *Scope) ShowCreateTable(u interface{}, fill func(interface{}, *batch.Batch) error) error {
+	p, _ := s.Plan.(*plan.ShowCreateTable)
+	results := p.ResultColumns()
+	tn := p.Relation.ID()
+	defs := p.Relation.TableDefs()
+
+	names := make([]string, 0)
+	for _, r := range results {
+		names = append(names, r.Name)
+	}
+
+	bat := batch.New(true, names)
+	for i := range bat.Vecs {
+		bat.Vecs[i] = vector.New(results[i].Type)
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("CREATE TABLE `")
+	buf.WriteString(tn)
+	buf.WriteString("` (\n")
+	var attributeDefs []*engine.AttributeDef
+	var indexTableDefs []*engine.IndexTableDef
+	primaryIndexDef := new(engine.PrimaryIndexDef)
+	for _, d := range defs {
+		switch v := d.(type) {
+		case *engine.AttributeDef:
+			attributeDefs = append(attributeDefs, v)
+		case *engine.IndexTableDef:
+			indexTableDefs = append(indexTableDefs, v)
+		case *engine.PrimaryIndexDef:
+			*primaryIndexDef = *v
+		}
+	}
+	prefix := " "
+	if attributeDefs != nil {
+		for _, a := range attributeDefs {
+			buf.WriteString(prefix)
+			a.Format(&buf)
+			prefix = ",\n "
+		}
+	}
+	if len(primaryIndexDef.Names) > 0 {
+		buf.WriteString(prefix)
+		primaryIndexDef.Format(&buf)
+		prefix = ",\n "
+	}
+	if indexTableDefs != nil {
+		for _, i := range indexTableDefs {
+			buf.WriteString(prefix)
+			i.Format(&buf)
+			prefix = ",\n "
+		}
+	}
+	buf.WriteString("\n)")
+
+	tableName := make([][]byte, 1)
+	createTable := make([][]byte, 1)
+	tableName[0] = []byte(tn)
+	createTable[0] = buf.Bytes()
+
+	vector.Append(bat.Vecs[0], tableName)
+	vector.Append(bat.Vecs[1], createTable)
+
+	bat.InitZsOne(1)
+	return fill(u, bat)
+}
+
 // Insert will insert a batch into relation and return affectedRow
 func (s *Scope) Insert(ts uint64) (uint64, error) {
 	p, _ := s.Plan.(*plan.Insert)
@@ -411,16 +479,9 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.Magic = Merge
 	s.PreScopes = ss
-	if s.DataSource.IsMerge {
-		s.Instructions[0] = vm.Instruction{
-			Op:  vm.Merge,
-			Arg: &merge.Argument{},
-		}
-	} else {
-		s.Instructions[0] = vm.Instruction{
-			Op:  vm.Plus,
-			Arg: &plus.Argument{Typ: arg.Typ},
-		}
+	s.Instructions[0] = vm.Instruction{
+		Op:  vm.Plus,
+		Arg: &plus.Argument{Typ: arg.Typ},
 	}
 	s.Proc.Cancel = cancel
 	s.Proc.Reg.MergeReceivers = make([]*process.WaitRegister, len(ss))
@@ -428,7 +489,7 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 		for i := 0; i < len(ss); i++ {
 			s.Proc.Reg.MergeReceivers[i] = &process.WaitRegister{
 				Ctx: ctx,
-				Ch:  make(chan *batch.Batch, 2),
+				Ch:  make(chan *batch.Batch, 1),
 			}
 		}
 	}
@@ -491,7 +552,7 @@ func (s *Scope) RunCAQ(e engine.Engine) error {
 		for i := 0; i < len(s.PreScopes); i++ {
 			s.Proc.Reg.MergeReceivers[i] = &process.WaitRegister{
 				Ctx: ctx,
-				Ch:  make(chan *batch.Batch, 2),
+				Ch:  make(chan *batch.Batch, 1),
 			}
 		}
 	}
@@ -547,18 +608,22 @@ func (s *Scope) RunCAQ(e engine.Engine) error {
 		}
 		arg.Bats = append(arg.Bats, bat)
 	}
+	if len(arg.Bats) == 0 {
+		return nil
+	}
+	constructViews(arg.Bats, arg.Svars)
 	for i := 0; i < mcpu; i++ {
 		ss[i].Instructions = vm.Instructions{vm.Instruction{
 			Op: vm.Times,
 			Arg: &times.Argument{
 				IsBare:   arg.IsBare,
-				SisBares: arg.SisBares,
 				R:        arg.R,
 				Rvars:    arg.Rvars,
 				Ss:       arg.Ss,
 				Svars:    arg.Svars,
 				VarsMap:  arg.VarsMap,
 				Bats:     arg.Bats,
+				FreeVars: arg.FreeVars,
 				Arg: &transform.Argument{
 					Typ:        arg.Arg.Typ,
 					IsMerge:    arg.Arg.IsMerge,
@@ -574,11 +639,11 @@ func (s *Scope) RunCAQ(e engine.Engine) error {
 		PreScopes: ss,
 		Magic:     Merge,
 	}
-	rs.Instructions = append(rs.Instructions, vm.Instruction{
-		Op:  vm.UnTransform,
-		Arg: s.Instructions[2].Arg,
-	})
-	rs.Instructions = append(rs.Instructions, s.Instructions[2:]...)
+	rs.Instructions = s.Instructions
+	rs.Instructions[0] = vm.Instruction{
+		Op:  vm.Plus,
+		Arg: &plus.Argument{Typ: arg.Arg.Typ},
+	}
 	{
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
@@ -591,7 +656,7 @@ func (s *Scope) RunCAQ(e engine.Engine) error {
 			for i := 0; i < len(ss); i++ {
 				rs.Proc.Reg.MergeReceivers[i] = &process.WaitRegister{
 					Ctx: ctx,
-					Ch:  make(chan *batch.Batch, 2),
+					Ch:  make(chan *batch.Batch, 1),
 				}
 			}
 		}
@@ -604,10 +669,6 @@ func (s *Scope) RunCAQ(e engine.Engine) error {
 				},
 			})
 		}
-	}
-	{
-		p := pipeline.NewMerge(rs.Instructions)
-		fmt.Printf("p: %v\n", p)
 	}
 	return rs.MergeRun(e)
 }

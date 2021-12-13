@@ -605,6 +605,8 @@ func (it IndexType) ToString() string {
 		return "hash"
 	case INDEX_TYPE_RTREE:
 		return "rtree"
+	case INDEX_TYPE_BSI:
+		return "bsi"
 	default:
 		return "Unknown IndexType"
 	}
@@ -615,6 +617,7 @@ const (
 	INDEX_TYPE_BTREE
 	INDEX_TYPE_HASH
 	INDEX_TYPE_RTREE
+	INDEX_TYPE_BSI
 )
 
 type VisibleType int
@@ -923,6 +926,35 @@ type TableOption interface {
 
 type tableOptionImpl struct {
 	TableOption
+}
+
+type TableOptionProperties struct {
+	tableOptionImpl
+	Preperties []Property
+}
+
+func (node *TableOptionProperties) Format(ctx *FmtCtx){
+	ctx.WriteString("properties")
+	if node.Preperties != nil {
+		prefix := "("
+		for _, p := range node.Preperties {
+			ctx.WriteString(prefix)
+			p.Format(ctx)
+			prefix = ", "
+		}
+		ctx.WriteByte(')')
+	}
+}
+
+type Property struct {
+	Key   string
+	Value string
+}
+
+func (node *Property) Format(ctx *FmtCtx) {
+	ctx.WriteString(node.Key)
+	ctx.WriteString(" = ")
+	ctx.WriteString(node.Value)
 }
 
 type TableOptionEngine struct {

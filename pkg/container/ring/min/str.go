@@ -17,6 +17,7 @@ package min
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/ring"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -120,23 +121,19 @@ func (r *StrRing) Fill(i int64, sel, z int64, vec *vector.Vector) {
 	}
 }
 
-func (r *StrRing) BatchFill(start int64, os []uint8, vps []*uint64, zs []int64, vec *vector.Vector) {
+func (r *StrRing) BatchFill(start int64, os []uint8, vps []uint64, zs []int64, vec *vector.Vector) {
 	vs := vec.Col.(*types.Bytes)
-	for i, o := range os {
-		if o == 1 {
-			j := *vps[i]
-			if v := vs.Get(int64(i) + start); r.Es[j] || bytes.Compare(v, r.Vs[j]) < 0 {
-				r.Es[j] = false
-				r.Vs[j] = append(r.Vs[j][:0], v...)
-			}
+	for i := range os {
+		j := vps[i] - 1
+		if v := vs.Get(int64(i) + start); r.Es[j] || bytes.Compare(v, r.Vs[j]) < 0 {
+			r.Es[j] = false
+			r.Vs[j] = append(r.Vs[j][:0], v...)
 		}
 	}
 	if nulls.Any(vec.Nsp) {
-		for i, o := range os {
-			if o == 1 {
-				if nulls.Contains(vec.Nsp, uint64(start)+uint64(i)) {
-					r.Ns[*vps[i]] += zs[int64(i)+start]
-				}
+		for i := range os {
+			if nulls.Contains(vec.Nsp, uint64(start)+uint64(i)) {
+				r.Ns[vps[i]-1] += zs[int64(i)+start]
 			}
 		}
 	}
@@ -168,22 +165,25 @@ func (r *StrRing) Add(a interface{}, x, y int64) {
 	r.Ns[x] += ar.Ns[y]
 }
 
-func (r *StrRing) BatchAdd(a interface{}, start int64, os []uint8, vps []*uint64) {
+func (r *StrRing) BatchAdd(a interface{}, start int64, os []uint8, vps []uint64) {
 	ar := a.(*StrRing)
-	for i, o := range os {
-		if o == 1 {
-			j := *vps[i]
-			if r.Es[j] || bytes.Compare(ar.Vs[int64(i)+start], r.Vs[j]) < 0 {
-				r.Es[j] = false
-				r.Vs[j] = ar.Vs[int64(i)+start]
-			}
-			r.Ns[j] += ar.Ns[int64(i)+start]
+	for i := range os {
+		j := vps[i] - 1
+		if r.Es[j] || bytes.Compare(ar.Vs[int64(i)+start], r.Vs[j]) < 0 {
+			r.Es[j] = false
+			r.Vs[j] = ar.Vs[int64(i)+start]
 		}
+		r.Ns[j] += ar.Ns[int64(i)+start]
 	}
 }
 
-func (r *StrRing) Mul(x, z int64) {
-	r.Ns[x] *= z
+func (r *StrRing) Mul(a interface{}, x, y, z int64) {
+	ar := a.(*StrRing)
+	if r.Es[x] || bytes.Compare(ar.Vs[y], r.Vs[x]) < 0 {
+		r.Es[x] = false
+		r.Vs[x] = ar.Vs[y]
+	}
+	r.Ns[x] += ar.Ns[y] * z
 }
 
 func (r *StrRing) Eval(zs []int64) *vector.Vector {

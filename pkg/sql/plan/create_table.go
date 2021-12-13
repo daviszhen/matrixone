@@ -16,6 +16,9 @@ package plan
 
 import (
 	"fmt"
+	"go/constant"
+	"math"
+
 	"github.com/matrixorigin/matrixone/pkg/compress"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/defines"
@@ -23,8 +26,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/errors"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"go/constant"
-	"math"
 )
 
 func (b *build) BuildCreateTable(stmt *tree.CreateTable, plan *CreateTable) error {
@@ -53,7 +54,13 @@ func (b *build) BuildCreateTable(stmt *tree.CreateTable, plan *CreateTable) erro
 		if _, ok := def.(*engine.PrimaryIndexDef); ok {
 			addPrimaryIndex = false
 		}
-		primaryKeys = pkeys
+		if pkeys != nil {
+			primaryKeys = pkeys
+		}
+		defs = append(defs, def)
+	}
+	for _, option := range stmt.Options {
+		def, _ := b.getOptionDef(option)
 		defs = append(defs, def)
 	}
 	if addPrimaryIndex && primaryKeys != nil {
@@ -69,6 +76,20 @@ func (b *build) BuildCreateTable(stmt *tree.CreateTable, plan *CreateTable) erro
 	plan.Db = db
 	plan.Id = tblName
 	return nil
+}
+func (b *build) getOptionDef(option tree.TableOption) (engine.TableDef, error) {
+	switch n := option.(type) {
+	case *tree.TableOptionProperties:
+		properties := make([]engine.Property, len(n.Preperties))
+		for i, property := range n.Preperties {
+			properties[i] = engine.Property{
+				Key:   property.Key,
+				Value: property.Value}
+		}
+		return &engine.PropertiesDef{Properties: properties}, nil
+
+	}
+	return nil, nil
 }
 
 func (b *build) tableInfo(stmt tree.TableExpr) (string, string, error) {
@@ -165,6 +186,8 @@ func (b *build) getTableDefType(typ tree.ResolvableTypeReference) (*types.Type, 
 			return &types.Type{Oid: types.T_varchar, Size: 24, Width: n.InternalType.DisplayWith}, nil
 		case defines.MYSQL_TYPE_DATE:
 			return &types.Type{Oid: types.T_date, Size: 4}, nil
+		case defines.MYSQL_TYPE_DATETIME:
+			return &types.Type{Oid: types.T_datetime, Size: 8}, nil
 		}
 	}
 	return nil, errors.New(errno.IndeterminateDatatype, fmt.Sprintf("unsupport type: '%v'", typ))
@@ -295,7 +318,7 @@ func rangeCheck(value interface{}, typ types.Type, columnName string, rowNumber 
 			return nil, errors.New(errno.DatatypeMismatch, "unexpected type and value")
 		}
 		return nil, errors.New(errno.DataException, fmt.Sprintf("Data too long for column '%s' at row %d", columnName, rowNumber))
-	case types.Date:
+	case types.Date, types.Datetime:
 		return v, nil
 	default:
 		return nil, errors.New(errno.DatatypeMismatch, "unexpected type and value")

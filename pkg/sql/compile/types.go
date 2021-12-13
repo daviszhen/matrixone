@@ -39,7 +39,10 @@ const (
 	ShowDatabases
 	ShowTables
 	ShowColumns
+	ShowCreateTable
 )
+
+var Address string
 
 // Source contains information of a relation which will be used in execution,
 type Source struct {

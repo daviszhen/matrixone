@@ -61,7 +61,7 @@ func (e *Exec) compileScope(pn plan.Plan) (*Scope, error) {
 		if err != nil {
 			return nil, err
 		}
-		return e.compileVTree(qry.FreeAttrs, vtree.New().Build(ft), qry.VarsMap)
+		return e.compileVTree(vtree.New().Build(ft), qry.VarsMap)
 	case *plan.Insert:
 		// todo: insert into tbl select a, b from tbl2 should deal next time.
 		return &Scope{
@@ -123,6 +123,12 @@ func (e *Exec) compileScope(pn plan.Plan) (*Scope, error) {
 	case *plan.ShowColumns:
 		return &Scope{
 			Magic: ShowColumns,
+			Plan:  pn,
+			Proc:  e.c.proc,
+		}, nil
+	case *plan.ShowCreateTable:
+		return &Scope{
+			Magic: ShowCreateTable,
 			Plan:  pn,
 			Proc:  e.c.proc,
 		}, nil
@@ -193,6 +199,8 @@ func (e *Exec) Run(ts uint64) error {
 		return e.scope.ShowTables(e.u, e.fill)
 	case ShowColumns:
 		return e.scope.ShowColumns(e.u, e.fill)
+	case ShowCreateTable:
+		return e.scope.ShowCreateTable(e.u, e.fill)
 	}
 	return nil
 }

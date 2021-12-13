@@ -1,14 +1,30 @@
+// Copyright 2021 Matrix Origin
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package vector
 
 import (
 	"bytes"
-	"github.com/pierrec/lz4"
-	"github.com/stretchr/testify/assert"
+	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	buf "github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/buffer"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/common"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe/storage/metadata/v1"
 	"os"
 	"testing"
+
+	"github.com/pierrec/lz4"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestWrapper(t *testing.T) {
@@ -75,7 +91,7 @@ func TestWrapper(t *testing.T) {
 		assert.Nil(t, wrapper.Close())
 		cpv, err := wrapper.CopyToVector()
 		assert.Nil(t, err)
-		assert.Equal(t, 10000, cpv.Length())
+		assert.Equal(t, 10000, vector.Length(cpv))
 
 		buf, err := wrapper.Marshal()
 		assert.Nil(t, err)
