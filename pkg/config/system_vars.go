@@ -409,6 +409,30 @@ type SystemVariables struct{
 	UpdateMode:	dynamic
 	*/
 	cubeLogLevel    string
+	
+	/**
+	Name:	enableProfileGetDataFromPipeline
+	Scope:	[global]
+	Access:	[file]
+	DataType:	bool
+	DomainType:	set
+	Values:	[]
+	Comment:	defult is false. true for profiling the getDataFromPipeline
+	UpdateMode:	dynamic
+	*/
+	enableProfileGetDataFromPipeline    bool
+	
+	/**
+	Name:	maxBytesInOutbufToFlush
+	Scope:	[global]
+	Access:	[file]
+	DataType:	int64
+	DomainType:	range
+	Values:	[1024 32 3096]
+	Comment:	KB. When the number of bytes in the outbuffer exceeds the it,the outbuffer will be flushed.
+	UpdateMode:	dynamic
+	*/
+	maxBytesInOutbufToFlush    int64
 
 	//parameter name -> parameter definition string
 	name2definition map[string]string
@@ -779,6 +803,30 @@ type varsConfig struct{
 	UpdateMode:	dynamic
 	*/
 	CubeLogLevel    string  `toml:"cubeLogLevel"`
+	
+	/**
+	Name:	enableProfileGetDataFromPipeline
+	Scope:	[global]
+	Access:	[file]
+	DataType:	bool
+	DomainType:	set
+	Values:	[]
+	Comment:	defult is false. true for profiling the getDataFromPipeline
+	UpdateMode:	dynamic
+	*/
+	EnableProfileGetDataFromPipeline    bool  `toml:"enableProfileGetDataFromPipeline"`
+	
+	/**
+	Name:	maxBytesInOutbufToFlush
+	Scope:	[global]
+	Access:	[file]
+	DataType:	int64
+	DomainType:	range
+	Values:	[1024 32 3096]
+	Comment:	KB. When the number of bytes in the outbuffer exceeds the it,the outbuffer will be flushed.
+	UpdateMode:	dynamic
+	*/
+	MaxBytesInOutbufToFlush    int64  `toml:"maxBytesInOutbufToFlush"`
 
 	//parameter name -> updated flag
 	name2updatedFlags map[string]bool
@@ -868,6 +916,10 @@ func (ap *SystemVariables) PrepareDefinition(){
 	ap.name2definition["loadDataConcurrencyCount"] = "	Name:	loadDataConcurrencyCount	Scope:	[global]	Access:	[file]	DataType:	int64	DomainType:	range	Values:	[16 1 16]	Comment:	default is 16. The count of go routine writing batch into the storage.	UpdateMode:	dynamic	"
 	
 	ap.name2definition["cubeLogLevel"] = "	Name:	cubeLogLevel	Scope:	[global]	Access:	[file]	DataType:	string	DomainType:	set	Values:	[error info debug warning warn fatal]	Comment:	default is error. The log level for cube.	UpdateMode:	dynamic	"
+	
+	ap.name2definition["enableProfileGetDataFromPipeline"] = "	Name:	enableProfileGetDataFromPipeline	Scope:	[global]	Access:	[file]	DataType:	bool	DomainType:	set	Values:	[]	Comment:	defult is false. true for profiling the getDataFromPipeline	UpdateMode:	dynamic	"
+	
+	ap.name2definition["maxBytesInOutbufToFlush"] = "	Name:	maxBytesInOutbufToFlush	Scope:	[global]	Access:	[file]	DataType:	int64	DomainType:	range	Values:	[1024 32 3096]	Comment:	KB. When the number of bytes in the outbuffer exceeds the it,the outbuffer will be flushed.	UpdateMode:	dynamic	"
 	
 }
 
@@ -1344,6 +1396,32 @@ func (ap *SystemVariables) LoadInitialValues()error{
 			return fmt.Errorf("set%s failed.error:%v","CubeLogLevel",err)
 		}
 	}
+	
+	enableProfileGetDataFromPipelinechoices :=[]bool {
+		
+	}
+	if len(enableProfileGetDataFromPipelinechoices) != 0 {
+		if err = ap.setEnableProfileGetDataFromPipeline(enableProfileGetDataFromPipelinechoices[0]) ; err != nil {
+			return fmt.Errorf("set%s failed.error:%v","EnableProfileGetDataFromPipeline",err)
+		}
+	} else { 
+		if err = ap.setEnableProfileGetDataFromPipeline(false) ; err != nil {
+			return fmt.Errorf("set%s failed.error:%v","EnableProfileGetDataFromPipeline",err)
+		}
+	}
+	
+	maxBytesInOutbufToFlushchoices :=[]int64 {
+		1024,32,3096,
+	}
+	if len(maxBytesInOutbufToFlushchoices) != 0 {
+		if err = ap.setMaxBytesInOutbufToFlush(maxBytesInOutbufToFlushchoices[0]) ; err != nil {
+			return fmt.Errorf("set%s failed.error:%v","MaxBytesInOutbufToFlush",err)
+		}
+	} else { 
+		if err = ap.setMaxBytesInOutbufToFlush(0) ; err != nil {
+			return fmt.Errorf("set%s failed.error:%v","MaxBytesInOutbufToFlush",err)
+		}
+	}
 	return nil
 }
 
@@ -1644,6 +1722,24 @@ func (ap * SystemVariables ) GetCubeLogLevel() string {
 	return ap.cubeLogLevel
 }
 
+/**
+Get the value of the parameter enableProfileGetDataFromPipeline
+*/
+func (ap * SystemVariables ) GetEnableProfileGetDataFromPipeline() bool {
+	ap.rwlock.RLock()
+	defer ap.rwlock.RUnlock()
+	return ap.enableProfileGetDataFromPipeline
+}
+
+/**
+Get the value of the parameter maxBytesInOutbufToFlush
+*/
+func (ap * SystemVariables ) GetMaxBytesInOutbufToFlush() int64 {
+	ap.rwlock.RLock()
+	defer ap.rwlock.RUnlock()
+	return ap.maxBytesInOutbufToFlush
+}
+
 
 /**
 Set the value of the parameter rootpassword
@@ -1853,6 +1949,20 @@ Set the value of the parameter cubeLogLevel
 */
 func (ap * SystemVariables ) SetCubeLogLevel(value string)error {
 	return  ap.setCubeLogLevel(value)
+}
+
+/**
+Set the value of the parameter enableProfileGetDataFromPipeline
+*/
+func (ap * SystemVariables ) SetEnableProfileGetDataFromPipeline(value bool)error {
+	return  ap.setEnableProfileGetDataFromPipeline(value)
+}
+
+/**
+Set the value of the parameter maxBytesInOutbufToFlush
+*/
+func (ap * SystemVariables ) SetMaxBytesInOutbufToFlush(value int64)error {
+	return  ap.setMaxBytesInOutbufToFlush(value)
 }
 
 /**
@@ -2548,6 +2658,46 @@ func (ap * SystemVariables ) setCubeLogLevel(value string)error {
 	return nil
 }
 
+/**
+Set the value of the parameter enableProfileGetDataFromPipeline
+*/
+func (ap * SystemVariables ) setEnableProfileGetDataFromPipeline(value bool)error {
+	ap.rwlock.Lock()
+	defer ap.rwlock.Unlock()
+	choices :=[]bool {
+				
+		}
+		if len( choices ) != 0{
+			if !isInSliceBool(value, choices){
+				return fmt.Errorf("setEnableProfileGetDataFromPipeline,the value %t is not in set %v",value,choices)
+			}
+		}//else means any bool value: true or false
+	
+	
+	ap.enableProfileGetDataFromPipeline = value
+	return nil
+}
+
+/**
+Set the value of the parameter maxBytesInOutbufToFlush
+*/
+func (ap * SystemVariables ) setMaxBytesInOutbufToFlush(value int64)error {
+	ap.rwlock.Lock()
+	defer ap.rwlock.Unlock()
+	
+	
+		choices :=[]int64 {
+			1024,32,3096,	
+		}
+		if !(value >= choices[1] && value <= choices[2]){
+			return fmt.Errorf("setMaxBytesInOutbufToFlush,the value %d is not in the range [%d,%d]",value,choices[1],choices[2])
+		}
+	
+	
+	ap.maxBytesInOutbufToFlush = value
+	return nil
+}
+
 
 
 /**
@@ -2597,6 +2747,8 @@ func (config *varsConfig) resetUpdatedFlags(){
 	config.name2updatedFlags["batchSizeInLoadData"] = false
 	config.name2updatedFlags["loadDataConcurrencyCount"] = false
 	config.name2updatedFlags["cubeLogLevel"] = false
+	config.name2updatedFlags["enableProfileGetDataFromPipeline"] = false
+	config.name2updatedFlags["maxBytesInOutbufToFlush"] = false
 }
 
 /**
@@ -2820,6 +2972,16 @@ func (ap * SystemVariables ) UpdateParametersWithConfiguration(config *varsConfi
 	if config.getUpdatedFlag("cubeLogLevel"){
 		if err = ap.setCubeLogLevel(config.CubeLogLevel); err != nil{
 			return fmt.Errorf("update parameter cubeLogLevel failed.error:%v",err)
+		}
+	}
+	if config.getUpdatedFlag("enableProfileGetDataFromPipeline"){
+		if err = ap.setEnableProfileGetDataFromPipeline(config.EnableProfileGetDataFromPipeline); err != nil{
+			return fmt.Errorf("update parameter enableProfileGetDataFromPipeline failed.error:%v",err)
+		}
+	}
+	if config.getUpdatedFlag("maxBytesInOutbufToFlush"){
+		if err = ap.setMaxBytesInOutbufToFlush(config.MaxBytesInOutbufToFlush); err != nil{
+			return fmt.Errorf("update parameter maxBytesInOutbufToFlush failed.error:%v",err)
 		}
 	}
 	return nil

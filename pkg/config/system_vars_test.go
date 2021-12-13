@@ -107,6 +107,12 @@ func isvarsConfigEqual(c1,c2 *varsConfig) bool {
 	if c1.CubeLogLevel != c2.CubeLogLevel {
 		return false
 	}
+	if c1.EnableProfileGetDataFromPipeline != c2.EnableProfileGetDataFromPipeline {
+		return false
+	}
+	if c1.MaxBytesInOutbufToFlush != c2.MaxBytesInOutbufToFlush {
+		return false
+	}
 
 	return true
 }
@@ -146,6 +152,8 @@ lengthOfQueryPrinted=50
 batchSizeInLoadData=40000
 loadDataConcurrencyCount=16
 cubeLogLevel= "error"
+enableProfileGetDataFromPipeline= false
+maxBytesInOutbufToFlush=1024
 		
 `
 	t1_config:=&varsConfig{
@@ -184,6 +192,8 @@ LengthOfQueryPrinted:50,
 BatchSizeInLoadData:40000,
 LoadDataConcurrencyCount:16,
 CubeLogLevel: "error" ,
+EnableProfileGetDataFromPipeline: false ,
+MaxBytesInOutbufToFlush:1024,
 	
 
 		name2updatedFlags: nil,

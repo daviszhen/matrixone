@@ -140,17 +140,6 @@ func (o *outputQueue) getData() [][]interface{} {
 	return o.mrs.Data[:o.rowIdx]
 }
 
-func allocateMysqlResultSet(source *MysqlResultSet,rowCount int,columnCount int) *MysqlResultSet {
-	mrsx := &MysqlResultSet{}
-	mrsx.Columns = source.Columns
-	mrsx.Name2Index = source.Name2Index
-	mrsx.Data = make([][]interface{}, rowCount)
-	for i := int64(0); i < int64(rowCount); i++ {
-		mrsx.Data[i] = make([]interface{}, columnCount)
-	}
-	return mrsx
-}
-
 /*
 extract the data from the pipeline.
 obj: routine obj
@@ -166,22 +155,21 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 		return nil
 	}
 
-	var rowGroupSize = ses.Pu.SV.GetCountOfRowsPerSendingToClient()
-	rowGroupSize = 1
-
-	logutil.Infof("rowGroupSize %d",rowGroupSize)
-
 	goID := GetRoutineId()
 
 	logutil.Infof("goid %d \n", goID)
-	cpuf, _ := os.Create("cpu_profile")
+	enableProfile := ses.Pu.SV.GetEnableProfileGetDataFromPipeline()
+
+	var cpuf *os.File = nil
+	if enableProfile {
+		cpuf, _ = os.Create("cpu_profile")
+	}
 
 	begin := time.Now()
 
 	proto := rt.GetClientProtocol().(MysqlProtocol)
 	protoImpl := proto.(*MysqlProtocolImpl)
 	protoImpl.Reset()
-	protoImpl.speedupCount = 0
 
 	//Create a new temporary resultset per pipeline thread.
 	mrs := &MysqlResultSet{}
@@ -191,26 +179,26 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	mrs.Name2Index = ses.Mrs.Name2Index
 
 	begin3 := time.Now()
+	countOfResultSet := 1
 	//group row
-	mrs.Data = make([][]interface{}, rowGroupSize)
-	for i := int64(0); i < rowGroupSize; i++ {
+	mrs.Data = make([][]interface{}, countOfResultSet)
+	for i := 0; i < countOfResultSet; i++ {
 		mrs.Data[i] = make([]interface{}, len(bat.Vecs))
 	}
 	allocateOutBufferTime := time.Since(begin3)
 
-	oq := NewOuputQueue(proto,mrs, uint64(rowGroupSize))
+	oq := NewOuputQueue(proto,mrs, uint64(countOfResultSet))
 	oq.reset()
 
 	row2colTime := time.Duration(0)
-	unknownTime := time.Duration(0)
-	rowCount := 0
 
 	procBatchBegin := time.Now()
+
 	n := vector.Length(bat.Vecs[0])
 
-	rowCount = n
-
-	pprof.StartCPUProfile(cpuf)
+	if enableProfile {
+		pprof.StartCPUProfile(cpuf)
+	}
 	for j := 0; j < n; j++ { //row index
 		if bat.Zs[j] <= 0{
 			continue
@@ -397,270 +385,32 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	if err != nil {
 		return err
 	}
-	pprof.StopCPUProfile()
+
+	if enableProfile {
+		pprof.StopCPUProfile()
+	}
 
 	procBatchTime := time.Since(procBatchBegin)
 	tTime := time.Since(begin)
 	logutil.Infof("rowCount %v \n" +
-		"flustCount %d \n" +
+		"flushCount %d \n" +
 		"time of getDataFromPipeline : %s \n" +
 		"processBatchTime %v \n" +
 		"row2colTime %v \n" +
-		"allocateOutbufferTime %v \n" +
-		"getEmptyRowTime %v \n"+
-		"flushTime %v \n" +
-		"unknownTime %v \n" +
+		"allocateOutBufferTime %v \n" +
+		"outputQueue.flushTime %v \n" +
 		"processBatchTime - row2colTime - allocateOutbufferTime - flushTime %v \n"+
-		"restTime(=tTime - row2colTime - makeTime - sendTime - allocateOutBufferTime) %v \n" +
+		"restTime(=tTime - row2colTime - allocateOutBufferTime) %v \n" +
 		"[resultset %s ]\n",
-		rowCount,
-		protoImpl.flustCount,
+		n,
+		protoImpl.flushCount,
 		tTime,
 		procBatchTime,
 		row2colTime,
 		allocateOutBufferTime,
-		oq.getEmptyRowTime,
 		oq.flushTime,
-		unknownTime,
 		procBatchTime - row2colTime - allocateOutBufferTime - oq.flushTime,
-		tTime - row2colTime - protoImpl.makeTime - protoImpl.sendTime - allocateOutBufferTime,
-		protoImpl.String())
-
-	return nil
-}
-
-func getDataFromPipelineSpeedup(obj interface{}, bat *batch.Batch) error {
-	rt := obj.(*Routine)
-	ses := rt.GetSession()
-
-	if bat == nil {
-		return nil
-	}
-
-	var rowGroupSize = ses.Pu.SV.GetCountOfRowsPerSendingToClient()
-	rowGroupSize = 1
-
-	logutil.Infof("rowGroupSize %d",rowGroupSize)
-
-	goID := GetRoutineId()
-
-	logutil.Infof("goid %d \n", goID)
-
-	begin := time.Now()
-
-	proto := rt.GetClientProtocol().(MysqlProtocol)
-	protoImpl := proto.(*MysqlProtocolImpl)
-	protoImpl.Reset()
-	protoImpl.speedupCount = 0
-
-	//Create a new temporary resultset per pipeline thread.
-	mrs := &MysqlResultSet{}
-	//Warning: Don't change ResultColumns in this.
-	//Reference the shared ResultColumns of the session among multi-thread.
-	mrs.Columns = ses.Mrs.Columns
-	mrs.Name2Index = ses.Mrs.Name2Index
-
-	row2colTime := time.Duration(0)
-	unknownTime := time.Duration(0)
-	rowCount := 0
-
-	procBatchBegin := time.Now()
-	n := vector.Length(bat.Vecs[0])
-	for j := 0; j < n; j++ { //row index
-		if bat.Zs[j] <= 0{
-			continue
-		}
-		var row []interface{}
-		var rowIndex int64 = int64(j)
-		if len(bat.Sels) != 0{
-			rowIndex = bat.Sels[j]
-		}
-
-		for i, vec := range bat.Vecs { //col index
-			switch vec.Typ.Oid { //get col
-			case types.T_int8:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]int8)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]int8)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_uint8:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]uint8)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]uint8)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_int16:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]int16)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]int16)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_uint16:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]uint16)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]uint16)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_int32:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]int32)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]int32)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_uint32:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]uint32)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]uint32)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_int64:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]int64)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]int64)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_uint64:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]uint64)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]uint64)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_float32:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]float32)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]float32)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_float64:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.([]float64)
-					row[i] = vs[rowIndex]
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.([]float64)
-						row[i] = vs[rowIndex]
-					}
-				}
-			case types.T_char:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.(*types.Bytes)
-					row[i] = vs.Get(int64(rowIndex))
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.(*types.Bytes)
-						row[i] = vs.Get(int64(rowIndex))
-					}
-				}
-			case types.T_varchar:
-				if !nulls.Any(vec.Nsp) { //all data in this column are not null
-					vs := vec.Col.(*types.Bytes)
-					row[i] = vs.Get(int64(rowIndex))
-				} else {
-					if nulls.Contains(vec.Nsp,uint64(rowIndex)) { //is null
-						row[i] = nil
-					} else {
-						vs := vec.Col.(*types.Bytes)
-						row[i] = vs.Get(int64(rowIndex))
-					}
-				}
-			default:
-				logutil.Errorf("getDataFromPipeline : unsupported type %d \n", vec.Typ.Oid)
-				return fmt.Errorf("getDataFromPipeline : unsupported type %d \n", vec.Typ.Oid)
-			}
-		}
-
-		//duplicate rows
-		for i := int64(0); i < bat.Zs[j] - 1; i++ {
-			var erow []interface{}
-
-			for l := 0; l < len(bat.Vecs); l++ {
-				erow[l] = row[l]
-			}
-		}
-	}
-
-	procBatchTime := time.Since(procBatchBegin)
-	tTime := time.Since(begin)
-	logutil.Infof("rowCount %v \n" +
-		"time of getDataFromPipeline : %s \n" +
-		"processBatchTime %v \n" +
-		"row2colTime %v \n" +
-		"allocateOutbufferTime %v \n" +
-		"getEmptyRowTime %v \n"+
-		"flushTime %v \n" +
-		"unknownTime %v \n" +
-		"processBatchTime - row2colTime - allocateOutbufferTime - flushTime %v \n"+
-		"restTime(=tTime - row2colTime - makeTime - sendTime - allocateOutBufferTime) %v \n" +
-		"[resultset %s ]\n",
-		rowCount,
-		tTime,
-		procBatchTime,
-		row2colTime,
-		0,
-		0,
-		0,
-		unknownTime,
-		procBatchTime - row2colTime - 0 - 0,
-		tTime - row2colTime - protoImpl.makeTime - protoImpl.sendTime - 0,
+		tTime - row2colTime  - allocateOutBufferTime,
 		protoImpl.String())
 
 	return nil
