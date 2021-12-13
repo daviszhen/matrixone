@@ -180,7 +180,7 @@ type rowHandler struct {
 	//when the number of bytes in the outbuffer exceeds the it,
 	//the outbuffer will be flushed.
 	untilBytesInOutbufToFlush int
-	//the of count of the flush
+	//the count of the flush
 	flushCount                int
 	enableLog                 bool
 }
@@ -192,11 +192,24 @@ func (rh *rowHandler) isInPacket() bool {
 	return rh.beginWriteIndex >= 0
 }
 
+/*
+resetPacket reset the beginWriteIndex
+ */
 func (rh *rowHandler) resetPacket()	{
 	rh.beginWriteIndex = -1
 }
+
+/*
+resetFlushOutBuffer clears the bytesInOutBuffer
+ */
 func (rh *rowHandler) resetFlushOutBuffer()  {
 	rh.bytesInOutBuffer = 0
+}
+
+/*
+resetFlushCount reset flushCount
+ */
+func (rh *rowHandler) resetFlushCount()  {
 	rh.flushCount = 0
 }
 
