@@ -402,6 +402,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	procBatchTime := time.Since(procBatchBegin)
 	tTime := time.Since(begin)
 	logutil.Infof("rowCount %v \n" +
+		"flustCount %d \n" +
 		"time of getDataFromPipeline : %s \n" +
 		"processBatchTime %v \n" +
 		"row2colTime %v \n" +
@@ -413,6 +414,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 		"restTime(=tTime - row2colTime - makeTime - sendTime - allocateOutBufferTime) %v \n" +
 		"[resultset %s ]\n",
 		rowCount,
+		protoImpl.flustCount,
 		tTime,
 		procBatchTime,
 		row2colTime,

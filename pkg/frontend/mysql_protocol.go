@@ -17,6 +17,7 @@ package frontend
 import (
 	"bytes"
 	"crypto/sha1"
+	"encoding/binary"
 	"fmt"
 	"github.com/fagongzi/goetty/buf"
 	"github.com/huandu/go-clone"
@@ -191,6 +192,28 @@ func (ds* debugStats) String() string {
 		)
 }
 
+type rowHandler struct {
+	beginWriteIndex int
+	bytesInBuffer int
+	flushBytes int
+	flustCount int
+	enableLog bool
+}
+
+/*
+isInPacket means it is compositing a packet now
+ */
+func (rh *rowHandler) isInPacket() bool {
+	return rh.beginWriteIndex >= 0
+}
+
+func (rh *rowHandler) resetPacket()	{
+	rh.beginWriteIndex = -1
+}
+func (rh *rowHandler) resetFlush()  {
+	rh.bytesInBuffer = 0
+}
+
 type MysqlProtocolImpl struct {
 	ProtocolImpl
 
@@ -245,6 +268,8 @@ type MysqlProtocolImpl struct {
 	strconvBuffer []byte
 
 	lenEncBuffer []byte
+
+	rowHandler
 }
 
 func (mp *MysqlProtocolImpl) Quit() {
@@ -374,7 +399,7 @@ func (mp *MysqlProtocolImpl) writeIntLenEnc(data []byte, pos int, value uint64) 
 func (mp *MysqlProtocolImpl) appendIntLenEnc(data []byte, value uint64) []byte {
 	mp.lenEncBuffer = mp.lenEncBuffer[:9]
 	pos := mp.writeIntLenEnc(mp.lenEncBuffer, 0, value)
-	return append(data, mp.lenEncBuffer[:pos]...)
+	return mp.append(data, mp.lenEncBuffer[:pos]...)
 }
 
 //read the count of bytes from the buffer at the position
@@ -396,7 +421,7 @@ func (mp *MysqlProtocolImpl) writeCountOfBytes(data []byte, pos int, value []byt
 //append the count of bytes to the buffer
 //return the buffer
 func (mp *MysqlProtocolImpl) appendCountOfBytes(data []byte, value []byte) []byte {
-	return append(data, value...)
+	return mp.append(data, value...)
 }
 
 //read a string with fixed length from the buffer at the position
@@ -421,7 +446,7 @@ func (mp *MysqlProtocolImpl) writeStringFix(data []byte, pos int, value string, 
 //append a string with fixed length to the buffer
 //return the buffer
 func (mp *MysqlProtocolImpl) appendStringFix(data []byte, value string, length int) []byte {
-	return append(data, []byte(value[:length])...)
+	return mp.append(data, []byte(value[:length])...)
 }
 
 //read a string appended with zero from the buffer at the position
@@ -501,6 +526,10 @@ func (mp *MysqlProtocolImpl) appendStringLenEncOfFloat64(data []byte, value floa
 	mp.strconvBuffer = mp.strconvBuffer[:0]
 	mp.strconvBuffer = strconv.AppendFloat(mp.strconvBuffer, value, 'f', 4, bitSize)
 	return mp.appendCountOfBytesLenEnc(data, mp.strconvBuffer)
+}
+
+func (mp *MysqlProtocolImpl) appendUint8(data []byte,e uint8) []byte {
+	return mp.append(data,e)
 }
 
 //write the count of zeros into the buffer at the position
@@ -1186,7 +1215,7 @@ func (mp *MysqlProtocolImpl) makeResultSetTextRow(data []byte,mrs *MysqlResultSe
 			return nil, err1
 		} else if isNil {
 			//NULL is sent as 0xfb
-			data = mp.io.AppendUint8(data, 0xFB)
+			data = mp.appendUint8(data, 0xFB)
 			continue
 		}
 
@@ -1282,16 +1311,20 @@ func (mp *MysqlProtocolImpl) SendResultSetTextBatchRowSpeedup(mrs *MysqlResultSe
 	defer mp.GetLock().Unlock()
 	var err error = nil
 
-	mp.data = mp.data[:0]
+	//mp.data = mp.data[:0]
 
 	//var data []byte
 	var rowGroupSize = mp.routine.ses.Pu.SV.GetCountOfRowsPerSendingToClient()
-	out := mp.routine.io
+	//out := mp.routine.io
 
 	//make rows into the batch
 	for i := uint64(0); i < cnt; i++ {
+		err = mp.openRow(nil)
+		if err != nil {
+			return err
+		}
 		//begin1 := time.Now()
-		mp.data,err = mp.makeResultSetTextRow(mp.data,mrs,i)
+		_,err = mp.makeResultSetTextRow(nil,mrs,i)
 		//mp.makeTime += time.Since(begin1)
 
 		if err != nil {
@@ -1304,9 +1337,7 @@ func (mp *MysqlProtocolImpl) SendResultSetTextBatchRowSpeedup(mrs *MysqlResultSe
 		}
 
 		//output into outbuf
-		//begin2 := time.Now()
-		err = mp.outputRowIntoOutbuf(out.OutBuf(), mp.data)
-		//mp.makePacketTime += time.Since(begin2)
+		err = mp.closeRow(nil)
 		if err != nil {
 			return err
 		}
@@ -1329,7 +1360,7 @@ func (mp *MysqlProtocolImpl) SendResultSetTextBatchRowSpeedup(mrs *MysqlResultSe
 
 		mp.speedupCount = 0
 	}
-	mp.data = mp.data[:0]
+	//mp.data = mp.data[:0]
 	return err
 }
 
@@ -1384,19 +1415,218 @@ func (mp *MysqlProtocolImpl) outputRowIntoOutbuf(outbuf *buf.ByteBuf,payload []b
 	return nil
 }
 
-func (mp *MysqlProtocolImpl) append(_ []byte,elems ...byte) []byte{
+func (mp *MysqlProtocolImpl) compositeRowIntoMysqlPackets(outbuf *buf.ByteBuf,beginWriteIdx,payloadLen int,) error {
+	//protocol header length
+	var headerLen = HeaderOffset
+	var header [4]byte
+
+	//position of the first data byte
+	var i = headerLen
+	var length = payloadLen
+	var curLen = 0
+	for ; i < length; i += curLen {
+		//var packet []byte = mp.packet[:0]
+		curLen = Min(int(MaxPayloadSize), length-i)
+
+		//make mysql client protocol header
+		//4 bytes
+		//int<3>    the length of payload
+		mp.io.WriteUint32(header[:], 0, uint32(curLen))
+
+		//int<1> sequence id
+		mp.io.WriteUint8(header[:], 3, mp.sequenceId)
+
+		//fill header
+		copy(outbuf.RawBuf()[beginWriteIdx:],header[:])
+
+		mp.sequenceId++
+
+		if i + curLen == length && curLen == int(MaxPayloadSize) {
+			//if the size of the last packet is exactly MaxPayloadSize, a zero-size payload should be sent
+			header[0] = 0
+			header[1] = 0
+			header[2] = 0
+			header[3] = mp.sequenceId
+
+			//send header / zero-sized packet
+			//_, err = outbuf.Write(header[:])
+			//if err != nil {
+			//	return err
+			//}
+			mp.sequenceId++
+		}
+	}
+	return nil
+}
+
+//open a new row
+func (mp *MysqlProtocolImpl) openRow(_ []byte) error {
+	if mp.enableLog {
+		fmt.Println("openRow")
+	}
+	return mp.openPacket()
+}
+
+//close a finished row
+func (mp *MysqlProtocolImpl) closeRow(_ []byte) error {
+	if mp.enableLog{
+		fmt.Println("closeRow")
+	}
+
+	err:= mp.closePacket()
+	if err != nil {
+		return err
+	}
+
+	err = mp.flush()
+	if err != nil {
+		return err
+	}
+	return err
+}
+
+//flush the packet
+func (mp *MysqlProtocolImpl) flush() error {
+	if mp.enableLog {
+		fmt.Println("flush")
+	}
+
+	if mp.bytesInBuffer >= mp.flushBytes {
+		mp.flustCount++
+		err := mp.routine.io.Flush()
+		if err != nil {
+			return err
+		}
+		mp.resetFlush()
+	}
+	return nil
+}
+
+//open a new packet
+func (mp *MysqlProtocolImpl) openPacket() error {
+	if mp.enableLog{
+		fmt.Println("openPacket")
+	}
+
+	outbuf := mp.routine.io.OutBuf()
+	n := 4
+	outbuf.Expansion(n)
+	writeIdx := outbuf.GetWriteIndex()
+	mp.beginWriteIndex = writeIdx
+	writeIdx += n
+	mp.bytesInBuffer += n
+	err := outbuf.SetWriterIndex(writeIdx)
+	if mp.enableLog {
+		fmt.Printf("openPacket curWriteIdx %d\n",outbuf.GetWriteIndex())
+	}
+	return err
+}
+
+//fill the packet with data
+func (mp *MysqlProtocolImpl) fillPacket(elems ...byte) error {
+	if mp.enableLog{
+		fmt.Printf("fillPacket len %d\n",len(elems))
+	}
 	outbuf := mp.routine.io.OutBuf()
 	n := len(elems)
-	outbuf.Expansion(n)
+	i := 0
+	curLen := 0
+	hasDataLen := 0
+	curDataLen := 0
+	var err error
+	var buf []byte
+	for ; i < n; i += curLen {
+		if !mp.isInPacket() {
+			err = mp.openPacket()
+			if err != nil {
+				return err
+			}
+		}
+		//length of data in the packet
+		hasDataLen = outbuf.GetWriteIndex() - mp.beginWriteIndex - 4
+		curLen = int(MaxPayloadSize) - hasDataLen
+		curLen = Min(curLen, n - i)
+		if curLen < 0 {
+			return fmt.Errorf("needLen %d < 0. hasDataLen %d n - i %d",curLen,hasDataLen,n-i)
+		}
+		outbuf.Expansion(curLen)
+		buf = outbuf.RawBuf()
+		writeIdx := outbuf.GetWriteIndex()
+		copy(buf[writeIdx:], elems[i:i + curLen])
+		writeIdx += curLen
+		mp.bytesInBuffer += curLen
+		err = outbuf.SetWriterIndex(writeIdx)
+		if err != nil {
+			return err
+		}
+		if mp.enableLog{
+			fmt.Printf("fillPacket curWriteIdx %d\n",outbuf.GetWriteIndex())
+		}
+
+		//> 16MB, split it
+		curDataLen = outbuf.GetWriteIndex() - mp.beginWriteIndex - 4
+		if curDataLen == int(MaxPayloadSize) {
+			err = mp.closePacket()
+			if err != nil {
+				return err
+			}
+
+			err = mp.flush()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	
+	return  nil
+}
+
+//close a packet
+func (mp *MysqlProtocolImpl) closePacket() error {
+	if mp.enableLog {
+		fmt.Println("closePacket")
+	}
+	if !mp.isInPacket() {
+		return nil
+	}
+	outbuf := mp.routine.io.OutBuf()
+	payLoadLen := outbuf.GetWriteIndex() - mp.beginWriteIndex - 4
+	if mp.enableLog {
+		fmt.Printf("closePacket curWriteIdx %d\n", outbuf.GetWriteIndex())
+	}
+	if payLoadLen < 0 || payLoadLen > int(MaxPayloadSize) {
+		return fmt.Errorf("invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
+			payLoadLen,outbuf.GetWriteIndex(),mp.beginWriteIndex)
+	}
+
 	buf := outbuf.RawBuf()
-	writeIdx := outbuf.GetWriteIndex()
-	copy(buf[writeIdx:], elems)
-	writeIdx += n
-	err := outbuf.SetWriterIndex(writeIdx)
+	binary.LittleEndian.PutUint32(buf[mp.beginWriteIndex:], uint32(payLoadLen))
+	buf[mp.beginWriteIndex + 3] = mp.sequenceId
+
+	mp.sequenceId++
+
+	if payLoadLen == int(MaxPayloadSize){//last 16MB packet,append a zero packet
+		//if the size of the last packet is exactly MaxPayloadSize, a zero-size payload should be sent
+		err := mp.openPacket()
+		if err != nil {
+			return err
+		}
+		buf = outbuf.RawBuf()
+		binary.LittleEndian.PutUint32(buf[mp.beginWriteIndex:], uint32(0))
+		buf[mp.beginWriteIndex + 3] = mp.sequenceId
+		mp.sequenceId++
+	}
+
+	mp.resetPacket()
+	return nil
+}
+
+func (mp *MysqlProtocolImpl) append(_ []byte,elems ...byte) []byte{
+	err := mp.fillPacket(elems...)
 	if err != nil {
 		panic(err)
 	}
-	return outbuf.RawBuf()
+	return mp.routine.io.OutBuf().RawBuf()
 }
 
 /*
@@ -1455,10 +1685,14 @@ func (mp *MysqlProtocolImpl) SendResultSetTextRow(mrs *MysqlResultSet, r uint64)
 
 //the server send every row of the result set as an independent packet
 func (mp *MysqlProtocolImpl) sendResultSetTextRow(mrs *MysqlResultSet, r uint64) error {
-	var data []byte
+	//var data []byte
 	var err error
-	begin := time.Now()
-	if data, err = mp.makeResultSetTextRow(nil,mrs, r); err != nil {
+	//begin := time.Now()
+	err = mp.openRow(nil)
+	if err != nil {
+		return err
+	}
+	if _, err = mp.makeResultSetTextRow(nil,mrs, r); err != nil {
 		//ERR_Packet in case of error
 		err1 := mp.sendErrPacket(ER_UNKNOWN_ERROR, DefaultMySQLState, err.Error())
 		if err1 != nil {
@@ -1467,17 +1701,22 @@ func (mp *MysqlProtocolImpl) sendResultSetTextRow(mrs *MysqlResultSet, r uint64)
 		return err
 	}
 
-	t1 := time.Since(begin)
-	mp.makeTime += t1
+	err = mp.closeRow(nil)
+	if err != nil {
+		return err
+	}
 
-	begin2 := time.Now()
+	//t1 := time.Since(begin)
+	//mp.makeTime += t1
+
+	//begin2 := time.Now()
 
 	//logutil.Infof("data ==> %v",data)
-	err = mp.writePackets(data)
-	if err != nil {
-		return fmt.Errorf("send result set text row failed. error: %v", err)
-	}
-	mp.sendTime += time.Since(begin2)
+	//err = mp.writePackets(data)
+	//if err != nil {
+	//	return fmt.Errorf("send result set text row failed. error: %v", err)
+	//}
+	//mp.sendTime += time.Since(begin2)
 
 	return nil
 }
@@ -1819,9 +2058,16 @@ func NewMysqlClientProtocol(IO IOPackage, connectionID uint32) *MysqlProtocolImp
 		toClientPool: &sync.Pool{New: poolNew},
 		strconvBuffer: make([]byte,0,16*1024),
 		lenEncBuffer: make([]byte,0,10),
+		rowHandler:rowHandler{
+			beginWriteIndex: 0,
+			bytesInBuffer: 0,
+			flushBytes: 1024 * 1024,
+			enableLog: false,
+		},
 	}
 
 	mysql.toClientBuffer = make([]byte,OneMB,OneMB)
+	mysql.resetPacket()
 
 	if mysql.useToClientChan {
 		go mysql.outputLoop()
