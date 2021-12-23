@@ -16,10 +16,12 @@ package plan
 
 import (
 	"fmt"
+
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/errno"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/extend"
 	"github.com/matrixorigin/matrixone/pkg/sql/errors"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
@@ -54,7 +56,7 @@ func (b *build) buildProjection(exprs tree.SelectExprs, qry *Query) error {
 		if err != nil {
 			return err
 		}
-		if e, err = b.pruneExtend(e); err != nil {
+		if e, err = b.pruneExtend(e, true); err != nil {
 			return err
 		}
 		{
@@ -155,5 +157,5 @@ func (b *build) buildProjectionExpr(n tree.Expr, qry *Query) (extend.Extend, err
 	case *tree.UnresolvedName:
 		return b.buildAttribute0(true, e, qry)
 	}
-	return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("'%v' is not support now", n))
+	return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("'%v' is not support now", tree.String(n, dialect.MYSQL)))
 }

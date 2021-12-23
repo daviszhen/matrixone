@@ -77,15 +77,13 @@ func (s *Scope) CreateTable(ts uint64) error {
 
 // CreateIndex do create index work according to create index plan
 func (s *Scope) CreateIndex(ts uint64) error {
-	return errors.New(errno.FeatureNotSupported, "not support now.")
+	o, _ := s.Plan.(*plan.CreateIndex)
+	if o.HasExist && o.IfNotExistFlag {
+		return nil
+	}
 
-	//o, _ := s.Plan.(*plan.CreateIndex)
-	//defer o.Relation.Close()
-	//err := o.Relation.CreateIndex(ts, o.Defs)
-	//if o.IfNotExistFlag && err != nil && err.String() == "index already exist" {
-	//	return nil
-	//}
-	//return err
+	defer o.Relation.Close()
+	return o.Relation.CreateIndex(ts, o.Defs)
 }
 
 // DropDatabase do drop database work according to drop index plan
@@ -128,15 +126,13 @@ func (s *Scope) DropTable(ts uint64) error {
 
 // DropIndex do drop index word according to drop index plan
 func (s *Scope) DropIndex(ts uint64) error {
-	return errors.New(errno.FeatureNotSupported, "not support now.")
+	p, _ := s.Plan.(*plan.DropIndex)
+	if p.NotExisted && p.IfExistFlag {
+		return nil
+	}
 
-	//p, _ := s.Plan.(*plan.DropIndex)
-	//defer p.Relation.Close()
-	//err := p.Relation.DropIndex(ts, p.Id)
-	//if p.IfExistFlag && err != nil && err.String == "index not exist" {
-	//	return nil
-	//}
-	//return err
+	defer p.Relation.Close()
+	return p.Relation.DropIndex(ts, p.Id)
 }
 
 // todo: show should get information from system table next day.
@@ -370,6 +366,43 @@ func (s *Scope) ShowCreateTable(u interface{}, fill func(interface{}, *batch.Bat
 	return fill(u, bat)
 }
 
+func (s *Scope) ShowCreateDatabase(u interface{}, fill func(interface{}, *batch.Batch) error) error {
+	p, _ := s.Plan.(*plan.ShowCreateDatabase)
+	if _, err := p.E.Database(p.Id); err != nil {
+		if p.IfNotExistFlag {
+			return nil
+		}
+		return err
+	}
+
+	results := p.ResultColumns()
+	names := make([]string, 0)
+	for _, r := range results {
+		names = append(names, r.Name)
+	}
+
+	bat := batch.New(true, names)
+	for i := range bat.Vecs {
+		bat.Vecs[i] = vector.New(results[i].Type)
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("CREATE DATABASE `")
+	buf.WriteString(p.Id)
+	buf.WriteString("`")
+
+	dbName := make([][]byte, 1)
+	createDatabase := make([][]byte, 1)
+	dbName[0] = []byte(p.Id)
+	createDatabase[0] = buf.Bytes()
+
+	vector.Append(bat.Vecs[0], dbName)
+	vector.Append(bat.Vecs[1], createDatabase)
+
+	bat.InitZsOne(1)
+	return fill(u, bat)
+}
+
 // Insert will insert a batch into relation and return affectedRow
 func (s *Scope) Insert(ts uint64) (uint64, error) {
 	p, _ := s.Plan.(*plan.Insert)
@@ -440,14 +473,26 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 	defer conn.Close()
 	addr, _ := net.ResolveTCPAddr("tcp", s.NodeInfo.Addr)
 	if _, err := conn.Connect(fmt.Sprintf("%v:%v", addr.IP, addr.Port+100), time.Second*3); err != nil {
+		select {
+		case <-arg.Reg.Ctx.Done():
+		case arg.Reg.Ch <- nil:
+		}
 		return err
 	}
 	if err := conn.WriteAndFlush(&message.Message{Data: buf.Bytes()}); err != nil {
+		select {
+		case <-arg.Reg.Ctx.Done():
+		case arg.Reg.Ch <- nil:
+		}
 		return err
 	}
 	for {
 		val, err := conn.Read()
 		if err != nil {
+			select {
+			case <-arg.Reg.Ctx.Done():
+			case arg.Reg.Ch <- nil:
+			}
 			return err
 		}
 		msg := val.(*message.Message)
@@ -463,6 +508,10 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 		}
 		bat, _, err := protocol.DecodeBatch(val.(*message.Message).Data)
 		if err != nil {
+			select {
+			case <-arg.Reg.Ctx.Done():
+			case arg.Reg.Ch <- nil:
+			}
 			return err
 		}
 		if arg.Reg.Ch == nil {
@@ -484,6 +533,10 @@ func (s *Scope) ParallelRun(e engine.Engine) error {
 	case *times.Argument:
 		return s.RunCAQ(e)
 	case *transform.Argument:
+		if t == nil {
+			s.Instructions[0].Arg = &transform.Argument{}
+			return s.RunQ(e)
+		}
 		if t.Typ == transform.Bare {
 			return s.RunQ(e)
 		}
@@ -522,26 +575,32 @@ func (s *Scope) RunQ(e engine.Engine) error {
 			},
 		}
 		ss[0].Instructions = append(ss[0].Instructions, vm.Instruction{
-			Op:  vm.Transform,
-			Arg: arg,
+			Op: vm.Transform,
+			Arg: &transform.Argument{
+				Typ:        arg.Typ,
+				IsMerge:    arg.IsMerge,
+				FreeVars:   arg.FreeVars,
+				Restrict:   arg.Restrict,
+				Projection: arg.Projection,
+				BoundVars:  arg.BoundVars,
+			},
 		})
 
 		ss[0].Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
 		ss[0].Proc.Id = s.Proc.Id
 		ss[0].Proc.Lim = s.Proc.Lim
 	}
-	s.PreScopes = ss
-	s.Magic = Merge
-	s.Instructions[0] = vm.Instruction{
-		Op:  vm.Merge,
-		Arg: nil,
-	}
 	ctx, cancel := context.WithCancel(context.Background())
+	s.Magic = Merge
+	s.PreScopes = ss
+	s.Instructions[0] = vm.Instruction{
+		Op: vm.Merge,
+	}
 	s.Proc.Cancel = cancel
 	s.Proc.Reg.MergeReceivers = make([]*process.WaitRegister, 1)
 	s.Proc.Reg.MergeReceivers[0] = &process.WaitRegister{
 		Ctx: ctx,
-		Ch:  make(chan *batch.Batch, 2),
+		Ch:  make(chan *batch.Batch, 1),
 	}
 
 	ss[0].Instructions = append(ss[0].Instructions, vm.Instruction{
@@ -732,7 +791,17 @@ func (s *Scope) RunCAQ(e engine.Engine) error {
 		}
 		arg.Bats = append(arg.Bats, bat)
 	}
-	if len(arg.Bats) == 0 {
+	if len(arg.Bats) != len(arg.Svars) {
+		for i, in := range s.Instructions {
+			if in.Op == vm.Connector {
+				arg := s.Instructions[i].Arg.(*connector.Argument)
+				select {
+				case <-arg.Reg.Ctx.Done():
+				case arg.Reg.Ch <- nil:
+				}
+				break
+			}
+		}
 		return nil
 	}
 	constructViews(arg.Bats, arg.Svars)

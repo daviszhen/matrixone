@@ -17,6 +17,8 @@ package unittest
 import (
 	"bytes"
 	"fmt"
+	"testing"
+
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/sql/compile"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -26,7 +28,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/mmu/host"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func newTestEngine() (engine.Engine, *process.Process) {
@@ -58,6 +59,10 @@ func TestInsertFunction(t *testing.T) {
 		"insert into def2 (name, age) values ('Abby', 24);",
 		"insert into def3 () values (), ();",
 		"insert into def4 (d1, d2) values (1, 2);",
+		"create table cha1 (a char(0));",
+		"create table cha2 (a char);",
+		"insert into cha2 values ('1');",
+		"insert into cha1 values ('');",
 	}
 	works := [][]string{ // First string is relation name, Second string is expected result.
 		{"iis", "i1\n\t[1 2 1 0]-&{<nil>}\ni2\n\t[2 0 3 0]-&{<nil>}\ni3\n\t[3 9 0 0]-&{<nil>}\ni4\n\t[4 1 5 0]-&{<nil>}\n\n"},
@@ -69,6 +74,10 @@ func TestInsertFunction(t *testing.T) {
 		{"def3", "i\n\t[-1 -1]-&{<nil>}\nv\n\t[abc abc]-&{<nil>}\nc\n\t[ ]-&{<nil>}\nprice\n\t[0 0]-&{<nil>}\n\n"},
 		{"def4", "d1\n\t1\nd2\n\t2\nd3\n\tnull\nd4\n\t1\n\n"},
 	}
+	eqls := [][]string{ // case should return error
+		{"insert into cha1 values ('1');", "[22000]Data too long for column 'a' at row 1"},
+		{"insert into cha2 values ('21');", "[22000]Data too long for column 'a' at row 1"},
+	}
 
 	for _, p := range prepares {
 		require.NoError(t, sqlRun(p, e, proc), p)
@@ -76,23 +85,34 @@ func TestInsertFunction(t *testing.T) {
 	for _, s := range works {
 		require.Equal(t, s[1], TempSelect(e, "test", s[0]))
 	}
+	for _, eql := range eqls {
+		r := sqlRun(eql[0], e, proc)
+		if len(eql[1]) == 0 {
+			require.NoError(t, r, eql[0])
+		} else {
+			if r == nil { // that should error but found no error
+				require.Equal(t, eql[1], "no error", eql[0])
+			}
+			require.Equal(t, eql[1], r.Error(), eql[0])
+		}
+	}
 }
 
 // TestDateType will do test for Type date
 func TestDateType(t *testing.T) {
 	e, proc := newTestEngine()
 
-	sqls := []string {
+	sqls := []string{
 		"create table tdate (a date);",
 		"create table tdefdate (a date default '20211202')",
 		"insert into tdate values ('20070210'), ('1997-02-10'), ('01-04-28'), (20041112), ('0000000123-4-3');",
 		"insert into tdefdate values ();",
 	}
-	res := [][]string {
+	res := [][]string{
 		{"tdate", "a\n\t[2007-02-10 1997-02-10 0001-04-28 2004-11-12 0123-04-03]-&{<nil>}\n\n"},
 		{"tdefdate", "a\n\t2021-12-02\n\n"},
 	}
-	eqls := [][]string {
+	eqls := [][]string{
 		{"create table tble (a date);", ""},
 		{"insert into tble values ('20201310')", "[22000]Incorrect date value"},
 		{"insert into tble values ('20200631')", "[22000]Incorrect date value"},
@@ -115,6 +135,50 @@ func TestDateType(t *testing.T) {
 			}
 			require.Equal(t, eql[1], r.Error(), eql[0])
 		}
+	}
+}
+
+// TestDateComparison tests date type comparison operation
+func TestDateComparison(t *testing.T) {
+	e, proc := newTestEngine()
+	sqls := []string{
+		"create table tdate (a date);",
+		"insert into tdate values ('20070210'), ('1997-02-10'), ('01-04-28'), (20041112), ('0000000123-4-3');",
+		"select * from tdate where a < '2004-01-01'",
+		"select * from tdate where '2004-01-01' < a",
+		"select * from tdate where a > '2004-01-01'",
+		"select * from tdate where '2004-01-01' > a",
+		"select * from tdate where a = '2004-01-01'",
+		"select * from tdate where '2004-01-01' = a",
+		"select * from tdate where a <= '2004-01-01'",
+		"select * from tdate where '2004-01-01' <= a",
+		"select * from tdate where a >= '2004-01-01'",
+		"select * from tdate where '2004-01-01' >= a",
+	}
+	for _, sql := range sqls {
+		require.NoError(t, sqlRun(sql, e, proc), sql)
+	}
+}
+
+// TestDatetimeComparison tests date type comparison operation
+func TestDatetimeComparison(t *testing.T) {
+	e, proc := newTestEngine()
+	sqls := []string{
+		"create table tdatetime (a datetime);",
+		"insert into tdatetime values ('2018-04-28 10:21:15'), ('17-04-28 03:05:01'), (250716163958), (20211203145633);",
+		"select * from tdatetime where a < '2020-01-01 10:21:15'",
+		"select * from tdatetime where '2020-01-01 10:21:15' < a",
+		"select * from tdatetime where a = '2020-01-01 10:21:15'",
+		"select * from tdatetime where '2020-01-01 10:21:15' = a",
+		"select * from tdatetime where a >= '2020-01-01 10:21:15'",
+		"select * from tdatetime where '2020-01-01 10:21:15' >= a",
+		"select * from tdatetime where a <= '2020-01-01 10:21:15'",
+		"select * from tdatetime where '2020-01-01 10:21:15' <= a",
+		"select * from tdatetime where a != '2020-01-01 10:21:15'",
+		"select * from tdatetime where '2020-01-01 10:21:15' != a",
+	}
+	for _, sql := range sqls {
+		require.NoError(t, sqlRun(sql, e, proc), sql)
 	}
 }
 
@@ -230,16 +294,26 @@ func TestOperators(t *testing.T) {
 		"select u4 - u4, u4 + u4, u4 / u4, u4 * u4, u4 % u4 from uus;",
 		"create table ccs (c1 char(10), c2 varchar(20));",
 		"select cast(c2 AS char) cc2c1 from ccs;",
+		"create table tk1 (a int, b int);",
+		"insert into tk1 values (1, 2);",
+		"select a div b from tk1;",
+		"create table tk2 (a varchar(10));",
+		"insert into tk2 values ('a'),('abc'),('abcd'),('hello'),('test');",
+		"select * from tk2 where a like 'abc%';",
+		"CREATE TABLE tk3 (spID int,userID int,score smallint);",
+		"insert into tk3 values (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4);",
+		"select * from tk3 where userID < 6 or not userID;",
+		"select * from tk3 where not userID between 2 and 3;",
 	}
-	supports = nil // todo: select not support complete now
 
 	for _, sql := range supports {
-		require.NoError(t, sqlRun(sql, e, proc))
+		require.NoError(t, sqlRun(sql, e, proc), sql)
 	}
 }
 
 // sqlRun compile and run a sql, return error if happens
 func sqlRun(sql string, e engine.Engine, proc *process.Process) error {
+	compile.InitAddress("127.0.0.1")
 	c := compile.New("test", sql, "", e, proc)
 	es, err := c.Build()
 	if err != nil {

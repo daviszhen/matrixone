@@ -166,38 +166,35 @@ func (ctr *Container) fillBatch(bat *batch.Batch, proc *process.Process) error {
 		ctr.inserted = make([]uint8, UnitLimit)
 		ctr.zInserted = make([]uint8, UnitLimit)
 		ctr.hashes = make([]uint64, UnitLimit)
-		ctr.fakeKeys = make([][2]uint64, UnitLimit)
+		ctr.strHashStates = make([][3]uint64, UnitLimit)
 		ctr.values = make([]uint64, UnitLimit)
+		ctr.intHashMap = &hashtable.Int64HashMap{}
+		ctr.strHashMap = &hashtable.StringHashMap{}
 		switch {
 		case size <= 8:
 			ctr.typ = H8
 			ctr.h8.keys = make([]uint64, UnitLimit)
 			ctr.h8.zKeys = make([]uint64, UnitLimit)
-			ctr.h8.ht = &hashtable.Int64HashMap{}
-			ctr.h8.ht.Init()
+			ctr.intHashMap.Init()
 		case size <= 24:
 			ctr.typ = H24
 			ctr.h24.keys = make([][3]uint64, UnitLimit)
 			ctr.h24.zKeys = make([][3]uint64, UnitLimit)
-			ctr.h24.ht = &hashtable.String24HashMap{}
-			ctr.h24.ht.Init()
+			ctr.strHashMap.Init()
 		case size <= 32:
 			ctr.typ = H32
 			ctr.h32.keys = make([][4]uint64, UnitLimit)
 			ctr.h32.zKeys = make([][4]uint64, UnitLimit)
-			ctr.h32.ht = &hashtable.String32HashMap{}
-			ctr.h32.ht.Init()
+			ctr.strHashMap.Init()
 		case size <= 40:
 			ctr.typ = H40
 			ctr.h40.keys = make([][5]uint64, UnitLimit)
 			ctr.h40.zKeys = make([][5]uint64, UnitLimit)
-			ctr.h40.ht = &hashtable.String40HashMap{}
-			ctr.h40.ht.Init()
+			ctr.strHashMap.Init()
 		default:
 			ctr.typ = HStr
 			ctr.hstr.keys = make([][]byte, UnitLimit)
-			ctr.hstr.ht = &hashtable.StringHashMap{}
-			ctr.hstr.ht.Init()
+			ctr.strHashMap.Init()
 		}
 	} else {
 		batch.Reorder(bat, ctr.vars)
@@ -219,7 +216,7 @@ func (ctr *Container) fillBatch(bat *batch.Batch, proc *process.Process) error {
 func (ctr *Container) fillH8(bat *batch.Batch, proc *process.Process) error {
 	if ctr.bat == nil {
 		ctr.bat = bat
-		ctr.h8.ht = bat.Ht.(*hashtable.Int64HashMap)
+		ctr.intHashMap = bat.Ht.(*hashtable.Int64HashMap)
 		ctr.rows += uint64(len(ctr.bat.Zs))
 		return nil
 	}
@@ -277,6 +274,12 @@ func (ctr *Container) fillH8(bat *batch.Batch, proc *process.Process) error {
 					*(*float32)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_date:
+				vs := vecs[j].Col.([]types.Date)
+				for k := int64(0); k < n; k++ {
+					*(*int32)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int32(vs[i+k])
+				}
+				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_int64:
 				vs := vecs[j].Col.([]int64)
 				for k := int64(0); k < n; k++ {
@@ -295,6 +298,12 @@ func (ctr *Container) fillH8(bat *batch.Batch, proc *process.Process) error {
 					*(*float64)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_datetime:
+				vs := vecs[j].Col.([]types.Datetime)
+				for k := int64(0); k < n; k++ {
+					*(*int64)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int64(vs[i+k])
+				}
+				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_char, types.T_varchar:
 				vs := vecs[j].Col.(*types.Bytes)
 				vData := vs.Data
@@ -307,7 +316,7 @@ func (ctr *Container) fillH8(bat *batch.Batch, proc *process.Process) error {
 			}
 		}
 		ctr.hashes[0] = 0
-		ctr.h8.ht.InsertBatch(int(n), ctr.hashes, unsafe.Pointer(&ctr.h8.keys[0]), ctr.values)
+		ctr.intHashMap.InsertBatch(int(n), ctr.hashes, unsafe.Pointer(&ctr.h8.keys[0]), ctr.values)
 		{ // batch
 			cnt := 0
 			copy(ctr.inserted[:n], ctr.zInserted[:n])
@@ -344,7 +353,7 @@ func (ctr *Container) fillH8(bat *batch.Batch, proc *process.Process) error {
 func (ctr *Container) fillH24(bat *batch.Batch, proc *process.Process) error {
 	if ctr.bat == nil {
 		ctr.bat = bat
-		ctr.h24.ht = bat.Ht.(*hashtable.String24HashMap)
+		ctr.strHashMap = bat.Ht.(*hashtable.StringHashMap)
 		ctr.rows += uint64(len(ctr.bat.Zs))
 		return nil
 	}
@@ -403,6 +412,12 @@ func (ctr *Container) fillH24(bat *batch.Batch, proc *process.Process) error {
 					*(*float32)(unsafe.Add(unsafe.Pointer(&ctr.h24.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_date:
+				vs := vecs[j].Col.([]types.Date)
+				for k := int64(0); k < n; k++ {
+					*(*int32)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int32(vs[i+k])
+				}
+				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_int64:
 				vs := vecs[j].Col.([]int64)
 				for k := int64(0); k < n; k++ {
@@ -421,6 +436,12 @@ func (ctr *Container) fillH24(bat *batch.Batch, proc *process.Process) error {
 					*(*float64)(unsafe.Add(unsafe.Pointer(&ctr.h24.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_datetime:
+				vs := vecs[j].Col.([]types.Datetime)
+				for k := int64(0); k < n; k++ {
+					*(*int64)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int64(vs[i+k])
+				}
+				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_char, types.T_varchar:
 				vs := vecs[j].Col.(*types.Bytes)
 				for k := int64(0); k < n; k++ {
@@ -430,8 +451,7 @@ func (ctr *Container) fillH24(bat *batch.Batch, proc *process.Process) error {
 				}
 			}
 		}
-		ctr.hashes[0] = 0
-		ctr.h24.ht.InsertBatch(ctr.hashes, ctr.h24.keys[:n], ctr.values)
+		ctr.strHashMap.InsertString24Batch(ctr.strHashStates, ctr.h24.keys[:n], ctr.values)
 		{ // batch
 			cnt := 0
 			copy(ctr.inserted[:n], ctr.zInserted[:n])
@@ -468,7 +488,7 @@ func (ctr *Container) fillH24(bat *batch.Batch, proc *process.Process) error {
 func (ctr *Container) fillH32(bat *batch.Batch, proc *process.Process) error {
 	if ctr.bat == nil {
 		ctr.bat = bat
-		ctr.h32.ht = bat.Ht.(*hashtable.String32HashMap)
+		ctr.strHashMap = bat.Ht.(*hashtable.StringHashMap)
 		ctr.rows += uint64(len(ctr.bat.Zs))
 		return nil
 	}
@@ -527,6 +547,12 @@ func (ctr *Container) fillH32(bat *batch.Batch, proc *process.Process) error {
 					*(*float32)(unsafe.Add(unsafe.Pointer(&ctr.h32.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_date:
+				vs := vecs[j].Col.([]types.Date)
+				for k := int64(0); k < n; k++ {
+					*(*int32)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int32(vs[i+k])
+				}
+				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_int64:
 				vs := vecs[j].Col.([]int64)
 				for k := int64(0); k < n; k++ {
@@ -545,6 +571,12 @@ func (ctr *Container) fillH32(bat *batch.Batch, proc *process.Process) error {
 					*(*float64)(unsafe.Add(unsafe.Pointer(&ctr.h32.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_datetime:
+				vs := vecs[j].Col.([]types.Datetime)
+				for k := int64(0); k < n; k++ {
+					*(*int64)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int64(vs[i+k])
+				}
+				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_char, types.T_varchar:
 				vs := vecs[j].Col.(*types.Bytes)
 				for k := int64(0); k < n; k++ {
@@ -554,7 +586,7 @@ func (ctr *Container) fillH32(bat *batch.Batch, proc *process.Process) error {
 				}
 			}
 		}
-		ctr.h32.ht.InsertRawBatch(ctr.hashes, ctr.fakeKeys, ctr.h32.keys[:n], ctr.values)
+		ctr.strHashMap.InsertString32Batch(ctr.strHashStates, ctr.h32.keys[:n], ctr.values)
 		{ // batch
 			cnt := 0
 			copy(ctr.inserted[:n], ctr.zInserted[:n])
@@ -591,7 +623,7 @@ func (ctr *Container) fillH32(bat *batch.Batch, proc *process.Process) error {
 func (ctr *Container) fillH40(bat *batch.Batch, proc *process.Process) error {
 	if ctr.bat == nil {
 		ctr.bat = bat
-		ctr.h40.ht = bat.Ht.(*hashtable.String40HashMap)
+		ctr.strHashMap = bat.Ht.(*hashtable.StringHashMap)
 		ctr.rows += uint64(len(ctr.bat.Zs))
 		return nil
 	}
@@ -650,6 +682,12 @@ func (ctr *Container) fillH40(bat *batch.Batch, proc *process.Process) error {
 					*(*float32)(unsafe.Add(unsafe.Pointer(&ctr.h40.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_date:
+				vs := vecs[j].Col.([]types.Date)
+				for k := int64(0); k < n; k++ {
+					*(*int32)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int32(vs[i+k])
+				}
+				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_int64:
 				vs := vecs[j].Col.([]int64)
 				for k := int64(0); k < n; k++ {
@@ -668,6 +706,12 @@ func (ctr *Container) fillH40(bat *batch.Batch, proc *process.Process) error {
 					*(*float64)(unsafe.Add(unsafe.Pointer(&ctr.h40.keys[k]), ctr.keyOffs[k])) = vs[i+k]
 				}
 				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
+			case types.T_datetime:
+				vs := vecs[j].Col.([]types.Datetime)
+				for k := int64(0); k < n; k++ {
+					*(*int64)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int64(vs[i+k])
+				}
+				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_char, types.T_varchar:
 				vs := vecs[j].Col.(*types.Bytes)
 				for k := int64(0); k < n; k++ {
@@ -677,7 +721,7 @@ func (ctr *Container) fillH40(bat *batch.Batch, proc *process.Process) error {
 				}
 			}
 		}
-		ctr.h40.ht.InsertRawBatch(ctr.hashes, ctr.fakeKeys, ctr.h40.keys[:n], ctr.values)
+		ctr.strHashMap.InsertString40Batch(ctr.strHashStates, ctr.h40.keys[:n], ctr.values)
 		{ // batch
 			cnt := 0
 			copy(ctr.inserted[:n], ctr.zInserted[:n])
@@ -714,7 +758,7 @@ func (ctr *Container) fillH40(bat *batch.Batch, proc *process.Process) error {
 func (ctr *Container) fillHStr(bat *batch.Batch, proc *process.Process) error {
 	if ctr.bat == nil {
 		ctr.bat = bat
-		ctr.hstr.ht = bat.Ht.(*hashtable.StringHashMap)
+		ctr.strHashMap = bat.Ht.(*hashtable.StringHashMap)
 		ctr.rows += uint64(len(ctr.bat.Zs))
 		return nil
 	}
@@ -770,6 +814,12 @@ func (ctr *Container) fillHStr(bat *batch.Batch, proc *process.Process) error {
 				for k := int64(0); k < n; k++ {
 					ctr.hstr.keys[k] = append(ctr.hstr.keys[k], data[(i+k)*4:(i+k+1)*4]...)
 				}
+			case types.T_date:
+				vs := vecs[j].Col.([]types.Date)
+				for k := int64(0); k < n; k++ {
+					*(*int32)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int32(vs[i+k])
+				}
+				add.Uint32AddScalar(4, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_int64:
 				vs := vecs[j].Col.([]int64)
 				data := unsafe.Slice((*byte)(unsafe.Pointer(&vs[0])), cap(vs)*8)[:len(vs)*8]
@@ -788,6 +838,12 @@ func (ctr *Container) fillHStr(bat *batch.Batch, proc *process.Process) error {
 				for k := int64(0); k < n; k++ {
 					ctr.hstr.keys[k] = append(ctr.hstr.keys[k], data[(i+k)*8:(i+k+1)*8]...)
 				}
+			case types.T_datetime:
+				vs := vecs[j].Col.([]types.Datetime)
+				for k := int64(0); k < n; k++ {
+					*(*int64)(unsafe.Add(unsafe.Pointer(&ctr.h8.keys[k]), ctr.keyOffs[k])) = int64(vs[i+k])
+				}
+				add.Uint32AddScalar(8, ctr.keyOffs[:n], ctr.keyOffs[:n])
 			case types.T_char, types.T_varchar:
 				vs := vecs[j].Col.(*types.Bytes)
 				for k := int64(0); k < n; k++ {
@@ -795,35 +851,41 @@ func (ctr *Container) fillHStr(bat *batch.Batch, proc *process.Process) error {
 				}
 			}
 		}
-		cnt := 0
-		copy(ctr.inserted[:n], ctr.zInserted[:n])
 		for k := int64(0); k < n; k++ {
-			v := ctr.hstr.ht.Insert(hashtable.StringRef{Ptr: &ctr.hstr.keys[k][0], Len: len(ctr.hstr.keys[k])})
-			ctr.hstr.keys[k] = ctr.hstr.keys[k][:0]
-			if v > ctr.rows {
-				ctr.inserted[k] = 1
-				ctr.rows++
-				cnt++
-				ctr.bat.Zs = append(ctr.bat.Zs, 0)
-			}
-			ctr.values[k] = v
-			ai := int64(v) - 1
-			ctr.bat.Zs[ai] += bat.Zs[i+int64(k)]
-		}
-		if cnt > 0 {
-			for j, vec := range ctr.bat.Vecs {
-				if err := vector.UnionBatch(vec, vecs[j], i, cnt, ctr.inserted[:n], proc.Mp); err != nil {
-					return err
-				}
-			}
-			for _, r := range ctr.bat.Rs {
-				if err := r.Grows(cnt, proc.Mp); err != nil {
-					return err
-				}
+			if l := len(ctr.hstr.keys[k]); l < 16 {
+				ctr.hstr.keys[k] = append(ctr.hstr.keys[k], hashtable.StrKeyPadding[l:]...)
 			}
 		}
-		for j, r := range ctr.bat.Rs {
-			r.BatchAdd(bat.Rs[j], i, ctr.inserted[:n], ctr.values)
+		ctr.strHashMap.InsertStringBatch(ctr.strHashStates, ctr.hstr.keys[:n], ctr.values)
+		{ // batch
+			cnt := 0
+			copy(ctr.inserted[:n], ctr.zInserted[:n])
+			for k, v := range ctr.values[:n] {
+				ctr.hstr.keys[k] = ctr.hstr.keys[k][:0]
+				if v > ctr.rows {
+					ctr.inserted[k] = 1
+					ctr.rows++
+					cnt++
+					ctr.bat.Zs = append(ctr.bat.Zs, 0)
+				}
+				ai := int64(v) - 1
+				ctr.bat.Zs[ai] += bat.Zs[i+int64(k)]
+			}
+			if cnt > 0 {
+				for j, vec := range ctr.bat.Vecs {
+					if err := vector.UnionBatch(vec, vecs[j], i, cnt, ctr.inserted[:n], proc.Mp); err != nil {
+						return err
+					}
+				}
+				for _, r := range ctr.bat.Rs {
+					if err := r.Grows(cnt, proc.Mp); err != nil {
+						return err
+					}
+				}
+			}
+			for j, r := range ctr.bat.Rs {
+				r.BatchAdd(bat.Rs[j], i, ctr.inserted[:n], ctr.values)
+			}
 		}
 	}
 	return nil

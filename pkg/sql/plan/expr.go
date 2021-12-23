@@ -16,6 +16,11 @@ package plan
 
 import (
 	"fmt"
+	"go/constant"
+	"math"
+	"strconv"
+	"strings"
+
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/defines"
@@ -26,10 +31,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/sql/util"
 	"github.com/matrixorigin/matrixone/pkg/sql/viewexec/transformer"
-	"go/constant"
-	"math"
-	"strconv"
-	"strings"
 )
 
 var (
@@ -235,7 +236,7 @@ func (b *build) buildFunc(flg bool, e *tree.FuncExpr, qry *Query, fn func(tree.E
 				}
 			}
 		}
-		return &extend.FuncExtend{Name: funcName, Args: args}, nil
+		return buildFunctionExtend(&extend.FuncExtend{Name: funcName, Args: args})
 	}
 	if op, ok := transformer.TransformerNamesMap[funcName]; ok {
 		if len(e.Exprs) > 1 {
@@ -253,7 +254,7 @@ func (b *build) buildFunc(flg bool, e *tree.FuncExpr, qry *Query, fn func(tree.E
 			}
 		}
 	}
-	return &extend.FuncExtend{Name: funcName, Args: args}, nil
+	return buildFunctionExtend(&extend.FuncExtend{Name: funcName, Args: args})
 }
 
 // flg indicates whether the aggregation function is accepted
@@ -281,7 +282,7 @@ func (b *build) buildHavingFunc(e *tree.FuncExpr, qry *Query, fn func(tree.Expr,
 			}
 		}
 	}
-	return &extend.FuncExtend{Name: funcName, Args: args}, nil
+	return buildFunctionExtend(&extend.FuncExtend{Name: funcName, Args: args})
 }
 
 func (b *build) buildBinary(e *tree.BinaryExpr, qry *Query, fn func(tree.Expr, *Query) (extend.Extend, error)) (extend.Extend, error) {
@@ -412,6 +413,16 @@ func (b *build) buildComparison(e *tree.ComparisonExpr, qry *Query, fn func(tree
 			return nil, err
 		}
 		return &extend.BinaryExtend{Op: overload.NE, Left: left, Right: right}, nil
+	case tree.LIKE:
+		left, err := fn(e.Left, qry)
+		if err != nil {
+			return nil, err
+		}
+		right, err := fn(e.Right, qry)
+		if err != nil {
+			return nil, err
+		}
+		return &extend.BinaryExtend{Op: overload.Like, Left: left, Right: right}, nil
 	}
 	return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("'%v' is not support now", e))
 }
@@ -872,6 +883,31 @@ func buildConstantValue(typ types.Type, num *tree.NumVal) (interface{}, error) {
 	return nil, errors.New(errno.IndeterminateDatatype, fmt.Sprintf("unsupport value: %v", val))
 }
 
+func buildFunctionExtend(fe *extend.FuncExtend) (extend.Extend, error) {
+	op, ok := extend.FunctionRegistry[fe.Name]
+	if !ok {
+		return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("function '%s' is not support now", fe.Name))
+	}
+	typ, ok := overload.OpTypes[op]
+	if !ok {
+		return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("function '%s' is not fully registered", fe.Name))
+	}
+	switch typ {
+	case overload.Unary:
+		if len(fe.Args) != 1 {
+			return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("wrong parameters for function '%s'", fe.Name))
+		}
+		return &extend.UnaryExtend{Op: op, E: fe.Args[0]}, nil
+	case overload.Binary:
+		if len(fe.Args) != 2 {
+			return nil, errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("wrong parameters for function '%s'", fe.Name))
+		}
+		return &extend.BinaryExtend{Op: op, Left: fe.Args[0], Right: fe.Args[1]}, nil
+	default:
+		return &extend.MultiExtend{Op: op, Args: fe.Args}, nil
+	}
+}
+
 func stripEqual(e extend.Extend) (string, string, bool) {
 	if v, ok := e.(*extend.BinaryExtend); ok {
 		if v.Op == overload.EQ {
@@ -897,6 +933,26 @@ func pruneExtendAttribute(e extend.Extend) extend.Extend {
 	case *extend.BinaryExtend:
 		v.Left = pruneExtendAttribute(v.Left)
 		v.Right = pruneExtendAttribute(v.Right)
+	}
+	return e
+}
+
+func pruneExtend(e extend.Extend) extend.Extend {
+	switch v := e.(type) {
+	case *extend.UnaryExtend:
+		v.E = pruneExtend(v.E)
+	case *extend.ParenExtend:
+		v.E = pruneExtend(v.E)
+	case *extend.Attribute:
+		_, name := util.SplitTableAndColumn(v.Name)
+		v.Name = name
+	case *extend.BinaryExtend:
+		v.Left = pruneExtend(v.Left)
+		v.Right = pruneExtend(v.Right)
+	case *extend.MultiExtend:
+		for i, arg := range v.Args {
+			v.Args[i] = pruneExtend(arg)
+		}
 	}
 	return e
 }

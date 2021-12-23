@@ -16,8 +16,10 @@ package plan
 
 import (
 	"fmt"
+
 	"github.com/matrixorigin/matrixone/pkg/errno"
 	"github.com/matrixorigin/matrixone/pkg/sql/errors"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/sql/rewrite"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -28,11 +30,13 @@ func New(db string, sql string, e engine.Engine) *build {
 		e:   e,
 		db:  db,
 		sql: sql,
+		flg: true,
 	}
 }
 
 func (b *build) BuildStatement(stmt tree.Statement) (Plan, error) {
 	stmt = rewrite.Rewrite(stmt)
+	stmt = rewrite.AstRewrite(stmt)
 	switch stmt := stmt.(type) {
 	case *tree.Select:
 		qry := &Query{
@@ -122,6 +126,12 @@ func (b *build) BuildStatement(stmt tree.Statement) (Plan, error) {
 			return nil, err
 		}
 		return plan, nil
+	case *tree.ShowCreateDatabase:
+		plan := &ShowCreateDatabase{}
+		if err := b.BuildShowCreateDatabase(stmt, plan); err != nil {
+			return nil, err
+		}
+		return plan, nil
 	}
-	return nil, errors.New(errno.SQLStatementNotYetComplete, fmt.Sprintf("unexpected statement: '%v'", stmt))
+	return nil, errors.New(errno.SQLStatementNotYetComplete, fmt.Sprintf("unexpected statement: '%v'", tree.String(stmt, dialect.MYSQL)))
 }

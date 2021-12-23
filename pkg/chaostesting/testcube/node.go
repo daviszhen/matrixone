@@ -12,23 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rewrite
+package main
 
-import "github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+import (
+	"io"
 
-func rewriteInsert(stmt *tree.Insert) *tree.Insert {
-	jtbl, ok := stmt.Table.(*tree.JoinTableExpr)
-	if !ok {
-		return stmt
+	"github.com/matrixorigin/matrixcube/config"
+	"github.com/matrixorigin/matrixcube/raftstore"
+	"github.com/matrixorigin/matrixcube/server"
+	"go.uber.org/zap"
+)
+
+type Node struct {
+	Logger    *zap.Logger
+	Config    *config.Config
+	RaftStore raftstore.Store
+	App       *server.Application
+	Endpoint  string
+}
+
+var _ io.Closer = new(Node)
+
+func (n *Node) Close() (err error) {
+	if n.RaftStore != nil {
+		n.RaftStore.Stop()
 	}
-	atbl, ok := jtbl.Left.(*tree.AliasedTableExpr)
-	if !ok {
-		return stmt
+	if n.App != nil {
+		n.App.Stop()
 	}
-	tbl, ok := atbl.Expr.(*tree.TableName)
-	if !ok {
-		return stmt
-	}
-	stmt.Table = tbl
-	return stmt
+	return
 }

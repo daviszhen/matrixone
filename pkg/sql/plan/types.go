@@ -114,6 +114,7 @@ type CreateTable struct {
 
 type CreateIndex struct {
 	IfNotExistFlag bool
+	HasExist	   bool // if true, means this index has existed.
 	Id             string
 	Relation       engine.Relation
 	Defs           []engine.TableDef
@@ -134,6 +135,7 @@ type DropTable struct {
 
 type DropIndex struct {
 	IfExistFlag bool
+	NotExisted  bool // if true, means this index does not exist.
 	Id          string
 	Relation    engine.Relation
 }
@@ -157,6 +159,12 @@ type ShowColumns struct {
 type ShowCreateTable struct {
 	Relation  engine.Relation
 	TableName string
+}
+
+type ShowCreateDatabase struct {
+	IfNotExistFlag bool
+	Id 			string
+	E  			engine.Engine
 }
 
 type Insert struct {
@@ -548,6 +556,24 @@ func (s ShowCreateTable) ResultColumns() []*Attribute {
 	attrs := []*Attribute{
 		&Attribute{Ref: 1, Name: "Table", Type: types.Type{Oid: types.T_varchar, Size: 24}},
 		&Attribute{Ref: 1, Name: "Create Table", Type: types.Type{Oid: types.T_varchar, Size: 24}},
+	}
+	return attrs
+}
+
+func (d ShowCreateDatabase) String() string {
+	var buf bytes.Buffer
+	buf.WriteString("show create database ")
+	if d.IfNotExistFlag {
+		buf.WriteString("if not exists ")
+	}
+	buf.WriteString(d.Id)
+	return buf.String()
+}
+
+func (d ShowCreateDatabase) ResultColumns() []*Attribute {
+	attrs := []*Attribute{
+		&Attribute{Ref: 1, Name: "Database", Type: types.Type{Oid: types.T_varchar, Size: 24}},
+		&Attribute{Ref: 1, Name: "Show Database", Type: types.Type{Oid: types.T_varchar, Size: 24}},
 	}
 	return attrs
 }
