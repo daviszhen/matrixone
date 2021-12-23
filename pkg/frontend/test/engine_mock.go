@@ -148,6 +148,20 @@ func (mr *MockRelationMockRecorder) Close() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockRelation)(nil).Close))
 }
 
+// CreateIndex mocks base method.
+func (m *MockRelation) CreateIndex(epoch uint64, defs []engine.TableDef) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateIndex", epoch, defs)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateIndex indicates an expected call of CreateIndex.
+func (mr *MockRelationMockRecorder) CreateIndex(epoch, defs interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIndex", reflect.TypeOf((*MockRelation)(nil).CreateIndex), epoch, defs)
+}
+
 // DelTableDef mocks base method.
 func (m *MockRelation) DelTableDef(arg0 uint64, arg1 engine.TableDef) error {
 	m.ctrl.T.Helper()
@@ -160,6 +174,20 @@ func (m *MockRelation) DelTableDef(arg0 uint64, arg1 engine.TableDef) error {
 func (mr *MockRelationMockRecorder) DelTableDef(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DelTableDef", reflect.TypeOf((*MockRelation)(nil).DelTableDef), arg0, arg1)
+}
+
+// DropIndex mocks base method.
+func (m *MockRelation) DropIndex(epoch uint64, name string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DropIndex", epoch, name)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DropIndex indicates an expected call of DropIndex.
+func (mr *MockRelationMockRecorder) DropIndex(epoch, name interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropIndex", reflect.TypeOf((*MockRelation)(nil).DropIndex), epoch, name)
 }
 
 // ID mocks base method.
