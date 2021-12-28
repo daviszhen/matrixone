@@ -804,13 +804,6 @@ func (mce *MysqlCmdExecutor) handleShowVariables(_ *tree.ShowVariables) error {
 	ses.Mrs.AddColumn(col1)
 	ses.Mrs.AddColumn(col2)
 
-	//isolation-level
-	var data = make([]interface{},2)
-	data[0] = "tx_isolation"
-	data[1] = "REPEATABLE-READ"
-
-	ses.Mrs.AddRow(data)
-
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.Mrs)
 	resp := NewResponse(ResultResponse, 0, int(COM_QUERY), mer)
 
