@@ -1726,7 +1726,7 @@ func (mp *MysqlProtocolImpl) recvPayload() ([]byte, error) {
 
 /*
 generate random ascii string.
-Reference to : mysys/crypt_genhash_impl.cc generate_user_salt(char*,int)
+Reference to :mysql 8.0.23 mysys/crypt_genhash_impl.cc generate_user_salt(char*,int)
  */
 func generate_salt(n int) []byte {
 	buf := make([]byte,n)
