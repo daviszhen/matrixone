@@ -73,7 +73,7 @@ func (s *Scanner) Scan() (int, string) {
 		} else if s.cur() == eofChar {
 			return LEX_ERROR, ""
 		} else {
-			tID, tBytes = s.scanIdentifier(false)
+			tID, tBytes = s.scanIdentifier(true)
 		}
 		if tID == LEX_ERROR {
 			return tID, ""
@@ -546,7 +546,7 @@ func (s *Scanner) scanIdentifier(isVariable bool) (int, string) {
 
 	for {
 		ch := s.cur()
-		if !isLetter(ch) && !isDigit(ch) && ch != '@' && !(isVariable && isCarat(ch)) {
+		if !isLetter(ch) && !isDigit(ch) && ch != '@' && !(isVariable && isCarat(ch)){
 			break
 		}
 		if ch == '@' {
