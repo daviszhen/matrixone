@@ -407,7 +407,7 @@ func TestCubeKV_GetRangeWithLimit(t *testing.T) {
 	tc := NewTestCluster(t)
 	defer CloseTestCluster(tc)
 
-	convey.Convey("get range with prefix",t, func() {
+	convey.Convey("get range with limit",t, func() {
 		prefix := "xyz"
 		cnt := 10
 
@@ -432,7 +432,7 @@ func TestCubeKV_GetRangeWithLimit(t *testing.T) {
 			convey.So(err,convey.ShouldBeNil)
 		}
 
-		_, values1, err := kv.GetRangeWithLimit(TupleKey(prefix),uint64(cnt))
+		_, values1, err := kv.GetRangeWithLimit(TupleKey(prefix), nil, uint64(cnt))
 		convey.So(err,convey.ShouldBeNil)
 
 		//for i, key := range keys1 {
@@ -446,7 +446,7 @@ func TestCubeKV_GetRangeWithLimit(t *testing.T) {
 		step := 2
 		last := TupleKey(prefix)
 		for i := 0; i < cnt; i += step {
-			keys, values, err := kv.GetRangeWithLimit(last, uint64(step))
+			keys, values, err := kv.GetRangeWithLimit(last, nil, uint64(step))
 			convey.So(err,convey.ShouldBeNil)
 
 			for j := i; j < i+step; j++ {

@@ -83,6 +83,14 @@ type CubeDriver interface {
 	Scan([]byte, []byte, uint64) ([][]byte, error)
 	// ScanWithGroup scan [start,end) data in specific group.
 	ScanWithGroup([]byte, []byte, uint64, pb.Group) ([][]byte, error)
+	// TpeScan gets the keys in the range [startKey,endKey), return keys/values.
+	//a. startKey maybe nil.
+	//b. endKey maybe nil.
+	//c. limit: if it is the math.MaxUint64,
+	//	        it means there is not limitation on the count of keys.
+	//d. needKey: if it is true, the keys and the values are returned.
+	//			  if it is false, the keys are returned only.
+	TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([][]byte, [][]byte, error)
 	// PrefixScan scan k-vs which k starts with prefix.
 	PrefixScan([]byte, uint64) ([][]byte, error)
 	// PrefixScanWithGroup scan k-vs which k starts with prefix
@@ -458,6 +466,60 @@ func (h *driver) ScanWithGroup(start []byte, end []byte, limit uint64, group pb.
 		req.Scan.Start = kvs[len(kvs)-1]
 	}
 	return pairs, err
+}
+
+func (h *driver) TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([][]byte, [][]byte, error) {
+	req := pb.Request{
+		Type:  pb.TpeScan,
+		Group: pb.KVGroup,
+		TpeScan: pb.TpeScanRequest{
+			Start: startKey,
+			End:   endKey,
+			Limit: limit,
+			NeedKey: needKey,
+		},
+	}
+
+	successorOfkey := func (key []byte) []byte {
+		l := len(key) + 1
+		ret := make([]byte, l)
+		copy(ret,key)
+		ret[l - 1] = 0
+		return ret
+	}
+
+	var err error
+	var data []byte
+	var keys [][]byte
+	var values [][]byte
+	for {
+		data, err = h.ExecWithGroup(req, pb.KVGroup)
+		if data == nil || err != nil {
+			break
+		}
+
+		var tsr TpeScanResponse
+
+		err = json.Unmarshal(data, &tsr)
+
+		if err != nil || tsr.Keys == nil || len(tsr.Keys) == 0 {
+			break
+		}
+
+		//save data
+		if needKey {
+			keys = append(keys, tsr.Keys...)
+		}
+		values = append(values,tsr.Values...)
+
+		//case1. shard has more data
+		//case2. shard does not have more data but shard.End is not null
+		//read data further.
+		if tsr.ShardHasMoreData || !tsr.ShardEndIsNull {
+			req.TpeScan.Start = successorOfkey(tsr.Keys[len(tsr.Keys) - 1])
+		}
+	}
+	return keys, values, err
 }
 
 //PrefixScan scans in KVGroup
@@ -857,4 +919,12 @@ func (h *driver) AddLabelToShard(shardID uint64, name, value string) error {
 
 func (h *driver) AddSchedulingRule(ruleName string, groupByLabel string) error {
 	return h.store.Prophet().GetClient().AddSchedulingRule(uint64(pb.AOEGroup), ruleName, groupByLabel)
+}
+
+// TpeScanResponse is the response to the tpeScan
+type TpeScanResponse struct {
+	Keys [][]byte	`json:"keys"`
+	Values [][]byte	`json:"values"`
+	ShardHasMoreData bool `json:"shard_has_more_data,string"`
+	ShardEndIsNull bool	`json:"shard_end_is_null,string"`
 }
