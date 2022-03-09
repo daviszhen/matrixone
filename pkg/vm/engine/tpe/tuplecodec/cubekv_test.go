@@ -15,6 +15,7 @@
 package tuplecodec
 
 import (
+	"fmt"
 	cconfig "github.com/matrixorigin/matrixcube/config"
 	"github.com/matrixorigin/matrixcube/raftstore"
 	"github.com/matrixorigin/matrixone/pkg/vm/driver/config"
@@ -406,8 +407,6 @@ func TestCubeKV_GetRangeWithLimit(t *testing.T) {
 	tc := NewTestCluster(t)
 	defer CloseTestCluster(tc)
 
-	/*
-	//TODO:to fix
 	convey.Convey("get range with limit",t, func() {
 		prefix := "xyz"
 		cnt := 10
@@ -457,18 +456,15 @@ func TestCubeKV_GetRangeWithLimit(t *testing.T) {
 			last = SuccessorOfKey(keys[len(keys) - 1])
 		}
 	})
-	*/
 }
 
 func TestCubeKV_GetWithPrefix(t *testing.T) {
 	tc := NewTestCluster(t)
 	defer CloseTestCluster(tc)
 
-	/*
-	//TODO: to fix
 	convey.Convey("get with prefix",t, func() {
 		prefix := "xyz"
-		cnt := 20
+		cnt := 10
 
 		kv, err := NewCubeKV(tc.CubeDrivers[0])
 		convey.So(err,convey.ShouldBeNil)
@@ -498,7 +494,7 @@ func TestCubeKV_GetWithPrefix(t *testing.T) {
 			convey.So(values[i],convey.ShouldResemble,kase.value)
 		}
 
-		step := 10
+		step := 2
 		last := TupleKey(prefix)
 		prefixLen := len(prefix)
 		for i := 0; i < cnt; i += step {
@@ -512,5 +508,4 @@ func TestCubeKV_GetWithPrefix(t *testing.T) {
 			last = SuccessorOfKey(keys[len(keys) - 1])
 		}
 	})
-	*/
 }

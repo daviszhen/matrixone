@@ -44,6 +44,11 @@ import (
 	cstorage "github.com/matrixorigin/matrixcube/storage"
 )
 
+var (
+	errorCubeReturnIsNull = errors.New("cube return is null")
+	errorPrefixLengthIsLongerThanStartKey = errors.New("the preifx length is longer than the startKey")
+)
+
 const (
 	defaultRPCTimeout     = time.Second * 10
 	defaultRetryTimes     = 5
@@ -79,6 +84,9 @@ type CubeDriver interface {
 	Delete([]byte) error
 	// DeleteIfExist remove the key from the store if key exists.
 	DeleteIfExist([]byte) error
+	// TpeDeleteWithPrefix will deletes all keys started with the prefix.
+	// countPerBatch : it denotes deleting the keys in every countPerBatch.
+	TpeDeleteWithPrefix(prefix []byte, countPerBatch uint64) error
 	// Scan scan [start,end) data
 	Scan([]byte, []byte, uint64) ([][]byte, error)
 	// ScanWithGroup scan [start,end) data in specific group.
@@ -90,17 +98,30 @@ type CubeDriver interface {
 	//	        it means there is not limitation on the count of keys.
 	//d. needKey: if it is true, the keys and the values are returned.
 	//			  if it is false, the keys are returned only.
-	TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([][]byte, [][]byte, error)
+	//return parameters:
+	//[][]byte : return keys
+	//[][]byte : return values
+	//bool: true - the cube has more data
+	//[]byte : the start key for the next scan
+	TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([][]byte, [][]byte, bool, []byte, error)
 	// PrefixScan scan k-vs which k starts with prefix.
 	PrefixScan([]byte, uint64) ([][]byte, error)
 	// PrefixScanWithGroup scan k-vs which k starts with prefix
 	PrefixScanWithGroup([]byte, uint64, pb.Group) ([][]byte, error)
 	// TpePrefixScan gets the values of the prefix with limit.
-	// The prefixLen denotes the prefix[:prefixLen] is the real prefix.
-	// When we invoke TpePrefixScan several times, the prefix is the real
-	// prefix in the first time. But from the second time, the prefix is the
-	// last key in previous results of the TpePrefixScan.
-	TpePrefixScan([]byte,int,uint64)([][]byte, error)
+	//a. startKeyOrPrefix : When we invoke TpePrefixScan several times,
+	//	the startKeyOrPrefix is the real prefix in the first time.
+	//	But from the second time, the startKeyOrPrefix is the next scan key
+	//	that generated from results in the previous TpePrefixScan.
+	//b. prefixLength : it denotes startKeyOrPrefix[:prefixLength] is the real prefix.
+	//c. limit: if it is the math.MaxUint64,
+	//	        it means there is not limitation on the count of keys.
+	//return parameters:
+	//[][]byte : return keys
+	//[][]byte : return values
+	//bool: true - the cube has more data
+	//[]byte : the start key for the next scan
+	TpePrefixScan(startKeyOrPrefix []byte, prefixLength int, limit uint64) ([][]byte, [][]byte, bool, []byte, error)
 	// PrefixScan returns the values whose key starts with prefix.
 	PrefixKeys([]byte, uint64) ([][]byte, error)
 	// PrefixKeysWithGroup scans prefix with specific group.
@@ -425,6 +446,19 @@ func (h *driver) DeleteIfExist(key []byte) error {
 	return err
 }
 
+func (h *driver) TpeDeleteWithPrefix(prefix []byte, countPerBatch uint64) error {
+	req := pb.Request{
+		Type:  pb.TpeDeleteWithPrefix,
+		Group: pb.KVGroup,
+		TpeDeleteWithPrefix: pb.TpeDeleteWithPrefixRequest{
+			Prefix: prefix,
+			CoutPerBatch: countPerBatch,
+		},
+	}
+	_, err := h.ExecWithGroup(req, pb.KVGroup)
+	return err
+}
+
 //Scan scans in KVGroup.
 //It returns the keys and values whose key is between start and end.
 func (h *driver) Scan(start []byte, end []byte, limit uint64) ([][]byte, error) {
@@ -468,7 +502,7 @@ func (h *driver) ScanWithGroup(start []byte, end []byte, limit uint64, group pb.
 	return pairs, err
 }
 
-func (h *driver) TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([][]byte, [][]byte, error) {
+func (h *driver) TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([][]byte, [][]byte, bool, []byte, error) {
 	req := pb.Request{
 		Type:  pb.TpeScan,
 		Group: pb.KVGroup,
@@ -480,46 +514,31 @@ func (h *driver) TpeScan(startKey, endKey []byte, limit uint64, needKey bool) ([
 		},
 	}
 
-	successorOfkey := func (key []byte) []byte {
-		l := len(key) + 1
-		ret := make([]byte, l)
-		copy(ret,key)
-		ret[l - 1] = 0
-		return ret
-	}
-
 	var err error
 	var data []byte
-	var keys [][]byte
-	var values [][]byte
-	for {
-		data, err = h.ExecWithGroup(req, pb.KVGroup)
-		if data == nil || err != nil {
-			break
-		}
+	var keys [][]byte = nil
 
-		var tsr TpeScanResponse
-
-		err = json.Unmarshal(data, &tsr)
-
-		if err != nil || tsr.Keys == nil || len(tsr.Keys) == 0 {
-			break
-		}
-
-		//save data
-		if needKey {
-			keys = append(keys, tsr.Keys...)
-		}
-		values = append(values,tsr.Values...)
-
-		//case1. shard has more data
-		//case2. shard does not have more data but shard.End is not null
-		//read data further.
-		if tsr.ShardHasMoreData || !tsr.ShardEndIsNull {
-			req.TpeScan.Start = successorOfkey(tsr.Keys[len(tsr.Keys) - 1])
-		}
+	data, err = h.ExecWithGroup(req, pb.KVGroup)
+	if data == nil {
+		return nil, nil, false, nil, errorCubeReturnIsNull
 	}
-	return keys, values, err
+
+	if err != nil {
+		return nil, nil, false, nil, err
+	}
+
+	var tsr TpeScanResponse
+	err = json.Unmarshal(data, &tsr)
+	if err != nil {
+		return nil, nil, false, nil, err
+	}
+
+	//save keys
+	if needKey {
+		keys = tsr.Keys
+	}
+
+	return keys, tsr.Values, tsr.HasMoreData, tsr.NextScanKey, err
 }
 
 //PrefixScan scans in KVGroup
@@ -565,41 +584,38 @@ func (h *driver) PrefixScanWithGroup(prefix []byte, limit uint64, group pb.Group
 	return pairs, err
 }
 
-func (h *driver) TpePrefixScan(prefixOrStartkey []byte, prefixLength int, limit uint64) ([][]byte, error) {
+func (h *driver) TpePrefixScan(startKeyOrPrefix []byte, prefixLength int, limit uint64) ([][]byte, [][]byte, bool, []byte, error) {
+	if prefixLength > len(startKeyOrPrefix) {
+		return nil, nil, false, nil, errorPrefixLengthIsLongerThanStartKey
+	}
 	req := pb.Request{
 		Type:  pb.TpePrefixScan,
 		Group: pb.KVGroup,
 		TpePrefixScan: pb.TpePrefixScanRequest{
-			PrefixOrStartKey: prefixOrStartkey,
-			PrefixLength: int64(prefixLength),
+			PrefixOrStartKey: startKeyOrPrefix,
+			PrefixLength:     int64(prefixLength),
 			Limit:            limit,
 		},
 	}
-	var pairs [][]byte
+
 	var err error
 	var data []byte
-	i := 0
-	//TODO:to fix
-	for {
-		i = i + 1
-		data, err = h.ExecWithGroup(req, pb.KVGroup)
-		if data == nil || err != nil {
-			break
-		}
-		var kvs [][]byte
-		err = json.Unmarshal(data, &kvs)
-		if err != nil || kvs == nil || len(kvs) == 0 {
-			break
-		}
-		if len(kvs)%2 == 0 {
-			pairs = append(pairs, kvs...)
-			break
-		}
 
-		pairs = append(pairs, kvs[0:len(kvs)-1]...)
-		req.TpePrefixScan.PrefixOrStartKey = kvs[len(kvs)-1]
+	data, err = h.ExecWithGroup(req, pb.KVGroup)
+	if data == nil {
+		return nil, nil, false, nil, errorCubeReturnIsNull
 	}
-	return pairs, err
+	if err != nil {
+		return nil, nil, false, nil, err
+	}
+
+	var tsr TpeScanResponse
+	err = json.Unmarshal(data, &tsr)
+	if err != nil {
+		return nil, nil, false, nil, err
+	}
+
+	return tsr.Keys, tsr.Values, tsr.HasMoreData, tsr.NextScanKey, err
 }
 
 //PrefixKeys scans in KVGroup.
@@ -925,6 +941,6 @@ func (h *driver) AddSchedulingRule(ruleName string, groupByLabel string) error {
 type TpeScanResponse struct {
 	Keys [][]byte	`json:"keys"`
 	Values [][]byte	`json:"values"`
-	ShardHasMoreData bool `json:"shard_has_more_data,string"`
-	ShardEndIsNull bool	`json:"shard_end_is_null,string"`
+	HasMoreData bool `json:"has_more_data,string"`
+	NextScanKey []byte `json:"next_scan_key"`
 }

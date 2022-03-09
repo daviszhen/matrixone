@@ -19,7 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
+	"github.com/matrixorigin/matrixcube/storage/executor"
+	"github.com/matrixorigin/matrixcube/util/buf"
 	"github.com/matrixorigin/matrixone/pkg/vm/driver"
 	errDriver "github.com/matrixorigin/matrixone/pkg/vm/driver/error"
 	pb3 "github.com/matrixorigin/matrixone/pkg/vm/driver/pb"
@@ -32,6 +33,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/driver/pb"
 
 	"github.com/matrixorigin/matrixcube/util"
+)
+
+var (
+	errorPrefixLengthIsLongerThanStartKey = errors.New("the preifx length is longer than the startKey")
 )
 
 // Storage memory storage
@@ -119,87 +124,82 @@ func (ce *kvExecutor) scan(shard meta.Shard, req storage.Request) ([]byte, error
 	return rep, nil
 }
 
-func (ce *kvExecutor) tpeScan(shard meta.Shard, req storage.Request) ([]byte, error) {
+func (ce *kvExecutor) clone (value []byte,buffer *buf.ByteBuf) ([]byte,error) {
+	if buffer == nil {
+		v := make([]byte, len(value))
+		copy(v, value)
+		return v,nil
+	}
+	buffer.MarkWrite()
+	write, err := buffer.Write(value)
+	if err != nil || write != len(value){
+		return nil, err
+	}
+	return buffer.WrittenDataAfterMark().Data(),nil
+}
+
+func (ce *kvExecutor) tpeScan(readCtx storage.ReadContext, shard meta.Shard, req storage.Request) ([]byte, error) {
 	userReq := &pb.TpeScanRequest{}
 	protoc.MustUnmarshal(userReq, req.Cmd)
 
-	var startKey []byte = nil
-	var endKey []byte = nil
+	scanner := executor.NewKVBasedDataStorageScanner(ce.kv)
 
-	if userReq.Start != nil {
-		startKey = kv.EncodeDataKey(userReq.GetStart(),nil)
-	}
-
-	if userReq.End != nil {
-		endKey = kv.EncodeDataKey(userReq.GetEnd(),nil)
-	}
-
-	copyKeyAndValue := false
-	readCount := uint64(0)
-	shardHasMoreData := true
-	shardEndIsNull := shard.GetEnd() == nil
-	var decodedKey []byte
 	var keys [][]byte = nil
 	var values [][]byte = nil
 	var rep []byte = nil
 
-	clone := func (value []byte) []byte {
-		v := make([]byte, len(value))
-		copy(v, value)
-		return v
+	options := []executor.ScanOption{
+		executor.WithScanStartKey(userReq.GetStart()),
+		executor.WithScanEndKey(userReq.GetEnd()),
+		executor.WithScanCountLimit(userReq.GetLimit()),
 	}
 
-	callback := func(key []byte,value []byte) (bool, error) {
-		decodedKey = kv.DecodeDataKey(key)
-		// shard.startKey == nil, no check
-		// shard.endKey == nil,no check
+	needKey := userReq.GetNeedKey()
+	var lastKey []byte = nil
+	var copyValue []byte = nil
+	var err error = nil
 
-		// decodedKey < shard.startKey, return true,nil
-		if shard.GetStart() != nil && bytes.Compare(decodedKey,shard.GetStart()) < 0 {
-			return true, nil
+	callback := func(key []byte,value []byte) error {
+		lastKey,err = ce.clone(key,readCtx.ByteBuf())
+		if err != nil {
+			return err
 		}
 
-		// shard.endKey <= decodedKey, return false,nil
-		if shard.GetEnd() != nil && bytes.Compare(shard.GetEnd(),decodedKey) <= 0 {
-			shardHasMoreData = false
-			return false, nil
+		if needKey {
+			keys = append(keys, lastKey)
 		}
 
-		// shard.startKey <= decodedKey < shard.endKey, process key/value
-
-		//count limit
-		if readCount >= userReq.GetLimit() {
-			return false,nil
-		}
-		readCount++
-
-		//need to return key
-		if !copyKeyAndValue {
-			keys = append(keys, clone(decodedKey))
-		}else{
-			keys = append(keys, decodedKey)
+		copyValue, err = ce.clone(value,readCtx.ByteBuf())
+		if err != nil {
+			return err
 		}
 
-		if !copyKeyAndValue {
-			values = append(values, clone(value))
-		}else{
-			values = append(values, value)
-		}
-
-		return true,nil
+		values = append(values, copyValue)
+		return nil
 	}
 
-	err := ce.kv.Scan(startKey,endKey,callback,copyKeyAndValue)
+	completed, policy, err := scanner.Scan(shard,callback,options...)
 	if err != nil {
 		rep = errDriver.ErrorResp(err)
 		return rep, nil
 	}
 
+	var nextKey []byte
+
+	switch policy {
+	case executor.None:
+		nextKey = nil
+	case executor.GenWithResultLastKey:
+		nextKey = kv.NextKey(lastKey,readCtx.ByteBuf())
+	case executor.UseShardEnd:
+		nextKey,err = ce.clone(shard.GetEnd(),readCtx.ByteBuf())
+	}
+
 	tsr := driver.TpeScanResponse{
 		Keys:             keys,
 		Values:           values,
-		ShardHasMoreData: shardHasMoreData,
-		ShardEndIsNull:   shardEndIsNull,
+		HasMoreData:  !completed,
+		NextScanKey:   nextKey,
 	}
 
 	if rep, err = json.Marshal(tsr); err != nil {
@@ -209,6 +209,7 @@ func (ce *kvExecutor) tpeScan(shard meta.Shard, req storage.Request) ([]byte, er
 
 	return rep, nil
 }
+
 func (ce *kvExecutor) prefixScan(shard meta.Shard, req storage.Request) ([]byte, error) {
 
 	customReq := &pb.PrefixScanRequest{}
@@ -243,103 +244,85 @@ func (ce *kvExecutor) prefixScan(shard meta.Shard, req storage.Request) ([]byte,
 	return byteData, nil
 }
 
-func (ce *kvExecutor) tpePrefixScan(shard meta.Shard, req storage.Request) ([]byte, error) {
+func (ce *kvExecutor) tpePrefixScan(readCtx storage.ReadContext, shard meta.Shard, req storage.Request) ([]byte, error) {
 	userReq := &pb.TpePrefixScanRequest{}
 	protoc.MustUnmarshal(userReq,req.Cmd)
 
-	var err error
-	var data [][]byte
-	var rep []byte
+	scanner := executor.NewKVBasedDataStorageScanner(ce.kv)
 
-	keyIsInShard := func(shardStartKey,shardEndKey,key []byte) bool {
-		//key < shardStartKey or key >= shardEndKey
-		if shardStartKey != nil && bytes.Compare(key,shardStartKey) < 0 ||
-			shardEndKey != nil && bytes.Compare(key,shardEndKey) >= 0{
-			return false
-		}
-		return true
+	if userReq.GetPrefixLength() > int64(len(userReq.GetPrefixOrStartKey())) {
+		return nil, errorPrefixLengthIsLongerThanStartKey
 	}
 
-	keyHasPrefix := func(key,prefix []byte) bool {
+	prefix := userReq.GetPrefixOrStartKey()[:userReq.GetPrefixLength()]
+
+	prefixFilter := func(key []byte) bool {
 		return bytes.HasPrefix(key,prefix)
 	}
 
-	clone := func (value []byte) []byte {
-		v := make([]byte, len(value))
-		copy(v, value)
-		return v
+	options := []executor.ScanOption{
+		executor.WithScanStartKey(userReq.GetPrefixOrStartKey()),
+		executor.WithScanCountLimit(userReq.GetLimit()),
+		executor.WithScanFilterFunc(prefixFilter),
 	}
 
-	copyKeyAndValue := false
-	readCount := uint64(0)
-	needCheckLimit := userReq.GetLimit() != 0
-	var decodedKey []byte
-	callback := func(key []byte, value []byte) (bool, error) {
-		if !keyIsInShard(shard.Start,shard.End,key) {
-			return true,nil
-		}
-		//now, the key is in the shard
+	var err error
+	var lastKey []byte
+	var rep []byte
+	var keys [][]byte
+	var values [][]byte
+	var copyValue []byte
 
-		decodedKey = kv.DecodeDataKey(key)
-		if !keyHasPrefix(decodedKey,userReq.GetPrefixOrStartKey()[:userReq.GetPrefixLength()]) {
-			return false,nil
-		}
-		//now, the key has the prefix
-
-		if needCheckLimit {
-			if readCount >= userReq.GetLimit() {
-				return false,nil
-			}
-			readCount++
+	callback := func(key []byte,value []byte) error {
+		lastKey,err = ce.clone(key,readCtx.ByteBuf())
+		if err != nil {
+			return err
 		}
 
-		if copyKeyAndValue {
-			data = append(data,decodedKey)
-			data = append(data,value)
-		}else{
-			data = append(data,clone(decodedKey))
-			data = append(data,clone(value))
+		keys = append(keys, lastKey)
+
+		copyValue, err = ce.clone(value,readCtx.ByteBuf())
+		if err != nil {
+			return err
 		}
 
-		return false, nil
+		values = append(values, copyValue)
+		return nil
 	}
 
-	err = ce.kv.Scan(userReq.PrefixOrStartKey,nil,callback,copyKeyAndValue)
+	completed,policy, err := scanner.Scan(shard,callback,options...)
+	if err != nil {
+		return nil, err
+	}
+
+	var nextKey []byte
+
+	switch policy {
+	case executor.None:
+		nextKey = nil
+	case executor.GenWithResultLastKey:
+		nextKey = kv.NextKey(lastKey,readCtx.ByteBuf())
+	case executor.UseShardEnd:
+		nextKey,err = ce.clone(shard.GetEnd(),readCtx.ByteBuf())
+	}
+
+	tsr := driver.TpeScanResponse{
+		Keys:             keys,
+		Values:           values,
+		HasMoreData:  !completed,
+		NextScanKey:   nextKey,
+	}
 
 	if err != nil {
 		rep = errDriver.ErrorResp(err)
 		return rep, nil
 	}
 
-	//case 1: read enough key -> Do not need to read other keys
-	//							in the shard or other shards.
-	//case 2: do not read enough key,
-	//	A. but there are no keys left in the shard any more.
-	//  	case2.1: if the endKey of the shard does not have the prefix,
-	//  	         it means there are no other shards can have keys owns the prefix.
-	//               -> Do not need to read other shards.
-	//  	case2.1: if the endKey of the shard does have the prefix,
-	//  	         it means maybe there are other shards can have
-	// 	      			keys owns the prefix.
-	//               -> Need to read other shards.
-	//  B. but there are many keys left in the shard.
-	//		it means there are no other keys in the shard own the prefix.
-	//	    -> Do not need to read other shards.
-
-	if needCheckLimit && readCount >= userReq.GetLimit() {
-		//read enough key value
+	if rep, err = json.Marshal(tsr); err != nil {
+		rep = errDriver.ErrorResp(err)
+		return rep, err
 	}
 
-	//TODO:to fix
-	//if shard.End != nil && bytes.Compare(shard.End, userReq.End) <= 0 {
-	//	data = append(data, shard.End)
-	//}
-	if data != nil {
-		if rep, err = json.Marshal(data); err != nil {
-			rep = errDriver.ErrorResp(err)
-			return rep, err
-		}
-	}
 	return rep, nil
 }
 
@@ -476,7 +459,7 @@ func (ce *kvExecutor) Read(ctx storage.ReadContext) ([]byte, error) {
 		ctx.SetReadBytes(uint64(len(v)))
 		return v, nil
 	case uint64(pb.TpeScan):
-		v, err := ce.tpeScan(ctx.Shard(), request)
+		v, err := ce.tpeScan(ctx, ctx.Shard(), request)
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +473,7 @@ func (ce *kvExecutor) Read(ctx storage.ReadContext) ([]byte, error) {
 		ctx.SetReadBytes(uint64(len(v)))
 		return v, nil
 	case uint64(pb.TpePrefixScan):
-		v, err := ce.tpePrefixScan(ctx.Shard(), request)
+		v, err := ce.tpePrefixScan(ctx, ctx.Shard(), request)
 		if err != nil {
 			return nil, err
 		}

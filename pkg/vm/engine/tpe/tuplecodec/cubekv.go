@@ -40,6 +40,7 @@ var (
 	errorInvalidIDPool = errors.New("invalid idpool")
 	errorInvalidKeyValueCount = errors.New("key count != value count")
 	errorUnsupportedInCubeKV = errors.New("unsupported in cubekv")
+	errorPrefixLengthIsLongerThanStartKey = errors.New("the preifx length is longer than the startKey")
 )
 var _ KVHandler = &CubeKV{}
 
@@ -216,6 +217,9 @@ func (ck * CubeKV) Delete(key TupleKey) error {
 }
 
 func (ck *CubeKV) DeleteWithPrefix(prefix TupleKey) error {
+	if prefix == nil {
+		return errorPrefixIsNull
+	}
 	return errorUnsupportedInCubeKV
 }
 
@@ -238,7 +242,7 @@ func (ck * CubeKV) GetBatch(keys []TupleKey) ([]TupleValue, error) {
 }
 
 func (ck * CubeKV) GetRange(startKey TupleKey, endKey TupleKey) ([]TupleValue, error) {
-	_, retValues, err := ck.Cube.TpeScan(startKey, endKey, math.MaxUint64,false)
+	_, retValues, _, _, err := ck.Cube.TpeScan(startKey, endKey, math.MaxUint64,false)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +254,7 @@ func (ck * CubeKV) GetRange(startKey TupleKey, endKey TupleKey) ([]TupleValue, e
 }
 
 func (ck * CubeKV) GetRangeWithLimit(startKey TupleKey, endKey TupleKey, limit uint64) ([]TupleKey, []TupleValue, error) {
-	scanKeys, scanValues, err := ck.Cube.TpeScan(startKey, endKey, limit, true)
+	scanKeys, scanValues, _, _, err := ck.Cube.TpeScan(startKey, endKey, limit, true)
 	if err != nil {
 		return nil,nil, err
 	}
@@ -268,29 +272,30 @@ func (ck * CubeKV) GetWithPrefix(prefixOrStartkey TupleKey, prefixLen int, limit
 		return nil, nil, errorPrefixIsNull
 	}
 
-	//TODO: to fix
-	ret, err := ck.Cube.TpePrefixScan(prefixOrStartkey,prefixLen,limit)
+	if prefixLen > len(prefixOrStartkey) {
+		return nil, nil, errorPrefixLengthIsLongerThanStartKey
+	}
+
+	scanKeys, scanValues, _, _, err := ck.Cube.TpePrefixScan(prefixOrStartkey,prefixLen,limit)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	var keys []TupleKey
 	var values []TupleValue
-	//ret[even index] is key
-	//ret[odd index] is value
-	for i := 1 ; i < len(ret); i += 2 {
-		keys = append(keys,ret[i-1])
-		values = append(values,ret[i])
+	for i := 0 ; i < len(scanKeys); i ++{
+		keys = append(keys,scanKeys[i])
+		values = append(values,scanValues[i])
 	}
+
 	return keys,values,err
 }
 
 func (ck * CubeKV) GetShardsWithRange(startKey TupleKey, endKey TupleKey) (interface{}, error) {
-	panic("implement me")
+	return nil,errorUnsupportedInCubeKV
 }
 
 func (ck * CubeKV) GetShardsWithPrefix(prefix TupleKey) (interface{}, error) {
-	panic("implement me")
+	return nil,errorUnsupportedInCubeKV
 }
 
 
