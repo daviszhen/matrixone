@@ -17,7 +17,6 @@ package tuplecodec
 import (
 	"errors"
 	"github.com/matrixorigin/matrixcube/server"
-	"github.com/matrixorigin/matrixcube/storage/kv"
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/vm/driver"
@@ -239,33 +238,27 @@ func (ck * CubeKV) GetBatch(keys []TupleKey) ([]TupleValue, error) {
 }
 
 func (ck * CubeKV) GetRange(startKey TupleKey, endKey TupleKey) ([]TupleValue, error) {
-	ret, err := ck.Cube.Scan(startKey, endKey, math.MaxUint64)
+	_, retValues, err := ck.Cube.TpeScan(startKey, endKey, math.MaxUint64,false)
 	if err != nil {
 		return nil, err
 	}
 	var values []TupleValue
-	//ret[even index] is key
-	//ret[odd index] is value
-	for i := 1 ; i < len(ret); i += 2 {
-		values = append(values,ret[i])
+	for i := 0 ; i < len(retValues); i ++ {
+		values = append(values,retValues[i])
 	}
 	return values,err
 }
 
-func (ck * CubeKV) GetRangeWithLimit(startKey TupleKey, limit uint64) ([]TupleKey, []TupleValue, error) {
-	ret, err := ck.Cube.Scan(startKey, nil, limit)
+func (ck * CubeKV) GetRangeWithLimit(startKey TupleKey, endKey TupleKey, limit uint64) ([]TupleKey, []TupleValue, error) {
+	scanKeys, scanValues, err := ck.Cube.TpeScan(startKey, endKey, limit, true)
 	if err != nil {
 		return nil,nil, err
 	}
 	var keys []TupleKey
-	var realKey TupleKey
 	var values []TupleValue
-	//ret[even index] is key
-	//ret[odd index] is value
-	for i := 1 ; i < len(ret); i += 2 {
-		realKey = kv.DecodeDataKey(ret[i-1])
-		keys = append(keys,realKey)
-		values = append(values,ret[i])
+	for i := 0 ; i < len(scanKeys); i ++{
+		keys = append(keys,scanKeys[i])
+		values = append(values,scanValues[i])
 	}
 	return keys,values,err
 }
@@ -276,7 +269,7 @@ func (ck * CubeKV) GetWithPrefix(prefixOrStartkey TupleKey, prefixLen int, limit
 	}
 
 	//TODO: to fix
-	ret, err := ck.Cube.PrefixScan(prefixOrStartkey[:prefixLen],limit)
+	ret, err := ck.Cube.TpePrefixScan(prefixOrStartkey,prefixLen,limit)
 	if err != nil {
 		return nil, nil, err
 	}
