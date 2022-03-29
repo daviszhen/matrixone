@@ -305,12 +305,15 @@ func (ihi *IndexHandlerImpl) ReadFromIndex(readCtx interface{}) (*batch.Batch, i
 			for i := 0; i < len(keys); i++ {
 				//decode the name which is in the value
 				data := values[i]
+				beforeDecode := make([]byte, len(data))
+				copy(beforeDecode, data)
 				_, dis, err := tkd.DecodePrimaryIndexValue(data,
 					indexReadCtx.IndexDesc, 0, ihi.serializer)
 				if err != nil {
 					prevValue := ES.getKey(keys[i])
 					ES.append(keys[i], values[i])
-					logutil.Errorf("key %v value %v previous value %v", keys[i], values[i], prevValue)
+					logutil.Errorf("key %v value %v previous value %v beforeDecode %v afterDecode %v",
+						keys[i], values[i], prevValue, beforeDecode, data)
 					return nil, 0, err
 				}
 

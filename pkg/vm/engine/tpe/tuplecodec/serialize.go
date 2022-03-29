@@ -285,7 +285,7 @@ func (cs *ConciseSerializer) DeserializeValue(data []byte) ([]byte, *orderedcode
 		return nil, nil, err
 	}
 
-	bufReader := bytes.NewReader(data)
+	bufReader := bytes.NewReader(actualData)
 
 	//unmarshal value
 	var value interface{}
