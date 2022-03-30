@@ -306,8 +306,6 @@ func (ihi *IndexHandlerImpl) ReadFromIndex(readCtx interface{}) (*batch.Batch, i
 			for i := 0; i < len(keys); i++ {
 				//decode the name which is in the value
 				data := values[i]
-				beforeDecode := make([]byte, len(data))
-				copy(beforeDecode, data)
 				_, dis, err := tkd.DecodePrimaryIndexValue(data,
 					indexReadCtx.IndexDesc, 0, ihi.serializer)
 				if err != nil {
