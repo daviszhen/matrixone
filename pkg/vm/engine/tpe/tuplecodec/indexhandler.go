@@ -17,6 +17,8 @@ package tuplecodec
 import (
 	"bytes"
 	"errors"
+	"github.com/matrixorigin/matrixcube/storage/kv"
+	"github.com/matrixorigin/matrixcube/storage/kv/pebble"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
@@ -45,6 +47,7 @@ type IndexHandlerImpl struct {
 	kvLimit    uint64
 	serializer ValueSerializer
 	rcc        RowColumnConverter
+	PBKV       *pebble.Storage
 }
 
 func NewIndexHandlerImpl(tch *TupleCodecHandler,
@@ -312,8 +315,13 @@ func (ihi *IndexHandlerImpl) ReadFromIndex(readCtx interface{}) (*batch.Batch, i
 				if err != nil {
 					prevValue := ES.getKey(keys[i])
 					ES.append(keys[i], values[i])
-					logutil.Errorf("key %v value %v previous value %v beforeDecode %v afterDecode %v",
-						keys[i], values[i], prevValue, beforeDecode, data)
+					pebbleKey := kv.EncodeDataKey(keys[i], nil)
+					get, err := ihi.PBKV.Get(pebbleKey)
+					if err != nil {
+						return nil, 0, err
+					}
+					logutil.Errorf("key %v \n value %v \n pebbleValue %v \n previous value %v \n beforeDecode %v \n afterDecode %v",
+						keys[i], values[i], get, prevValue, beforeDecode, data)
 					return nil, 0, err
 				}
 

@@ -311,7 +311,7 @@ func (ce *kvExecutor) tpePrefixScan(readCtx storage.ReadContext, shard metapb.Sh
 		if err != nil {
 			return err
 		}
-
+		logutil.Infof("tpePrefixScan key %v value %v", lastKey, copyValue)
 		values = append(values, copyValue)
 		return nil
 	}
