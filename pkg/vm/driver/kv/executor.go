@@ -316,8 +316,6 @@ func (ce *kvExecutor) tpePrefixScan(readCtx storage.ReadContext, shard metapb.Sh
 		nf.collect(valueBuf)
 		copyValue = ce.copy(valueBuf, value)
 
-		//logutil.Infof("tpePrefixScan key %v value %v", lastKey, copyValue)
-
 		values = append(values, copyValue)
 		return nil
 	}
@@ -353,16 +351,6 @@ func (ce *kvExecutor) tpePrefixScan(readCtx storage.ReadContext, shard metapb.Sh
 	}
 
 	rep = protoc.MustMarshal(&tsr)
-
-	//for test
-	//test := pb.TpeScanResponse{}
-	//protoc.MustUnmarshal(&test, rep)
-	//
-	//for i := 0; i < len(keys); i++ {
-	//	if !bytes.Equal(values[i], test.Values[i]) {
-	//		logutil.Infof("deserialize key1 %v value1 %v key2 %v value2 %v", keys[i], values[i], test.Keys[i], test.Values[i])
-	//	}
-	//}
 
 	return rep, nil
 }

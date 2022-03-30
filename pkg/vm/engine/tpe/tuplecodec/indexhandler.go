@@ -17,11 +17,9 @@ package tuplecodec
 import (
 	"bytes"
 	"errors"
-	"github.com/matrixorigin/matrixcube/storage/kv"
 	"github.com/matrixorigin/matrixcube/storage/kv/pebble"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/descriptor"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/index"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/orderedcodec"
@@ -313,15 +311,6 @@ func (ihi *IndexHandlerImpl) ReadFromIndex(readCtx interface{}) (*batch.Batch, i
 				_, dis, err := tkd.DecodePrimaryIndexValue(data,
 					indexReadCtx.IndexDesc, 0, ihi.serializer)
 				if err != nil {
-					prevValue := ES.getKey(keys[i])
-					ES.append(keys[i], values[i])
-					pebbleKey := kv.EncodeDataKey(keys[i], nil)
-					get, err := ihi.PBKV.Get(pebbleKey)
-					if err != nil {
-						return nil, 0, err
-					}
-					logutil.Errorf("key %v \n value %v \n pebbleValue %v \n previous value %v \n beforeDecode %v \n afterDecode %v",
-						keys[i], values[i], get, prevValue, beforeDecode, data)
 					return nil, 0, err
 				}
 

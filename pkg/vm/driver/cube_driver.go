@@ -686,14 +686,6 @@ func (h *driver) TpePrefixScan(startKeyOrPrefix []byte, prefixLength int, prefix
 	var tsr pb.TpeScanResponse
 	protoc.MustUnmarshal(&tsr, data)
 
-	//for i := 0; i < len(tsr.Keys); i++ {
-	//	l := len(tsr.Values)
-	//	if l >= 40 {
-	//		l = 40
-	//	}
-	//	logutil.Infof("driver key %v value %v", tsr.Keys[i], tsr.Values[i])
-	//}
-
 	return tsr.Keys, tsr.Values, tsr.CompleteInAllShards, tsr.NextScanKey, err
 }
 
