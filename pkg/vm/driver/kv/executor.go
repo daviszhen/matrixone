@@ -299,7 +299,6 @@ func (ce *kvExecutor) tpePrefixScan(readCtx storage.ReadContext, shard metapb.Sh
 	var keys [][]byte
 	var values [][]byte
 	var copyValue []byte
-	needKeyOnly := userReq.GetNeedKeyOnly()
 	nf := mallocedBuffers{}
 	defer func() {
 		//!!!NOTE return buffer to the pool
@@ -313,13 +312,11 @@ func (ce *kvExecutor) tpePrefixScan(readCtx storage.ReadContext, shard metapb.Sh
 
 		keys = append(keys, lastKey)
 
-		if !needKeyOnly {
-			valueBuf := ce.malloc.malloc(len(value))
-			nf.collect(valueBuf)
-			copyValue = ce.copy(valueBuf, value)
+		valueBuf := ce.malloc.malloc(len(value))
+		nf.collect(valueBuf)
+		copyValue = ce.copy(valueBuf, value)
 
-			values = append(values, copyValue)
-		}
+		values = append(values, copyValue)
 		return nil
 	}
 

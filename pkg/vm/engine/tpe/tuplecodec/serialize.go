@@ -33,7 +33,6 @@ var (
 	errorAttributeIDInFormatIsUnsupported     = errors.New("the attributeID in format is unsupported now")
 	errorNoSuchAttributeInTuple               = errors.New("no such attribute in the tuple")
 	errorGetOffsetArrayLenFailed              = errors.New("get offsetArrayLen failed")
-	errorNoSuchField                          = errors.New("no such field")
 )
 
 type SerializerType int
@@ -42,23 +41,6 @@ const (
 	ST_JSON    SerializerType = iota
 	ST_CONCISE SerializerType = iota + 1
 )
-
-// ValueDecodedItem for value deserialization
-type ValueDecodedItem struct {
-	OffsetInUndecodedKey     int    //the position in undecoded bytes
-	RawBytes                 []byte //the byte that holds the item
-	BytesCountInUndecodedKey int    //the count of bytes in undecoded bytes
-	ID                       uint32 //the attribute id
-	serializer               ValueSerializer
-}
-
-func (vdi *ValueDecodedItem) DecodeValue() (*orderedcodec.DecodedItem, error) {
-	_, di, err := vdi.serializer.DeserializeValue(vdi.RawBytes)
-	if err != nil {
-		return nil, err
-	}
-	return di, nil
-}
 
 //ValueSerializer for serializing the value
 //Stateless is better
@@ -258,10 +240,12 @@ func (dvs *DefaultValueSerializer) DeserializeValue(data []byte) ([]byte, *order
 		}
 	}
 
-	return data[dataEnd:], orderedcodec.NewDecodeItem(value,
-		vt,
-		orderedcodec.SECTION_TYPE_VALUE,
-		0, 1+bytesRead+int(len(actualData))), nil
+	return data[dataEnd:],
+		orderedcodec.NewDecodeItem(value,
+			vt,
+			orderedcodec.SECTION_TYPE_VALUE,
+			0, 1+bytesRead+int(len(actualData))),
+		nil
 }
 
 type ConciseSerializer struct {
@@ -410,10 +394,12 @@ func (cs *ConciseSerializer) DeserializeValue(data []byte) ([]byte, *orderedcode
 		return nil, nil, errorWrongValueType
 	}
 
-	return data[dataEnd:], orderedcodec.NewDecodeItem(value,
-		vt,
-		orderedcodec.SECTION_TYPE_VALUE,
-		0, 1+bytesRead+int(len(actualData))), nil
+	return data[dataEnd:],
+		orderedcodec.NewDecodeItem(value,
+			vt,
+			orderedcodec.SECTION_TYPE_VALUE,
+			0, 1+bytesRead+int(len(actualData))),
+		nil
 }
 
 // appendValueType appends the valueType of the value to the buffer
@@ -543,31 +529,6 @@ func extractActualData(data []byte) ([]byte, int64, int, orderedcodec.ValueType,
 	return actualData, dataEnd, bytesRead, vt, nil
 }
 
-// extractSerializedBytes extracts the serialized bytes of the attribute
-func extractSerializedBytes(data []byte) ([]byte, []byte, error) {
-	if len(data) == 0 {
-		return nil, nil, errorNoEnoughBytes
-	}
-	//decode data len
-	dataLen, bytesRead := binary.Varint(data[1:])
-	if bytesRead == 0 {
-		return nil, nil, errorNoEnoughBytes
-	}
-
-	if bytesRead < 0 {
-		return nil, nil, errorVarintOverflow
-	}
-
-	//skip the byte for value type and the bytes for data length
-	dataOffset := 1 + bytesRead
-	if int64(len(data[dataOffset:])) < dataLen {
-		return nil, nil, errorNoEnoughBytes
-	}
-	dataEnd := int64(dataOffset) + dataLen
-
-	return data[:dataEnd], data[dataEnd:], nil
-}
-
 type ValueLayoutContext struct {
 	TableDesc *descriptor.RelationDesc
 	IndexDesc *descriptor.IndexDesc
@@ -575,22 +536,19 @@ type ValueLayoutContext struct {
 	//write control for the attribute
 	AttributeStates []AttributeStateForWrite
 	Tuple           Tuple
-	Fields          []interface{}
 
 	ColumnGroup uint64
 }
 
 // ValueLayoutSerializer defines the layout of the value serialization
 type ValueLayoutSerializer interface {
-	Serialize(out []byte, ctx *ValueLayoutContext) ([]byte, error)
-	Deserialize(data []byte, amForValue *AttributeMap) ([]byte, []*orderedcodec.DecodedItem, []*ValueDecodedItem, error)
-	GetPositionsOfAttributesInTheValue(tableDesc *descriptor.RelationDesc, indexDesc *descriptor.IndexDesc) map[uint32]int
+	Serialize(ctx *ValueLayoutContext) ([]byte, error)
+	Deserialize(data []byte) ([]byte, []*orderedcodec.DecodedItem, error)
 }
 
-var _ ValueLayoutSerializer = &CompactValueLayoutSerializer{}
 var _ ValueLayoutSerializer = &DefaultValueLayoutSerializer{}
 
-// CompactValueLayoutSerializer defines a compact layout of the value
+// DefaultValueLayoutSerializer defines a compact layout of the value
 /*
 The Layout of the value:
 | The Control Byte(first byte) | The Column Group (option) | The Attributes Storage Section                                                   |
@@ -608,7 +566,7 @@ bit5: 0-The Attribute X Format does not have Attribute ID；1-The Attribute X Fo
 bit4~bit3 : used in secondary index
 bit0~bit2: the offset of the Attributes Offset Section
 */
-type CompactValueLayoutSerializer struct {
+type DefaultValueLayoutSerializer struct {
 	needColumnGroup         bool
 	needAttributeIDInFormat bool
 	serializer              ValueSerializer
@@ -665,7 +623,8 @@ const (
 
 //Serialize serializes the tuple
 //Now we just consider the primary index
-func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayoutContext) ([]byte, error) {
+func (dvls *DefaultValueLayoutSerializer) Serialize(ctx *ValueLayoutContext) ([]byte, error) {
+	var out []byte
 	//1, Fill The control byte
 	var controlByte byte = 0
 	//bit7:0-primary index；1-secondary index。
@@ -677,14 +636,14 @@ func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayout
 	}
 
 	//bit6: 0-no column group; 1-has column group
-	if cvls.needColumnGroup {
+	if dvls.needColumnGroup {
 		controlByte |= bit6mask
 	} else {
 		controlByte &= ^bit6mask
 	}
 
 	//bit5: 0-The Attribute X Format does not have Attribute ID；1-The Attribute X Format has Attribute ID
-	if cvls.needAttributeIDInFormat {
+	if dvls.needAttributeIDInFormat {
 		controlByte |= bit5mask
 		return nil, errorAttributeIDInFormatIsUnsupported
 	} else {
@@ -692,7 +651,7 @@ func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayout
 	}
 
 	//bit0~bit2: the offset of the Attributes Offset Section
-	if cvls.needColumnGroup {
+	if dvls.needColumnGroup {
 		cgBuf := make([]byte, binary.MaxVarintLen32)
 		//!!!NOTE: just use the low 32 bit
 		cg := uint32(ctx.ColumnGroup)
@@ -713,11 +672,11 @@ func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayout
 	}
 
 	//collect attribute id in the index
-	attributeIDInTheIndex := make(map[uint32]int8)
+	attributeIDInTheInex := make(map[uint32]int8)
 
 	for _, attribute := range ctx.IndexDesc.Attributes {
-		if _, exist := attributeIDInTheIndex[attribute.ID]; !exist {
-			attributeIDInTheIndex[attribute.ID] = 1
+		if _, exist := attributeIDInTheInex[attribute.ID]; !exist {
+			attributeIDInTheInex[attribute.ID] = 1
 		} else {
 			return nil, errorDuplicateAttributeIDInIndex
 		}
@@ -737,7 +696,7 @@ func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayout
 	//serialize the value when needed
 	for _, state := range ctx.AttributeStates {
 		//only store the attribute that is not in the index
-		if _, exist := attributeIDInTheIndex[state.AttrDesc.ID]; !exist {
+		if _, exist := attributeIDInTheInex[state.AttrDesc.ID]; !exist {
 			//the logic for implicit primary key or default expr
 			if state.NeedGenerated {
 				if state.AttrDesc.Default.Exist { //default expr
@@ -750,23 +709,16 @@ func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayout
 				if uint32(state.PositionInBatch) >= attrCount {
 					return nil, errorNoSuchAttributeInTuple
 				}
-				if ctx.Tuple != nil {
-					value, err = ctx.Tuple.GetValue(uint32(state.PositionInBatch))
-					if err != nil {
-						return nil, err
-					}
-				} else {
-					if state.PositionInBatch >= len(ctx.Fields) || state.PositionInBatch < 0 {
-						return nil, errorNoSuchField
-					}
-					value = ctx.Fields[state.PositionInBatch]
+				value, err = ctx.Tuple.GetValue(uint32(state.PositionInBatch))
+				if err != nil {
+					return nil, err
 				}
 			}
 
 			lastOffset := len(dataStorage)
 
 			//serial value
-			serialized, _, err = cvls.serializer.SerializeValue(dataStorage, value)
+			serialized, _, err = dvls.serializer.SerializeValue(dataStorage, value)
 			if err != nil {
 				return nil, err
 			}
@@ -817,15 +769,15 @@ func (cvls *CompactValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayout
 	return out, nil
 }
 
-func (cvls *CompactValueLayoutSerializer) Deserialize(data []byte, amForValue *AttributeMap) ([]byte, []*orderedcodec.DecodedItem, []*ValueDecodedItem, error) {
+func (dvls *DefaultValueLayoutSerializer) Deserialize(data []byte) ([]byte, []*orderedcodec.DecodedItem, error) {
 	if len(data) < 1 {
-		return nil, nil, nil, errorNoEnoughBytes
+		return nil, nil, errorNoEnoughBytes
 	}
 	controlByte := data[0]
 
 	//bit7:0-primary index；1-secondary index
 	if controlByte&bit7mask != 0 {
-		return nil, nil, nil, errorSecondaryIndexIsUnsupported
+		return nil, nil, errorSecondaryIndexIsUnsupported
 	}
 
 	hasColumnGroup := false
@@ -837,7 +789,7 @@ func (cvls *CompactValueLayoutSerializer) Deserialize(data []byte, amForValue *A
 
 	//bit5: 0-The Attribute X Format does not have Attribute ID；1-The Attribute X Format has Attribute ID
 	if controlByte&bit5mask != 0 {
-		return nil, nil, nil, errorAttributeIDInFormatIsUnsupported
+		return nil, nil, errorAttributeIDInFormatIsUnsupported
 	}
 
 	offsetSectionPos := 1
@@ -847,7 +799,7 @@ func (cvls *CompactValueLayoutSerializer) Deserialize(data []byte, amForValue *A
 
 	offsetArrayLen, bytesRead := binary.Uvarint(data[offsetSectionPos:])
 	if bytesRead <= 0 {
-		return nil, nil, nil, errorGetOffsetArrayLenFailed
+		return nil, nil, errorGetOffsetArrayLenFailed
 	}
 
 	offsetSectionPos += bytesRead
@@ -857,149 +809,41 @@ func (cvls *CompactValueLayoutSerializer) Deserialize(data []byte, amForValue *A
 	}
 
 	if excessLengthOfTheData(offsetSectionPos) {
-		return nil, nil, nil, errorNoEnoughBytes
+		return nil, nil, errorNoEnoughBytes
 	}
 
-	var valueDis []*ValueDecodedItem
+	var dis []*orderedcodec.DecodedItem
 
-	wantIDIndex := 0
-	for i := 0; i < int(offsetArrayLen) && wantIDIndex < amForValue.Length(); i++ {
+	for i := 0; i < int(offsetArrayLen); i++ {
 		if excessLengthOfTheData(offsetSectionPos + 7) {
-			return nil, nil, nil, errorNoEnoughBytes
+			return nil, nil, errorNoEnoughBytes
 		}
 		id := binary.BigEndian.Uint64(data[offsetSectionPos:])
 
 		offsetSectionPos += 8
 		if excessLengthOfTheData(offsetSectionPos + 7) {
-			return nil, nil, nil, errorNoEnoughBytes
+			return nil, nil, errorNoEnoughBytes
 		}
-		off := binary.BigEndian.Uint64(data[offsetSectionPos:])
+		offset := binary.BigEndian.Uint64(data[offsetSectionPos:])
 
-		if id == uint64(amForValue.GetAttributeAtSortedIndex(wantIDIndex)) {
-			vdi := &ValueDecodedItem{
-				OffsetInUndecodedKey: int(off),
-				RawBytes:             data[off:],
-				ID:                   uint32(id),
-				serializer:           cvls.serializer,
-			}
-			wantIDIndex++
-			valueDis = append(valueDis, vdi)
-		}
+		di := &orderedcodec.DecodedItem{}
+		di.ID = uint32(id)
+		di.OffsetInUndecodedKey = int(offset)
+		dis = append(dis, di)
 
 		offsetSectionPos += 8
 	}
 
 	// skip the rest of the data
 	if excessLengthOfTheData(offsetSectionPos + 7) {
-		return nil, nil, nil, errorNoEnoughBytes
+		return nil, nil, errorNoEnoughBytes
 	}
 
 	dataLen := int(binary.BigEndian.Uint64(data[offsetSectionPos:]))
 	offsetSectionPos += 8
 	if excessLengthOfTheData(offsetSectionPos + dataLen - 1) {
-		return nil, nil, nil, errorNoEnoughBytes
+		return nil, nil, errorNoEnoughBytes
 	}
 	offsetSectionPos += dataLen
-	return data[offsetSectionPos:], nil, valueDis, nil
-}
-
-func (cvls *CompactValueLayoutSerializer) GetPositionsOfAttributesInTheValue(tableDesc *descriptor.RelationDesc, indexDesc *descriptor.IndexDesc) map[uint32]int {
-	indexAttrIDs := make(map[uint32]int8)
-	for _, attr := range indexDesc.Attributes {
-		indexAttrIDs[attr.ID] = 1
-	}
-	attr2pos := make(map[uint32]int)
-	positionInValue := 0
-	for _, attr := range tableDesc.Attributes {
-		if _, exist := indexAttrIDs[attr.ID]; !exist {
-			attr2pos[attr.ID] = positionInValue
-			positionInValue++
-		}
-	}
-	return attr2pos
-}
-
-// DefaultValueLayoutSerializer defines a default layout of the value
-/*
-The Layout of the value:
-
-The attributes in the value keep the same order as they defined in the relation.
-
-| Attribute1,Attribute2,... |
-
-*/
-type DefaultValueLayoutSerializer struct {
-	serializer ValueSerializer
-}
-
-func (dvls *DefaultValueLayoutSerializer) Serialize(out []byte, ctx *ValueLayoutContext) ([]byte, error) {
-	var value interface{}
-	var err error
-	//fill value into the row from the tuple
-	for _, state := range ctx.AttributeStates {
-		//the logic for implicit primary key or default expr
-		if state.NeedGenerated {
-			if state.AttrDesc.Default.Exist { //default expr
-				value = state.AttrDesc.Default.Value
-			} else {
-				//get the implicit primary key
-				value = state.ImplicitPrimaryKey
-			}
-		} else {
-			if ctx.Tuple != nil {
-				value, err = ctx.Tuple.GetValue(uint32(state.PositionInBatch))
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				if state.PositionInBatch >= len(ctx.Fields) || state.PositionInBatch < 0 {
-					return nil, errorNoSuchField
-				}
-				value = ctx.Fields[state.PositionInBatch]
-			}
-
-		}
-		//serial value
-		serialized, _, err := dvls.serializer.SerializeValue(out, value)
-		if err != nil {
-			return nil, err
-		}
-		out = serialized
-	}
-	return out, nil
-}
-
-func (dvls *DefaultValueLayoutSerializer) Deserialize(data []byte, amForValue *AttributeMap) ([]byte, []*orderedcodec.DecodedItem, []*ValueDecodedItem, error) {
-	var vdis []*ValueDecodedItem
-	id := uint32(0)
-	wantIDIndex := 0
-	for len(data) != 0 && wantIDIndex < amForValue.Length() {
-		serializedBytes, next, err := extractSerializedBytes(data)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		if id == uint32(amForValue.GetAttributeAtSortedIndex(wantIDIndex)) {
-			vdis = append(vdis, &ValueDecodedItem{
-				OffsetInUndecodedKey:     -1,
-				RawBytes:                 serializedBytes,
-				BytesCountInUndecodedKey: -1,
-				ID:                       id,
-				serializer:               dvls.serializer,
-			})
-			wantIDIndex++
-		}
-
-		id++
-		data = next
-	}
-	return data, nil, vdis, nil
-}
-
-func (dvls *DefaultValueLayoutSerializer) GetPositionsOfAttributesInTheValue(tableDesc *descriptor.RelationDesc, indexDesc *descriptor.IndexDesc) map[uint32]int {
-	positions := make(map[uint32]int)
-	for _, attr := range tableDesc.Attributes {
-		positions[attr.ID] = int(attr.ID)
-	}
-	return positions
+	return data[offsetSectionPos:], dis, nil
 }
