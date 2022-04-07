@@ -59,6 +59,7 @@ type TpeDatabase struct {
 	id             uint64
 	desc           *descriptor.DatabaseDesc
 	computeHandler computation.ComputationHandler
+	cube           driver.CubeDriver
 }
 
 type TpeRelation struct {
@@ -66,8 +67,14 @@ type TpeRelation struct {
 	dbDesc         *descriptor.DatabaseDesc
 	desc           *descriptor.RelationDesc
 	computeHandler computation.ComputationHandler
-	nodes          engine.Nodes
-	shards         *tuplecodec.Shards
+	//global nodes
+	nodes engine.Nodes
+	//global shards
+	shards *tuplecodec.Shards
+	//this node
+	thisNodes engine.Nodes
+	//shards in this node
+	shardsInThisNode *tuplecodec.Shards
 }
 
 type ShardNode struct {

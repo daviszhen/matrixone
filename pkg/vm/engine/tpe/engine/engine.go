@@ -117,6 +117,7 @@ func (te *TpeEngine) Database(name string) (engine.Database, error) {
 			id:             uint64(dbDesc.ID),
 			desc:           dbDesc,
 			computeHandler: te.computeHandler,
+			cube:           te.tpeConfig.Cube,
 		},
 		nil
 }

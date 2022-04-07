@@ -1023,13 +1023,25 @@ func (ck *CubeKV) GetShardsWithRange(startKey TupleKey, endKey TupleKey) (interf
 		shardInfos[i].statistics = stats
 	}
 
+	duplicateFunc := func(nodes []ShardNode, addr string) bool {
+		for _, node := range nodes {
+			if node.Addr == addr {
+				return true
+			}
+		}
+		return false
+	}
+
+	//all nodes that hold the table
 	var nodes []ShardNode
 	for id, addr := range stores {
-		nodes = append(nodes, ShardNode{
-			Addr:         addr,
-			StoreIDbytes: string(codec.Uint642Bytes(id)),
-			StoreID:      id,
-		})
+		if !duplicateFunc(nodes, addr) {
+			nodes = append(nodes, ShardNode{
+				Addr:         addr,
+				StoreIDbytes: string(codec.Uint642Bytes(id)),
+				StoreID:      id,
+			})
+		}
 	}
 
 	if len(nodes) == 0 {

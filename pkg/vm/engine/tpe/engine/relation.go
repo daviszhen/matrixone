@@ -32,7 +32,8 @@ var (
 
 func (trel *TpeRelation) Rows() int64 {
 	rows := int64(0)
-	for _, info := range trel.shards.ShardInfos() {
+	//read global shards
+	for _, info := range trel.shards.GetShardInfos() {
 		stats := info.GetStatistics()
 		rows += int64(stats.GetApproximateKeys())
 	}
@@ -41,7 +42,8 @@ func (trel *TpeRelation) Rows() int64 {
 
 func (trel *TpeRelation) Size(s string) int64 {
 	size := int64(0)
-	for _, info := range trel.shards.ShardInfos() {
+	//read global shards
+	for _, info := range trel.shards.GetShardInfos() {
 		stats := info.GetStatistics()
 		size += int64(stats.GetApproximateSize())
 	}
@@ -199,7 +201,7 @@ func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
 	var retReaders []engine.Reader = make([]engine.Reader, cnt)
 	var tpeReaders []*TpeReader = make([]*TpeReader, tcnt)
 	//split shards into multiple readers
-	shardInfos := trel.shards.ShardInfos()
+	shardInfos := trel.shardsInThisNode.GetShardInfos()
 	shardInfosCount := len(shardInfos)
 
 	shardCountPerReader := shardInfosCount / tcnt
@@ -278,7 +280,7 @@ func (trel *TpeRelation) NewReader(cnt int) []engine.Reader {
 		parallelReader: false,
 		isDumpReader:   false,
 	}
-	shardInfos := trel.shards.ShardInfos()
+	shardInfos := trel.shardsInThisNode.GetShardInfos()
 	for _, info := range shardInfos {
 		newInfo := ShardInfo{
 			startKey:        info.GetStartKey(),

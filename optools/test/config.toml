@@ -313,10 +313,20 @@
 #	Access:	[file]
 #	DataType:	int64
 #	DomainType:	range
-#	Values:	[16 1 16]
-#	Comment:	default is 16. The count of go routine writing batch into the storage.
+#	Values:	[4 1 16]
+#	Comment:	default is 4. The count of go routine writing batch into the storage.
 #	UpdateMode:	dynamic
-	loadDataConcurrencyCount = 16
+	loadDataConcurrencyCount = 4
+
+#	Name:	loadDataSkipWritingBatch
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	bool
+#	DomainType:	set
+#	Values:	[]
+#	Comment:	default is fase. Skip writing batch into the storage
+#	UpdateMode:	dynamic
+	loadDataSkipWritingBatch = false
 
 #	Name:	cubeLogLevel
 #	Scope:	[global]
@@ -396,14 +406,84 @@
 #	Values:	[]
 #	Comment:	default is false. Enable transactional processing engine.
 #	UpdateMode:	dynamic
-	enableTpe = false
+	enableTpe = true
+
+#	Name:	tpeKVType
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	string
+#	DomainType:	set
+#	Values:	[cubekv memorykv]
+#	Comment:	default is cubekv. Chose memory or cube as the KV storage.
+#	UpdateMode:	dynamic
+	tpeKVType = "cubekv"
+
+#	Name:	tpeKVLimit
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	int64
+#	DomainType:	range
+#	Values:	[40000 10000 160000]
+#	Comment:	limit count per batch in the read/write of the Tpe
+#	UpdateMode:	dynamic
+	tpeKVLimit = 40000
+
+#	Name:	tpeParallelReader
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	bool
+#	DomainType:	set
+#	Values:	[]
+#	Comment:	default is false. true : tpe creates multiple readers reading data from KV. false : only one reader
+#	UpdateMode:	dynamic
+	tpeParallelReader = false
+
+#	Name:	tpeDedupSetBatchTimeout
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	int64
+#	DomainType:	range
+#	Values:	[30 30 180]
+#	Comment:	timeout in DedupSetBatch
+#	UpdateMode:	dynamic
+	tpeDedupSetBatchTimeout = 30
+
+#	Name:	tpeDedupSetBatchTryCount
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	int64
+#	DomainType:	range
+#	Values:	[3 1 5]
+#	Comment:	the count of tries when the set failed in DedupSetBatch
+#	UpdateMode:	dynamic
+	tpeDedupSetBatchTryCount = 3
+
+#	Name:	tpeSerializer
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	string
+#	DomainType:	set
+#	Values:	[flat concise json]
+#	Comment:	default is flat. concise : just use the go encoding/binary as the de/serializer. json: json de/serializer. flat: binary de/serializer
+#	UpdateMode:	dynamic
+	tpeSerializer = "flat"
+
+#	Name:	tpeValueLayoutSerializer
+#	Scope:	[global]
+#	Access:	[file]
+#	DataType:	string
+#	DomainType:	set
+#	Values:	[default compact]
+#	Comment:	default is 'default'. default : attributes in value without offset array. compact: attributes in value with offset array
+#	UpdateMode:	dynamic
+	tpeValueLayoutSerializer = "default"
 
 # Cluster Configs
 pre-allocated-group-num = 20
 max-group-num           = 0
 
 # Logger Configs
-level = "debug" # debug, info, warn, error, fatal.
+level = "info" # debug, info, warn, error, fatal.
 format = "json" # json, console.
 
 # log file config
@@ -446,7 +526,7 @@ heartbeat-ticks = 2                                 # how many ticks one raft he
 election-timeout-ticks = 10                         # how many ticks a election timeout has
 max-size-per-msg = 0                                # maximum number of raft log entry one raft message has
 max-inflight-msgs = 512                             # maximum number of raft message on the way of sending(inflight)
-max-entry-bytes = 16777216                          # maximum bytes for one cube write proposal
+max-entry-bytes = 314572800                         # maximum bytes for one cube write proposal
 
 # Prophet Configs
 [prophet]
