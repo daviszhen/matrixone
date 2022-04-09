@@ -16,8 +16,11 @@ package engine
 
 import (
 	"errors"
+	"github.com/matrixorigin/matrixcube/pb/metapb"
+	"github.com/matrixorigin/matrixone/pkg/vm/driver/pb"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/tuplecodec"
+	"strings"
 )
 
 var (
@@ -122,8 +125,21 @@ func (te *TpeEngine) Database(name string) (engine.Database, error) {
 		nil
 }
 
-func (te *TpeEngine) Node(s string) *engine.NodeInfo {
-	return &engine.NodeInfo{Mcpu: 1}
+func (te *TpeEngine) Node(ip string) *engine.NodeInfo {
+	var ni *engine.NodeInfo
+	te.tpeConfig.Cube.RaftStore().GetRouter().Every(uint64(pb.KVGroup), true, func(shard metapb.Shard, store metapb.Store) bool {
+		if ni != nil {
+			return false
+		}
+		if strings.HasPrefix(store.ClientAddress, ip) {
+			stats := te.tpeConfig.Cube.RaftStore().GetRouter().GetStoreStats(store.ID)
+			ni = &engine.NodeInfo{
+				Mcpu: len(stats.GetCpuUsages()),
+			}
+		}
+		return true
+	})
+	return ni
 }
 
 func (te *TpeEngine) RemoveDeletedTable(epoch uint64) error {
