@@ -17,6 +17,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -71,6 +72,8 @@ func (td *TpeDatabase) Relation(name string) (engine.Relation, error) {
 	shardsInThisNode := &tuplecodec.Shards{}
 	shardsInThisNode.SetShardInfos(shardsInfosInThisNode)
 
+	logutil.Infof("cube_store_id %d", td.cube.RaftStore().Meta().ID)
+
 	var thisNodes engine.Nodes
 	for _, node := range shards.GetShardNodes() {
 		if node.StoreID == td.cube.RaftStore().Meta().ID {
@@ -91,6 +94,7 @@ func (td *TpeDatabase) Relation(name string) (engine.Relation, error) {
 		shards:           shards,
 		thisNodes:        thisNodes,
 		shardsInThisNode: shardsInThisNode,
+		storeID:          td.cube.RaftStore().Meta().ID,
 	}, nil
 }
 

@@ -103,6 +103,8 @@ func MakeBatch(batchSize int, attrName []string, cols []*engine.AttributeDef) *b
 	//alloc space for vector
 	for i := 0; i < len(attrName); i++ {
 		vec := vector.New(cols[i].Attr.Type)
+		vec.Or = true
+		vec.Data = nil
 		switch vec.Typ.Oid {
 		case types.T_int8:
 			vec.Col = make([]int8, batchSize)
@@ -426,6 +428,18 @@ func TruncateBatch(bat *batch.Batch, batchSize, needLen int) {
 	bat.Zs = bat.Zs[:needLen]
 }
 
+func SerializeVectorForBatch(bat *batch.Batch) error {
+	for i, _ := range bat.Vecs {
+		bat.Vecs[i].Or = true
+		show, err := bat.Vecs[i].Show()
+		if err != nil {
+			return err
+		}
+		bat.Vecs[i].Data = show
+	}
+	return nil
+}
+
 func ConvertAttributeDescIntoTypesType(attrs []*descriptor.AttributeDesc) ([]string, []*engine.AttributeDef) {
 	var names []string
 	var defs []*engine.AttributeDef
@@ -606,3 +620,9 @@ func (es *errorStorage) getKey(k TupleKey) TupleValue {
 }
 
 var ES errorStorage
+
+func Uint64ToString(v uint64) string {
+	s := fmt.Sprintf("%d", v)
+	logutil.Infof("all_nodes id %d string %v", v, s)
+	return s
+}

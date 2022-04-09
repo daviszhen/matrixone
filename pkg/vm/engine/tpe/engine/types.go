@@ -43,6 +43,7 @@ type TpeConfig struct {
 	KVLimit uint64
 
 	ParallelReader bool
+	MultiNode      bool
 
 	TpeDedupSetBatchTimeout  time.Duration
 	TpeDedupSetBatchTrycount int
@@ -75,6 +76,8 @@ type TpeRelation struct {
 	thisNodes engine.Nodes
 	//shards in this node
 	shardsInThisNode *tuplecodec.Shards
+	//storeid or nodeid ?
+	storeID uint64
 }
 
 type ShardNode struct {
@@ -119,7 +122,9 @@ type TpeReader struct {
 	readCtx        *tuplecodec.ReadContext
 	shardInfos     []ShardInfo
 	parallelReader bool
+	multiNode      bool
 	//for test
 	isDumpReader bool
 	id           int
+	storeID      uint64
 }

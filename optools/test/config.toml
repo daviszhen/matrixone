@@ -436,7 +436,7 @@
 #	Values:	[]
 #	Comment:	default is false. true : tpe creates multiple readers reading data from KV. false : only one reader
 #	UpdateMode:	dynamic
-	tpeParallelReader = false
+	tpeParallelReader = true
 
 #	Name:	tpeDedupSetBatchTimeout
 #	Scope:	[global]
@@ -446,7 +446,7 @@
 #	Values:	[30 30 180]
 #	Comment:	timeout in DedupSetBatch
 #	UpdateMode:	dynamic
-	tpeDedupSetBatchTimeout = 30
+	tpeDedupSetBatchTimeout = 180
 
 #	Name:	tpeDedupSetBatchTryCount
 #	Scope:	[global]
@@ -456,7 +456,7 @@
 #	Values:	[3 1 5]
 #	Comment:	the count of tries when the set failed in DedupSetBatch
 #	UpdateMode:	dynamic
-	tpeDedupSetBatchTryCount = 3
+	tpeDedupSetBatchTryCount = 5
 
 #	Name:	tpeSerializer
 #	Scope:	[global]

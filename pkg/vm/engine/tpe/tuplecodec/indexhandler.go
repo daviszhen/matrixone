@@ -170,17 +170,18 @@ func (ihi *IndexHandlerImpl) parallelReader(indexReadCtx *ReadContext) (*batch.B
 			return nil, 0, err
 		}
 
-		rowRead += len(keys)
-		indexReadCtx.addReadCount(len(keys))
+		//rowRead += len(keys)
+		//indexReadCtx.addReadCount(len(keys))
 
 		//1.decode index key
 		//2.get fields wanted
 		for i := 0; i < len(keys); i++ {
-			//if !keys[i].Less(indexReadCtx.ShardScanEndKey) {
-			//	break
-			//}
-			//rowRead++
-			//indexReadCtx.addReadCount(1)
+			if !keys[i].Less(indexReadCtx.ShardScanEndKey) {
+				break
+			}
+			logutil.Infof("keyvalue %v %v", keys[i], values[i])
+			rowRead++
+			indexReadCtx.addReadCount(1)
 			indexKey := keys[i][indexReadCtx.LengthOfPrefixForScanKey:]
 			_, dis, err := tkd.DecodePrimaryIndexKey(indexKey, indexReadCtx.IndexDesc)
 			if err != nil {
@@ -200,9 +201,9 @@ func (ihi *IndexHandlerImpl) parallelReader(indexReadCtx *ReadContext) (*batch.B
 			//need to update prefix
 			//decode index value
 			for i := 0; i < len(keys); i++ {
-				//if !keys[i].Less(indexReadCtx.ShardScanEndKey) {
-				//	break
-				//}
+				if !keys[i].Less(indexReadCtx.ShardScanEndKey) {
+					break
+				}
 				//decode the name which is in the value
 				data := values[i]
 				if ihi.useLayout {
@@ -287,6 +288,11 @@ func (ihi *IndexHandlerImpl) parallelReader(indexReadCtx *ReadContext) (*batch.B
 
 	TruncateBatch(bat, int(ihi.kvLimit), rowRead)
 
+	err := SerializeVectorForBatch(bat)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	if readFinished {
 		if rowRead == 0 {
 			//there are no data read in this call.
@@ -315,7 +321,7 @@ func (ihi *IndexHandlerImpl) ReadFromIndex(readCtx interface{}) (*batch.Batch, i
 		return nil, 0, errorReadContextIsInvalid
 	}
 
-	if indexReadCtx.ParallelReader {
+	if indexReadCtx.ParallelReader || indexReadCtx.MultiNode {
 		return ihi.parallelReader(indexReadCtx)
 	}
 
@@ -448,6 +454,11 @@ func (ihi *IndexHandlerImpl) ReadFromIndex(readCtx interface{}) (*batch.Batch, i
 	}
 
 	TruncateBatch(bat, int(ihi.kvLimit), rowRead)
+
+	err := SerializeVectorForBatch(bat)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	if readFinished {
 		if rowRead == 0 {

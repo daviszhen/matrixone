@@ -76,7 +76,7 @@ func NewTpeEngine(tc *TpeConfig) (*TpeEngine, error) {
 	ihi := tuplecodec.NewIndexHandlerImpl(tch, nil, kv, uint64(kvLimit), serial, valueLayout, rcc)
 	ihi.PBKV = tc.PBKV
 	epoch := tuplecodec.NewEpochHandler(tch, dh, kv)
-	ch := tuplecodec.NewComputationHandlerImpl(dh, kv, tch, serial, ihi, epoch, tc.ParallelReader)
+	ch := tuplecodec.NewComputationHandlerImpl(dh, kv, tch, serial, ihi, epoch, tc.ParallelReader, tc.MultiNode)
 	te.computeHandler = ch
 	te.dh = dh
 	return te, nil
