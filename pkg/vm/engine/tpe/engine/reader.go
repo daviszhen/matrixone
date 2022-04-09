@@ -26,6 +26,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/descriptor"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/tuplecodec"
+	"sort"
+	"strings"
 )
 
 var (
@@ -169,13 +171,34 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 	if bat != nil {
 		cnt = vector.Length(bat.Vecs[0])
 
+		var indexes []int = make([]int, len(bat.Vecs))
+		for i := 0; i < len(bat.Vecs); i++ {
+			indexes[i] = i
+		}
+
+		sort.Slice(indexes, func(i, j int) bool {
+			ai := indexes[i]
+			bi := indexes[j]
+			a := attrs[ai]
+			b := attrs[bi]
+			return strings.Compare(a, b) < 0
+		})
+
 		logutil.Infof("store id %d reader %d readCount %d parallelContext %v ", tr.storeID, tr.id, cnt, tr.readCtx.ParallelReaderContext)
 		row := make([]interface{}, len(bat.Vecs))
 
+		var names []string
+		for _, index := range indexes {
+			names = append(names, attrs[index])
+		}
+		logutil.Infof("attrs %v", attrs)
+		logutil.Infof("attrs_names %v", names)
 		for rowIndex := 0; rowIndex < cnt; rowIndex++ {
 			buf := &bytes.Buffer{}
-			buf.WriteString(fmt.Sprintf("batchrow rowIndex %d ", rowIndex))
-			for i, vec := range bat.Vecs { //col index
+			buf.WriteString(fmt.Sprintf("batchrow rowIndex %d ]", rowIndex))
+			for i := 0; i < len(bat.Vecs); i++ {
+				k := indexes[i]
+				vec := bat.Vecs[k]
 				switch vec.Typ.Oid { //get col
 				case types.T_int8:
 					if !nulls.Any(vec.Nsp) { //all data in this column are not null
@@ -349,7 +372,7 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 					logutil.Errorf("reader.Read : unsupported type %d \n", vec.Typ.Oid)
 					return nil, fmt.Errorf("reader.Read : unsupported type %d \n", vec.Typ.Oid)
 				}
-				buf.WriteString(fmt.Sprintf("colIndex %d typ %v value %v ", i, vec.Typ, row[i]))
+				buf.WriteString(fmt.Sprintf("colname %v typ %v value %v ", attrs[k], vec.Typ, row[i]))
 			}
 			logutil.Infof("%s", buf.String())
 		}
