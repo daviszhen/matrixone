@@ -386,8 +386,11 @@ func fillBatch(lines [][]string, batchData *batch.Batch) {
 }
 
 func TruncateBatch(bat *batch.Batch, batchSize, needLen int) {
-	if needLen >= batchSize {
+	if needLen == batchSize {
 		return
+	}
+	if needLen > batchSize {
+		panic("needLen > batchSize is impossible")
 	}
 	for _, vec := range bat.Vecs {
 		//remove nulls.NUlls
@@ -397,35 +400,45 @@ func TruncateBatch(bat *batch.Batch, batchSize, needLen int) {
 		//remove row
 		switch vec.Typ.Oid {
 		case types.T_int8:
-			cols := vec.Col.([]int8)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_int8).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeInt8Slice(vec.Data)
 		case types.T_int16:
-			cols := vec.Col.([]int16)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_int16).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeInt16Slice(vec.Data)
 		case types.T_int32:
-			cols := vec.Col.([]int32)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_int32).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeInt32Slice(vec.Data)
 		case types.T_int64:
-			cols := vec.Col.([]int64)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_int64).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeInt64Slice(vec.Data)
 		case types.T_uint8:
-			cols := vec.Col.([]uint8)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_uint8).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeUint8Slice(vec.Data)
 		case types.T_uint16:
-			cols := vec.Col.([]uint16)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_uint16).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeUint16Slice(vec.Data)
 		case types.T_uint32:
-			cols := vec.Col.([]uint32)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_uint32).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeUint32Slice(vec.Data)
 		case types.T_uint64:
-			cols := vec.Col.([]uint64)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_uint64).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeUint64Slice(vec.Data)
 		case types.T_float32:
-			cols := vec.Col.([]float32)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_float32).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeFloat32Slice(vec.Data)
 		case types.T_float64:
-			cols := vec.Col.([]float64)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_float64).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeFloat64Slice(vec.Data)
 		case types.T_char, types.T_varchar: //bytes is different
 			vBytes := vec.Col.(*types.Bytes)
 			if len(vBytes.Offsets) > needLen {
@@ -433,11 +446,13 @@ func TruncateBatch(bat *batch.Batch, batchSize, needLen int) {
 			}
 			vec.Data = vBytes.Data
 		case types.T_date:
-			cols := vec.Col.([]types.Date)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_date).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeDateSlice(vec.Data)
 		case types.T_datetime:
-			cols := vec.Col.([]types.Datetime)
-			vec.Col = cols[:needLen]
+			needBytes := needLen * int(toTypesType(types.T_datetime).Size)
+			vec.Data = vec.Data[:needBytes]
+			vec.Col = encoding.DecodeDatetimeSlice(vec.Data)
 		}
 	}
 	bat.Zs = bat.Zs[:needLen]
