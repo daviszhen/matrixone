@@ -127,7 +127,7 @@ func MakeBatch(batchSize int, attrName []string, cols []*engine.AttributeDef) *b
 			vec.Col = encoding.DecodeUint16Slice(vec.Data)
 		case types.T_uint32:
 			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_uint32).Size))
-			vec.Col = encoding.DecodeUint16Slice(vec.Data)
+			vec.Col = encoding.DecodeUint32Slice(vec.Data)
 		case types.T_uint64:
 			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_uint64).Size))
 			vec.Col = encoding.DecodeUint64Slice(vec.Data)
