@@ -116,29 +116,39 @@ func (te *TpeEngine) Database(name string) (engine.Database, error) {
 	if err != nil {
 		return nil, err
 	}
+	storeID := uint64(0)
+	if te.tpeConfig.Cube != nil {
+		storeID = te.tpeConfig.Cube.RaftStore().Meta().ID
+	}
 	return &TpeDatabase{
 			id:             uint64(dbDesc.ID),
 			desc:           dbDesc,
 			computeHandler: te.computeHandler,
-			cube:           te.tpeConfig.Cube,
+			storeID:        storeID,
 		},
 		nil
 }
 
 func (te *TpeEngine) Node(ip string) *engine.NodeInfo {
 	var ni *engine.NodeInfo
-	te.tpeConfig.Cube.RaftStore().GetRouter().Every(uint64(pb.KVGroup), true, func(shard metapb.Shard, store metapb.Store) bool {
-		if ni != nil {
-			return false
-		}
-		if strings.HasPrefix(store.ClientAddress, ip) {
-			stats := te.tpeConfig.Cube.RaftStore().GetRouter().GetStoreStats(store.ID)
-			ni = &engine.NodeInfo{
-				Mcpu: len(stats.GetCpuUsages()),
+	if te.tpeConfig.Cube != nil {
+		te.tpeConfig.Cube.RaftStore().GetRouter().Every(uint64(pb.KVGroup), true, func(shard metapb.Shard, store metapb.Store) bool {
+			if ni != nil {
+				return false
 			}
+			if strings.HasPrefix(store.ClientAddress, ip) {
+				stats := te.tpeConfig.Cube.RaftStore().GetRouter().GetStoreStats(store.ID)
+				ni = &engine.NodeInfo{
+					Mcpu: len(stats.GetCpuUsages()),
+				}
+			}
+			return true
+		})
+	} else {
+		return &engine.NodeInfo{
+			Mcpu: 1,
 		}
-		return true
-	})
+	}
 	return ni
 }
 

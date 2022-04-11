@@ -64,7 +64,7 @@ func (td *TpeDatabase) Relation(name string) (engine.Relation, error) {
 	var shardsInfosInThisNode []tuplecodec.ShardInfo
 	//only records this node and the shards that this node holds.
 	for _, info := range shards.GetShardInfos() {
-		if info.GetShardNode().StoreID != td.cube.RaftStore().Meta().ID {
+		if info.GetShardNode().StoreID != td.storeID {
 			continue
 		}
 		shardsInfosInThisNode = append(shardsInfosInThisNode, info)
@@ -72,11 +72,11 @@ func (td *TpeDatabase) Relation(name string) (engine.Relation, error) {
 	shardsInThisNode := &tuplecodec.Shards{}
 	shardsInThisNode.SetShardInfos(shardsInfosInThisNode)
 
-	logutil.Infof("cube_store_id %d", td.cube.RaftStore().Meta().ID)
+	logutil.Infof("cube_store_id %d", td.storeID)
 
 	var thisNodes engine.Nodes
 	for _, node := range shards.GetShardNodes() {
-		if node.StoreID == td.cube.RaftStore().Meta().ID {
+		if node.StoreID == td.storeID {
 			thisNodes = append(thisNodes, engine.Node{
 				Id:   node.StoreIDbytes,
 				Addr: node.Addr,
@@ -94,7 +94,7 @@ func (td *TpeDatabase) Relation(name string) (engine.Relation, error) {
 		shards:           shards,
 		thisNodes:        thisNodes,
 		shardsInThisNode: shardsInThisNode,
-		storeID:          td.cube.RaftStore().Meta().ID,
+		storeID:          td.storeID,
 	}, nil
 }
 

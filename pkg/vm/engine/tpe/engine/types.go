@@ -62,7 +62,7 @@ type TpeDatabase struct {
 	id             uint64
 	desc           *descriptor.DatabaseDesc
 	computeHandler computation.ComputationHandler
-	cube           driver.CubeDriver
+	storeID        uint64
 }
 
 type TpeRelation struct {
