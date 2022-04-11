@@ -17,6 +17,7 @@ package tuplecodec
 import (
 	"bytes"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/encoding"
 	"math/rand"
 	"os"
 	"runtime/pprof"
@@ -107,25 +108,35 @@ func MakeBatch(batchSize int, attrName []string, cols []*engine.AttributeDef) *b
 		vec.Data = nil
 		switch vec.Typ.Oid {
 		case types.T_int8:
-			vec.Col = make([]int8, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_int8).Size))
+			vec.Col = encoding.DecodeInt8Slice(vec.Data)
 		case types.T_int16:
-			vec.Col = make([]int16, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_int16).Size))
+			vec.Col = encoding.DecodeInt16Slice(vec.Data)
 		case types.T_int32:
-			vec.Col = make([]int32, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_int32).Size))
+			vec.Col = encoding.DecodeInt32Slice(vec.Data)
 		case types.T_int64:
-			vec.Col = make([]int64, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_int64).Size))
+			vec.Col = encoding.DecodeInt64Slice(vec.Data)
 		case types.T_uint8:
-			vec.Col = make([]uint8, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_uint8).Size))
+			vec.Col = encoding.DecodeUint8Slice(vec.Data)
 		case types.T_uint16:
-			vec.Col = make([]uint16, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_uint16).Size))
+			vec.Col = encoding.DecodeUint16Slice(vec.Data)
 		case types.T_uint32:
-			vec.Col = make([]uint32, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_uint32).Size))
+			vec.Col = encoding.DecodeUint16Slice(vec.Data)
 		case types.T_uint64:
-			vec.Col = make([]uint64, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_uint64).Size))
+			vec.Col = encoding.DecodeUint64Slice(vec.Data)
 		case types.T_float32:
-			vec.Col = make([]float32, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_float32).Size))
+			vec.Col = encoding.DecodeFloat32Slice(vec.Data)
 		case types.T_float64:
-			vec.Col = make([]float64, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_float64).Size))
+			vec.Col = encoding.DecodeFloat64Slice(vec.Data)
 		case types.T_char, types.T_varchar:
 			vBytes := &types.Bytes{
 				Offsets: make([]uint32, batchSize),
@@ -133,10 +144,13 @@ func MakeBatch(batchSize int, attrName []string, cols []*engine.AttributeDef) *b
 				Data:    nil,
 			}
 			vec.Col = vBytes
+			vec.Data = vBytes.Data
 		case types.T_date:
-			vec.Col = make([]types.Date, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_date).Size))
+			vec.Col = encoding.DecodeDateSlice(vec.Data)
 		case types.T_datetime:
-			vec.Col = make([]types.Datetime, batchSize)
+			vec.Data = make([]byte, batchSize*int(toTypesType(types.T_datetime).Size))
+			vec.Col = encoding.DecodeDatetimeSlice(vec.Data)
 		default:
 			panic("unsupported vector type")
 		}
@@ -417,6 +431,7 @@ func TruncateBatch(bat *batch.Batch, batchSize, needLen int) {
 			if len(vBytes.Offsets) > needLen {
 				vec.Col = vBytes.Window(0, needLen)
 			}
+			vec.Data = vBytes.Data
 		case types.T_date:
 			cols := vec.Col.([]types.Date)
 			vec.Col = cols[:needLen]
@@ -429,14 +444,14 @@ func TruncateBatch(bat *batch.Batch, batchSize, needLen int) {
 }
 
 func SerializeVectorForBatch(bat *batch.Batch) error {
-	for i, _ := range bat.Vecs {
-		bat.Vecs[i].Or = true
-		show, err := bat.Vecs[i].Show()
-		if err != nil {
-			return err
-		}
-		bat.Vecs[i].Data = show
-	}
+	//for i, _ := range bat.Vecs {
+	//	bat.Vecs[i].Or = true
+	//	show, err := bat.Vecs[i].Show()
+	//	if err != nil {
+	//		return err
+	//	}
+	//	bat.Vecs[i].Data = show
+	//}
 	return nil
 }
 
