@@ -71,6 +71,12 @@ const (
 	VarianceRing
 	// BitAnd
 	BitAndNumericRing
+	//Bitor
+	BitOrRing
+	// BitXor
+	BitXorRing
+	// StdDevPop
+	StdDevPopRing
 )
 
 // colexec
@@ -227,7 +233,13 @@ func UntransferTransformArg(arg TransformArgument) *transform.Argument {
 }
 
 type JoinArgument struct {
-	Vars [][]string
+	Result []string
+	Vars   [][]string
+}
+
+type TimesArgument struct {
+	Result []string
+	Vars   [][]string
 }
 
 type UntransformArgument struct {
