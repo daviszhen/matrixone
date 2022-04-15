@@ -19,6 +19,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -1048,8 +1050,20 @@ func (h *driver) doAsyncExecWithGroup(cr CustomRequest, cb func(CustomRequest, [
 
 func (h *driver) doExecWithRequest(cr CustomRequest) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultRPCTimeout)
-	f := h.doExec(ctx, cr)
 	defer cancel()
+	f := h.doExec(ctx, cr)
 	defer f.Close()
-	return f.Get()
+	var a int = 0
+	go func() {
+		time.Sleep(2 * defaultRPCTimeout)
+		if a == 0 {
+			fmt.Println("===exit===")
+			os.Exit(-1)
+		}
+	}()
+	fmt.Println("before_get")
+	ret, err := f.Get()
+	fmt.Println("after_get")
+	a = 1
+	return ret, err
 }

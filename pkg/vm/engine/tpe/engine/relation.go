@@ -15,6 +15,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -199,15 +200,22 @@ func (trel *TpeRelation) DelTableDef(u uint64, def engine.TableDef) error {
 	panic("implement me")
 }
 
-func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
+func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader {
 	tcnt := cnt
 	if cnt <= 0 {
 		tcnt = 1
 	}
 	var retReaders []engine.Reader = make([]engine.Reader, cnt)
 	var tpeReaders []*TpeReader = make([]*TpeReader, tcnt)
+
 	//split shards into multiple readers
-	shardInfos := trel.shardsInThisNode.GetShardInfos()
+	shardsThisNodeWillRead := &tuplecodec.CubeShards{}
+	err := json.Unmarshal(payload, shardsThisNodeWillRead)
+	if err != nil {
+		logutil.Errorf("unmarshal cube shard failed.err %v", err)
+		return nil
+	}
+	shardInfos := shardsThisNodeWillRead.Shards
 	shardInfosCount := len(shardInfos)
 
 	shardCountPerReader := shardInfosCount / tcnt
@@ -230,17 +238,11 @@ func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
 		for j := startIndex; j < endIndex; j++ {
 			info := shardInfos[j]
 			newInfo := ShardInfo{
-				startKey:        info.GetStartKey(),
-				endKey:          info.GetEndKey(),
+				startKey:        info.GetStart(),
+				endKey:          info.GetEnd(),
 				nextScanKey:     nil,
 				completeInShard: false,
-				shardID:         info.GetShardID(),
-				node: ShardNode{
-					Addr:         info.GetShardNode().Addr,
-					StoreID:      info.GetShardNode().StoreID,
-					StoreIDbytes: info.GetShardNode().StoreIDbytes,
-					Statistics:   info.GetStatistics(),
-				},
+				shardID:         info.GetID(),
 			}
 			infos = append(infos, newInfo)
 		}
@@ -277,10 +279,10 @@ func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
 	return retReaders
 }
 
-func (trel *TpeRelation) NewReader(cnt int, _ extend.Extend, _ []byte) []engine.Reader {
+func (trel *TpeRelation) NewReader(cnt int, _ extend.Extend, payload []byte) []engine.Reader {
 	logutil.Infof("newreader cnt %d", cnt)
 	if trel.computeHandler.ParallelReader() || trel.computeHandler.MultiNode() {
-		return trel.parallelReader(cnt)
+		return trel.parallelReader(cnt, payload)
 	}
 	var readers []engine.Reader = make([]engine.Reader, cnt)
 	tr := &TpeReader{
@@ -292,18 +294,19 @@ func (trel *TpeRelation) NewReader(cnt int, _ extend.Extend, _ []byte) []engine.
 		multiNode:      trel.computeHandler.MultiNode(),
 		storeID:        trel.storeID,
 	}
-	shardInfos := trel.shardsInThisNode.GetShardInfos()
+	shardsThisNodeWillRead := &tuplecodec.CubeShards{}
+	err := json.Unmarshal(payload, shardsThisNodeWillRead)
+	if err != nil {
+		logutil.Errorf("unmarshal cube shard failed.err %v", err)
+		return nil
+	}
+	shardInfos := shardsThisNodeWillRead.Shards
 	for _, info := range shardInfos {
 		newInfo := ShardInfo{
-			startKey:        info.GetStartKey(),
-			endKey:          info.GetEndKey(),
+			startKey:        info.GetStart(),
+			endKey:          info.GetEnd(),
 			nextScanKey:     nil,
 			completeInShard: false,
-			node: ShardNode{
-				Addr:         info.GetShardNode().Addr,
-				StoreID:      info.GetShardNode().StoreID,
-				StoreIDbytes: info.GetShardNode().StoreIDbytes,
-			},
 		}
 		tr.shardInfos = append(tr.shardInfos, newInfo)
 		logutil.Infof("single reader %v", newInfo)

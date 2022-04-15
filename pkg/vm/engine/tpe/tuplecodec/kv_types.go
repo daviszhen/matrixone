@@ -85,6 +85,10 @@ type KVHandler interface {
 	GetShardsWithPrefix(prefix TupleKey) (interface{}, error)
 }
 
+type CubeShards struct {
+	Shards []metapb.Shard `json:"shards"`
+}
+
 type ShardNode struct {
 	//the address of the store of the leader replica of the shard
 	Addr string
@@ -92,6 +96,8 @@ type ShardNode struct {
 	StoreID uint64
 	//the bytes of the id
 	StoreIDbytes string
+	//shards the node will read
+	Shards CubeShards
 }
 
 type ShardInfo struct {

@@ -19,8 +19,11 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -142,6 +145,10 @@ func removeEpoch(epoch uint64) {
 
 }
 
+func init() {
+	runtime.SetBlockProfileRate(int(10 * time.Minute))
+}
+
 func main() {
 	// if the argument passed in is "--version", return version info and exit
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
@@ -193,6 +200,11 @@ func main() {
 
 	Host := config.GlobalSystemVariables.GetHost()
 	NodeId := config.GlobalSystemVariables.GetNodeID()
+
+	go func() {
+		ip := fmt.Sprintf("localhost:%d", 9527+NodeId)
+		fmt.Println(http.ListenAndServe(ip, nil))
+	}()
 
 	ppu := frontend.NewPDCallbackParameterUnit(int(config.GlobalSystemVariables.GetPeriodOfEpochTimer()), int(config.GlobalSystemVariables.GetPeriodOfPersistence()), int(config.GlobalSystemVariables.GetPeriodOfDDLDeleteTimer()), int(config.GlobalSystemVariables.GetTimeoutOfHeartbeat()), config.GlobalSystemVariables.GetEnableEpochLogging(), math.MaxInt64)
 

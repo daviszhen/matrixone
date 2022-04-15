@@ -15,6 +15,7 @@
 package tuplecodec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
@@ -411,6 +412,7 @@ func (chi *ComputationHandlerImpl) GetNodesHoldTheTable(dbId uint64, desc *descr
 			{
 				Id:   "0",
 				Addr: "localhost:20000",
+				Data: nil, //TODO:fix it
 			},
 		}
 		return nds, &Shards{}, nil
@@ -434,9 +436,14 @@ func (chi *ComputationHandlerImpl) GetNodesHoldTheTable(dbId uint64, desc *descr
 	var nodes engine.Nodes
 	for i, node := range shards.nodes {
 		logutil.Infof("xindex %d all_nodes %v", i, node)
+		nodeShards, err := json.Marshal(node.Shards)
+		if err != nil {
+			return nil, nil, err
+		}
 		nodes = append(nodes, engine.Node{
 			Id:   node.StoreIDbytes,
 			Addr: node.Addr,
+			Data: nodeShards, //put the shards info here
 		})
 	}
 
@@ -613,9 +620,9 @@ type ReadContext struct {
 
 	SingleReaderContext
 
-	DumpData 	bool // dumpData flag
+	DumpData bool // dumpData flag
 
-	Opt	*batch.DumpOption
+	Opt *batch.DumpOption
 }
 
 func (rc *ReadContext) AddReadCount() int {
