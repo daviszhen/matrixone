@@ -31,11 +31,11 @@ func pf3() {
 }
 
 func PanicF(i int) (err *Error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = NewPanicError(e)
-		}
-	}()
+	//defer func() {
+	//	if e := recover(); e != nil {
+	//		err = NewPanicError(e)
+	//	}
+	//}()
 	switch i {
 	case 1:
 		pf1()

@@ -16,6 +16,8 @@ package pipeline
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/connector"
@@ -68,15 +70,20 @@ func (p *Pipeline) Run(r engine.Reader, proc *process.Process) (bool, error) {
 		return false, err
 	}
 	for {
+		fmt.Printf("---batch---%p\n", bat)
 		// read data from storage engine
 		if bat, err = r.Read(p.refCnts, p.attrs); err != nil {
+			logutil.Errorf("r.Read %v", err)
 			return false, err
 		}
+		fmt.Printf("+++batch+++%p\n", bat)
 		// processing the batch according to the instructions
 		proc.Reg.InputBatch = bat
 		if end, err = vm.Run(p.instructions, proc); err != nil || end { // end is true means pipeline successfully completed
+			logutil.Errorf("vm.Run end %v err %v", end, err)
 			return end, err
 		}
+		fmt.Printf("===batch===%p\n", bat)
 	}
 }
 

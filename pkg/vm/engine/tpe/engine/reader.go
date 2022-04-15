@@ -55,6 +55,10 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 		//read nothing
 		return nil, nil
 	}
+	logutil.Infof("reader %d storeID %d enter_read()", tr.id, tr.storeID)
+	defer func() {
+		logutil.Infof("reader %d storeID %d exit_read()", tr.id, tr.storeID)
+	}()
 	if len(refCnts) == 0 || len(attrs) == 0 {
 		return nil, errorInvalidParameters
 	}

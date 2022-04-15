@@ -61,7 +61,7 @@ func (trel *TpeRelation) ID() string {
 
 func (trel *TpeRelation) Nodes() engine.Nodes {
 	for i, node := range trel.nodes {
-		logutil.Infof("index %d storeID %v all_nodes %v", i, trel.storeID, node)
+		logutil.Infof("index %d storeID %v all_nodes_tpe %v", i, trel.storeID, node)
 	}
 	return trel.nodes
 }
@@ -217,6 +217,7 @@ func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
 
 	//for test
 	//one reader for all shards
+	trel.useOneThread = true
 	if trel.useOneThread {
 		shardCountPerReader = shardInfosCount
 	}

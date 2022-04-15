@@ -896,7 +896,9 @@ func (ck *CubeKV) GetRangeWithPrefixLimit(startKey TupleKey, endKey TupleKey, pr
 
 	for readCnt < limit {
 		needCnt := limit - readCnt
+		logutil.Infof("before_TpeScan")
 		scanKeys, scanValues, complete, nextScanKey, err = ck.Cube.TpeScan(lastKey, endKey, prefix, needCnt, true)
+		logutil.Infof("after_TpeScan")
 		if err != nil {
 			return nil, nil, false, nil, err
 		}
