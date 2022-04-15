@@ -16,6 +16,7 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
@@ -61,7 +62,7 @@ func (trel *TpeRelation) ID() string {
 
 func (trel *TpeRelation) Nodes() engine.Nodes {
 	for i, node := range trel.nodes {
-		logutil.Infof("index %d storeID %v all_nodes_tpe %v", i, trel.storeID, node)
+		logutil.Infof("readCtx index %d storeID %v all_nodes_tpe %v", i, trel.storeID, node)
 	}
 	return trel.nodes
 }
@@ -259,7 +260,7 @@ func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
 			tpeReaders[i] = &TpeReader{isDumpReader: true, id: i}
 		}
 
-		logutil.Infof("store id %d reader %d shard startIndex %d shardCountPerReader %d shardCount %d endIndex %d isDumpReader %v",
+		fmt.Printf("readCtx store id %d reader %d shard startIndex %d shardCountPerReader %d shardCount %d endIndex %d isDumpReader %v\n",
 			trel.storeID, i, startIndex, shardCountPerReader, shardInfosCount, endIndex, tpeReaders[i].isDumpReader)
 
 		startIndex += shardCountPerReader
@@ -268,7 +269,7 @@ func (trel *TpeRelation) parallelReader(cnt int) []engine.Reader {
 	for i, reader := range tpeReaders {
 		if reader != nil {
 			retReaders[i] = reader
-			logutil.Infof("-->reader %v", reader.shardInfos)
+			fmt.Printf("-->reader readCtx %v\n", reader.shardInfos)
 		} else {
 			retReaders[i] = &TpeReader{isDumpReader: true}
 		}

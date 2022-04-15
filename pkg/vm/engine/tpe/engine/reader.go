@@ -109,7 +109,7 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 				CountOfWithoutPrefix: 0,
 			}
 
-			logutil.Infof("reader %d info --> shard %v readCtx %v",
+			fmt.Printf("reader %d info --> shard %v readCtx %v\n",
 				tr.id,
 				tr.shardInfos,
 				tr.readCtx.ParallelReaderContext,
@@ -134,10 +134,7 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 		}
 
 		if tr.readCtx.ParallelReader || tr.readCtx.MultiNode {
-			logutil.Infof("reader %d info --> readCtx %v",
-				tr.id,
-				tr.readCtx.ParallelReaderContext,
-			)
+
 			//update new shard if needed
 			if tr.readCtx.CompleteInShard {
 				tr.shardInfos[tr.readCtx.ShardIndex].completeInShard = true
@@ -151,10 +148,14 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 						tr.shardInfos[shardIdx].endKey,
 						tr.shardInfos[shardIdx].nextScanKey,
 						nil)
-					logutil.Infof("reader %d switch from %v to %v--> readCtx %v",
+					fmt.Printf("reader %d switch from %v to %v--> readCtx %v\n",
 						tr.id,
 						tr.shardInfos[tr.readCtx.ShardIndex-1],
 						tr.shardInfos[tr.readCtx.ShardIndex],
+						tr.readCtx.ParallelReaderContext,
+					)
+					fmt.Printf("reader %d info --> readCtx %v\n",
+						tr.id,
 						tr.readCtx.ParallelReaderContext,
 					)
 				} else {
