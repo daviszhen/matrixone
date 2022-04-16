@@ -34,6 +34,7 @@ func recoverScope(ps protocol.Scope, proc *process.Process) *compile.Scope {
 	s.NodeInfo.Id = ps.NodeInfo.Id
 	s.NodeInfo.Addr = ps.NodeInfo.Addr
 	s.Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
+	s.Proc.Payload = proc.Payload
 	if len(ps.PreScopes) > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.Proc.Cancel = cancel

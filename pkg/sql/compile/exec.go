@@ -1040,7 +1040,7 @@ func (e *Exec) compileAQ(ps *plan.Scope) (*Scope, error) {
 				Magic:      Remote,
 			}
 			ss[i].Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
-			ss[i].Proc.Payload = e.c.proc.Payload
+			ss[i].Proc.Payload = nodes[i].Data
 			ss[i].Proc.Id = e.c.proc.Id
 			ss[i].Proc.Lim = e.c.proc.Lim
 			ss[i].Instructions = append(ss[i].Instructions, vm.Instruction{
