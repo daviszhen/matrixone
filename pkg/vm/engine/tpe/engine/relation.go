@@ -262,7 +262,7 @@ func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader
 			tpeReaders[i] = &TpeReader{isDumpReader: true, id: i}
 		}
 
-		fmt.Printf("readCtx store id %d reader %d shard startIndex %d shardCountPerReader %d shardCount %d endIndex %d isDumpReader %v\n",
+			fmt.Printf("readCtx store id %d reader %d shard startIndex %d shardCountPerReader %d shardCount %d endIndex %d isDumpReader %v\n",
 			trel.storeID, i, startIndex, shardCountPerReader, shardInfosCount, endIndex, tpeReaders[i].isDumpReader)
 
 		startIndex += shardCountPerReader
@@ -281,6 +281,7 @@ func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader
 
 func (trel *TpeRelation) NewReader(cnt int, _ extend.Extend, payload []byte) []engine.Reader {
 	logutil.Infof("newreader cnt %d", cnt)
+	logutil.Infof("payload len %d data %v",len(payload),payload)
 	if trel.computeHandler.ParallelReader() || trel.computeHandler.MultiNode() {
 		return trel.parallelReader(cnt, payload)
 	}
