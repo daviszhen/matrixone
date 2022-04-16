@@ -35,6 +35,10 @@ var (
 )
 
 func (trel *TpeRelation) Rows() int64 {
+	fmt.Printf("TpeRelation.Rows-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.Rows-exit\n")
+	}()
 	rows := int64(0)
 	//read global shards
 	for _, info := range trel.shards.GetShardInfos() {
@@ -45,6 +49,10 @@ func (trel *TpeRelation) Rows() int64 {
 }
 
 func (trel *TpeRelation) Size(s string) int64 {
+	fmt.Printf("TpeRelation.Size-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.Size-exit\n")
+	}()
 	size := int64(0)
 	//read global shards
 	for _, info := range trel.shards.GetShardInfos() {
@@ -58,10 +66,18 @@ func (trel *TpeRelation) Close() {
 }
 
 func (trel *TpeRelation) ID() string {
+	fmt.Printf("TpeRelation.ID-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.ID-exit\n")
+	}()
 	return trel.desc.Name
 }
 
 func (trel *TpeRelation) Nodes() engine.Nodes {
+	fmt.Printf("TpeRelation.Nodes-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.Nodes-exit\n")
+	}()
 	for i, node := range trel.nodes {
 		cs :=& tuplecodec.CubeShards{}
 		err := json.Unmarshal(node.Data, cs)
@@ -84,6 +100,10 @@ func (trel *TpeRelation) DropIndex(epoch uint64, name string) error {
 }
 
 func (trel *TpeRelation) GetHideColDef() *engine.Attribute {
+	fmt.Printf("TpeRelation.GetHideColDef-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.GetHideColDef-exit\n")
+	}()
 	for _, attr := range trel.desc.Attributes {
 		if attr.Is_hidden {
 			return &engine.Attribute{
@@ -98,6 +118,10 @@ func (trel *TpeRelation) GetHideColDef() *engine.Attribute {
 }
 
 func (trel *TpeRelation) TableDefs() []engine.TableDef {
+	fmt.Printf("TpeRelation.TableDefs-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.TableDefs-exit\n")
+	}()
 	var defs []engine.TableDef
 	var pkNames []string
 	for _, attr := range trel.desc.Attributes {
@@ -130,6 +154,10 @@ func (trel *TpeRelation) TableDefs() []engine.TableDef {
 }
 
 func (trel *TpeRelation) Write(_ uint64, batch *batch.Batch) error {
+	fmt.Printf("TpeRelation.Write-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.Write-exit\n")
+	}()
 	//attribute set
 	attrSet := make(map[string]uint32)
 	for _, attr := range trel.desc.Attributes {
@@ -222,6 +250,11 @@ func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader
 		logutil.Errorf("unmarshal cube shard failed.err %v", err)
 		return nil
 	}
+
+	for i, shard := range shardsThisNodeWillRead.Shards {
+		fmt.Printf("+++parallelReader shardIndex %d shardID %d startKey %v  endKey %v\n",
+			i,shard.GetID(),shard.GetStart(),shard.GetEnd())
+	}
 	shardInfos := shardsThisNodeWillRead.Shards
 	shardInfosCount := len(shardInfos)
 
@@ -269,8 +302,8 @@ func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader
 			tpeReaders[i] = &TpeReader{isDumpReader: true, id: i}
 		}
 
-			fmt.Printf("readCtx store id %d reader %d shard startIndex %d shardCountPerReader %d shardCount %d endIndex %d isDumpReader %v\n",
-			trel.storeID, i, startIndex, shardCountPerReader, shardInfosCount, endIndex, tpeReaders[i].isDumpReader)
+			//fmt.Printf("readCtx store id %d reader %d shard startIndex %d shardCountPerReader %d shardCount %d endIndex %d isDumpReader %v\n",
+			//trel.storeID, i, startIndex, shardCountPerReader, shardInfosCount, endIndex, tpeReaders[i].isDumpReader)
 
 		startIndex += shardCountPerReader
 	}
@@ -278,7 +311,7 @@ func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader
 	for i, reader := range tpeReaders {
 		if reader != nil {
 			retReaders[i] = reader
-			fmt.Printf("-->reader readCtx %v\n", reader.shardInfos)
+			//fmt.Printf("-->reader readCtx %v\n", reader.shardInfos)
 		} else {
 			retReaders[i] = &TpeReader{isDumpReader: true}
 		}
@@ -287,8 +320,12 @@ func (trel *TpeRelation) parallelReader(cnt int, payload []byte) []engine.Reader
 }
 
 func (trel *TpeRelation) NewReader(cnt int, _ extend.Extend, payload []byte) []engine.Reader {
-	logutil.Infof("newreader cnt %d storeID %d", cnt,trel.storeID)
-	logutil.Infof("storeID %d payload len %d data %v",trel.storeID,len(payload),payload)
+	fmt.Printf("TpeRelation.NewReader-enter\n")
+	defer func() {
+		fmt.Printf("TpeRelation.NewReader-exit\n")
+	}()
+	fmt.Printf("newreader cnt %d storeID %d\n", cnt,trel.storeID)
+	fmt.Printf("storeID %d payload len %d \n",trel.storeID,len(payload))
 	if trel.computeHandler.ParallelReader() || trel.computeHandler.MultiNode() {
 		return trel.parallelReader(cnt, payload)
 	}

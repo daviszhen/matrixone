@@ -778,6 +778,10 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 			src.RefCounts = append(src.RefCounts, uint64(v.Ref))
 		}
 		nodes := rel.Nodes()
+		fmt.Printf("==========nodes: %v\n", op.Name)
+		for i, node := range nodes{
+			fmt.Printf("\t[%v] = %v, %v, %v\n", i, node.Id, node.Addr, len(node.Data))
+		}
 		ss := make([]*Scope, len(nodes))
 		for i := range nodes {
 			ss[i] = &Scope{
@@ -1032,6 +1036,10 @@ func (e *Exec) compileAQ(ps *plan.Scope) (*Scope, error) {
 			src.RefCounts = append(src.RefCounts, uint64(v.Ref))
 		}
 		nodes := rel.Nodes()
+		fmt.Printf("==========nodes: %v\n", op.Name)
+		for i, node := range nodes{
+			fmt.Printf("\t[%v] = %v, %v, %v\n", i, node.Id, node.Addr, len(node.Data))
+		}
 		ss := make([]*Scope, len(nodes))
 		for i := range nodes {
 			ss[i] = &Scope{
@@ -1634,6 +1642,10 @@ func (e *Exec) compileFact(ps *plan.Scope) ([]*Scope, error) {
 			src.RefCounts = append(src.RefCounts, uint64(v.Ref))
 		}
 		nodes := rel.Nodes()
+		fmt.Printf("==========nodes: %v\n", op.Name)
+		for i, node := range nodes{
+			fmt.Printf("\t[%v] = %v, %v, %v\n", i, node.Id, node.Addr, len(node.Data))
+		}
 		ss := make([]*Scope, len(nodes))
 		for i := range nodes {
 			ss[i] = &Scope{
@@ -1756,6 +1768,10 @@ func (e *Exec) compileCAQFact(ps *plan.Scope) ([]*Scope, error) {
 			src.RefCounts = append(src.RefCounts, uint64(v.Ref))
 		}
 		nodes := rel.Nodes()
+		fmt.Printf("==========nodes: %v\n", op.Name)
+		for i, node := range nodes{
+			fmt.Printf("\t[%v] = %v, %v, %v\n", i, node.Id, node.Addr, len(node.Data))
+		}
 		ss := make([]*Scope, len(nodes))
 		for i := range nodes {
 			ss[i] = &Scope{

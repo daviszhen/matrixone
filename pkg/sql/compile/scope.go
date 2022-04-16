@@ -508,12 +508,15 @@ func (s *Scope) MergeRun(e engine.Engine) error {
 func (s *Scope) RemoteRun(e engine.Engine) error {
 	var buf bytes.Buffer
 
+	//fmt.Printf("%v\n",s.NodeInfo)
+
 	if Address == s.NodeInfo.Addr {
 		return s.ParallelRun(e)
 	}
 	{
-		buf.Write(encoding.EncodeUint32(uint32(len(s.Proc.Payload))))
-		buf.Write(s.Proc.Payload)
+		fmt.Printf("===RemoteRun data len %d \n",len(s.NodeInfo.Data))
+		buf.Write(encoding.EncodeUint32(uint32(len(s.NodeInfo.Data))))
+		buf.Write(s.NodeInfo.Data)
 	}
 	ps := Transfer(s)
 	err := protocol.EncodeScope(ps, &buf)
@@ -525,6 +528,11 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 	conn := goetty.NewIOSession(goetty.WithCodec(encoder, decoder))
 	defer conn.Close()
 	addr, _ := net.ResolveTCPAddr("tcp", s.NodeInfo.Addr)
+	fmt.Printf("----- Adress %s NodeInfo.Addr %s equal %v send payload len %d %v:%v \n",
+		Address,
+		s.NodeInfo.Addr,
+		Address == s.NodeInfo.Addr ,len(s.Proc.Payload),
+		addr.IP, addr.Port+100)
 	if _, err := conn.Connect(fmt.Sprintf("%v:%v", addr.IP, addr.Port+100), time.Second*3); err != nil {
 		select {
 		case <-arg.Reg.Ctx.Done():

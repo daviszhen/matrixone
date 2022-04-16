@@ -16,6 +16,7 @@ package handler
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/encoding"
@@ -42,6 +43,7 @@ func (hp *Handler) Process(_ uint64, val interface{}, conn goetty.IOSession) err
 		n := encoding.DecodeUint32(data[:4])
 		data = data[4:]
 		hp.proc.Payload = data[:n]
+		fmt.Printf("HandlerProcess payload len %d \n",len(hp.proc.Payload))
 		data = data[n:]
 	}
 	ps, _, err := protocol.DecodeScope(data)
@@ -49,6 +51,8 @@ func (hp *Handler) Process(_ uint64, val interface{}, conn goetty.IOSession) err
 		return err
 	}
 	s := recoverScope(ps, hp.proc)
+	s.Proc.Payload = s.NodeInfo.Data
+	fmt.Printf("===addr %v\n",s.NodeInfo.Addr)
 	s.Instructions[len(s.Instructions)-1] = vm.Instruction{
 		Op: vm.Output,
 		Arg: &output.Argument{

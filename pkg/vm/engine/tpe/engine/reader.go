@@ -51,6 +51,10 @@ func (tr *TpeReader) NewSparseFilter() engine.SparseFilter {
 }
 
 func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error) {
+	fmt.Printf("TpeReader.Read-enter\n")
+	defer func() {
+		fmt.Printf("TpeReader.Read-exit\n")
+	}()
 	if tr.isDumpReader {
 		//read nothing
 		return nil, nil
@@ -109,11 +113,11 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 				CountOfWithoutPrefix: 0,
 			}
 
-			fmt.Printf("reader %d info --> shard %v readCtx %v\n",
-				tr.id,
-				tr.shardInfos,
-				tr.readCtx.ParallelReaderContext,
-			)
+			//fmt.Printf("reader %d info --> shard %v readCtx %v\n",
+			//	tr.id,
+			//	tr.shardInfos,
+			//	tr.readCtx.ParallelReaderContext,
+			//)
 		} else {
 			tr.readCtx.SingleReaderContext = tuplecodec.SingleReaderContext{
 				CompleteInAllShards:      false,
@@ -148,16 +152,16 @@ func (tr *TpeReader) Read(refCnts []uint64, attrs []string) (*batch.Batch, error
 						tr.shardInfos[shardIdx].endKey,
 						tr.shardInfos[shardIdx].nextScanKey,
 						nil)
-					fmt.Printf("reader %d switch from %v to %v--> readCtx %v\n",
-						tr.id,
-						tr.shardInfos[tr.readCtx.ShardIndex-1],
-						tr.shardInfos[tr.readCtx.ShardIndex],
-						tr.readCtx.ParallelReaderContext,
-					)
-					fmt.Printf("reader %d info --> readCtx %v\n",
-						tr.id,
-						tr.readCtx.ParallelReaderContext,
-					)
+					//fmt.Printf("reader %d switch from %v to %v--> readCtx %v\n",
+					//	tr.id,
+					//	tr.shardInfos[tr.readCtx.ShardIndex-1],
+					//	tr.shardInfos[tr.readCtx.ShardIndex],
+					//	tr.readCtx.ParallelReaderContext,
+					//)
+					//fmt.Printf("reader %d info --> readCtx %v\n",
+					//	tr.id,
+					//	tr.readCtx.ParallelReaderContext,
+					//)
 				} else {
 					return nil, nil
 				}
