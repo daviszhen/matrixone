@@ -360,6 +360,7 @@ func (e *Exec) compilePlanScope(s *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -539,6 +540,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -591,6 +593,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -658,6 +661,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -704,6 +708,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -781,6 +786,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 				Magic:      Remote,
 			}
 			ss[i].Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+			ss[i].Proc.Payload = nodes[i].Data
 			ss[i].Proc.Id = e.c.proc.Id
 			ss[i].Proc.Lim = e.c.proc.Lim
 			ss[i].Instructions = append(ss[i].Instructions, vm.Instruction{
@@ -806,6 +812,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -861,6 +868,7 @@ func (e *Exec) compileQ(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -984,6 +992,7 @@ func (e *Exec) compileAQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1031,6 +1040,7 @@ func (e *Exec) compileAQ(ps *plan.Scope) (*Scope, error) {
 				Magic:      Remote,
 			}
 			ss[i].Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+			ss[i].Proc.Payload = e.c.proc.Payload
 			ss[i].Proc.Id = e.c.proc.Id
 			ss[i].Proc.Lim = e.c.proc.Lim
 			ss[i].Instructions = append(ss[i].Instructions, vm.Instruction{
@@ -1047,6 +1057,7 @@ func (e *Exec) compileAQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1086,6 +1097,7 @@ func (e *Exec) compileAQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1173,6 +1185,7 @@ func (e *Exec) compileCQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1216,6 +1229,7 @@ func (e *Exec) compileCQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1255,6 +1269,7 @@ func (e *Exec) compileCQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1294,6 +1309,7 @@ func (e *Exec) compileCQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1333,6 +1349,7 @@ func (e *Exec) compileCQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1501,6 +1518,7 @@ func (e *Exec) compileCAQ(ps *plan.Scope) (*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1624,6 +1642,7 @@ func (e *Exec) compileFact(ps *plan.Scope) ([]*Scope, error) {
 				Magic:      Remote,
 			}
 			ss[i].Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+			ss[i].Proc.Payload = nodes[i].Data
 			ss[i].Proc.Id = e.c.proc.Id
 			ss[i].Proc.Lim = e.c.proc.Lim
 			ss[i].Instructions = append(ss[i].Instructions, vm.Instruction{
@@ -1655,6 +1674,7 @@ func (e *Exec) compileFact(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim
@@ -1744,6 +1764,7 @@ func (e *Exec) compileCAQFact(ps *plan.Scope) ([]*Scope, error) {
 				Magic:      Remote,
 			}
 			ss[i].Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+			ss[i].Proc.Payload = nodes[i].Data
 			ss[i].Proc.Id = e.c.proc.Id
 			ss[i].Proc.Lim = e.c.proc.Lim
 			ss[i].Instructions = append(ss[i].Instructions, vm.Instruction{
@@ -1775,6 +1796,7 @@ func (e *Exec) compileCAQFact(ps *plan.Scope) ([]*Scope, error) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc = process.New(mheap.New(guest.New(e.c.proc.Mp.Gm.Limit, e.c.proc.Mp.Gm.Mmu)))
+		rs.Proc.Payload = e.c.proc.Payload
 		rs.Proc.Cancel = cancel
 		rs.Proc.Id = e.c.proc.Id
 		rs.Proc.Lim = e.c.proc.Lim

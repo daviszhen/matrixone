@@ -18,6 +18,7 @@ import (
 	"bytes"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"github.com/matrixorigin/matrixone/pkg/encoding"
 	"github.com/matrixorigin/matrixone/pkg/rpcserver/message"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/output"
 	"github.com/matrixorigin/matrixone/pkg/sql/protocol"
@@ -36,7 +37,14 @@ func New(engine engine.Engine, proc *process.Process) *Handler {
 }
 
 func (hp *Handler) Process(_ uint64, val interface{}, conn goetty.IOSession) error {
-	ps, _, err := protocol.DecodeScope(val.(*message.Message).Data)
+	data := val.(*message.Message).Data
+	{
+		n := encoding.DecodeUint32(data[:4])
+		data = data[4:]
+		hp.proc.Payload = data[:n]
+		data = data[n:]
+	}
+	ps, _, err := protocol.DecodeScope(data)
 	if err != nil {
 		return err
 	}

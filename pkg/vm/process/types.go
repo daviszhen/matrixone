@@ -64,5 +64,7 @@ type Process struct {
 	Lim Limitation
 	Mp  *mheap.Mheap
 
+	Payload []byte
+
 	Cancel context.CancelFunc
 }
