@@ -14,7 +14,10 @@
 
 package tuplecodec
 
-import "github.com/matrixorigin/matrixcube/pb/metapb"
+import (
+	"fmt"
+	"github.com/matrixorigin/matrixcube/pb/metapb"
+)
 
 type KVType int
 
@@ -87,6 +90,18 @@ type KVHandler interface {
 
 type CubeShards struct {
 	Shards []metapb.Shard `json:"shards"`
+}
+
+func (cs CubeShards) String() string {
+	s := fmt.Sprintf("shardCont %d ",len(cs.Shards))
+	for i, shard := range cs.Shards {
+		s += fmt.Sprintf("[shardIndex %d shardId %d startKey %v endKey %v] ;",
+			i,
+			shard.GetID(),
+			shard.GetStart(),
+			shard.GetEnd())
+	}
+	return s
 }
 
 type ShardNode struct {
