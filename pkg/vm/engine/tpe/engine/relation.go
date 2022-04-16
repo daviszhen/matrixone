@@ -69,8 +69,8 @@ func (trel *TpeRelation) Nodes() engine.Nodes {
 			logutil.Errorf("decode cubeshards failed.err : %v",err)
 			return nil
 		}
-		logutil.Infof("readCtx index %d storeID %v cubeshards %v",i,trel.storeID,cs)
-		logutil.Infof("readCtx index %d storeID %v all_nodes_tpe %v", i, trel.storeID, node)
+		fmt.Printf("readCtx index %d storeID %v cubeshards \n %v \n",i,trel.storeID,cs)
+		fmt.Printf("readCtx index %d storeID %v all_nodes_tpe \n %v \n", i, trel.storeID, node)
 	}
 	return trel.nodes
 }

@@ -93,9 +93,9 @@ type CubeShards struct {
 }
 
 func (cs CubeShards) String() string {
-	s := fmt.Sprintf("shardCont %d ",len(cs.Shards))
+	s := fmt.Sprintf("shardCont %d \n",len(cs.Shards))
 	for i, shard := range cs.Shards {
-		s += fmt.Sprintf("[shardIndex %d shardId %d startKey %v endKey %v] ;",
+		s += fmt.Sprintf("[shardIndex %d shardId %d startKey %v endKey %v] ;\n",
 			i,
 			shard.GetID(),
 			shard.GetStart(),
