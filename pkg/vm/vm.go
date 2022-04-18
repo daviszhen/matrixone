@@ -16,6 +16,7 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
@@ -32,6 +33,10 @@ func String(ins Instructions, buf *bytes.Buffer) {
 
 // Prepare range instructions and do init work for each operator's argument by calling its prepare function
 func Prepare(ins Instructions, proc *process.Process) error {
+	fmt.Printf("^^^vm.Prepare enter\n")
+	defer func() {
+		fmt.Printf("^^^vm.Prepare exit\n")
+	}()
 	for _, in := range ins {
 		if err := prepareFunc[in.Op](proc, in.Arg); err != nil {
 			return err
@@ -44,6 +49,10 @@ func Run(ins Instructions, proc *process.Process) (bool, error) {
 	var ok bool
 	var end bool
 	var err error
+	fmt.Printf("---vm.Run enter---\n")
+	defer func() {
+		fmt.Printf("---vm.Run exit---\n")
+	}()
 
 	//defer func() {
 	//	if e := recover(); e != nil {
@@ -51,9 +60,12 @@ func Run(ins Instructions, proc *process.Process) (bool, error) {
 	//	}
 	//}()
 	for _, in := range ins {
+		fmt.Printf("---before execFunc in.Op %d proc %p \n",in.Op,proc)
 		if ok, err = execFunc[in.Op](proc, in.Arg); err != nil {
+			fmt.Printf("---error execFunc in.Op %d proc %p \n",in.Op,proc)
 			return ok || end, err
 		}
+		fmt.Printf("---after execFunc in.Op %d proc %p \n",in.Op,proc)
 		if ok { // ok is true shows that at least one operator has done its work
 			end = true
 		}

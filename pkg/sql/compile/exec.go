@@ -84,6 +84,8 @@ func (e *Exec) Run(ts uint64) error {
 		return nil
 	}
 
+	fmt.Printf("scope %v",e.scope)
+
 	switch e.scope.Magic {
 	case Normal:
 		return e.scope.Run(e.c.e)

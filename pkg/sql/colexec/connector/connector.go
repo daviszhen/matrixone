@@ -16,6 +16,7 @@ package connector
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -32,21 +33,30 @@ func Prepare(_ *process.Process, _ interface{}) error {
 }
 
 func Call(proc *process.Process, arg interface{}) (bool, error) {
+	fmt.Printf("!!!connector enter proc %p!!!\n",proc)
+	defer func() {
+		fmt.Printf("!!!connector exit proc %p!!!\n",proc)
+	}()
 	n := arg.(*Argument)
 	reg := n.Reg
 	bat := proc.Reg.InputBatch
 	if bat == nil {
+		fmt.Printf("!!!connector 000 proc %p!!!\n",proc)
 		select {
 		case <-reg.Ctx.Done():
 			process.FreeRegisters(proc)
+			fmt.Printf("!!!connector -2 -2 -2 proc %p!!!\n",proc)
 			return true, nil
 		case reg.Ch <- bat:
+			fmt.Printf("!!!connector -3 -3 -3 proc %p!!!\n",proc)
 			return false, nil
 		}
 	}
 	if len(bat.Zs) == 0 {
+		fmt.Printf("!!!connector -1 -1 -1 proc %p!!!\n",proc)
 		return false, nil
 	}
+	fmt.Printf("!!!connector 111 proc %p!!!\n",proc)
 	vecs := n.vecs[:0]
 	for i := range bat.Vecs {
 		if bat.Vecs[i].Or {
@@ -57,18 +67,20 @@ func Call(proc *process.Process, arg interface{}) (bool, error) {
 			vecs = append(vecs, vec)
 		}
 	}
+	fmt.Printf("!!!connector 222 proc %p!!!\n",proc)
 	for i := range bat.Vecs {
 		if bat.Vecs[i].Or {
 			bat.Vecs[i] = vecs[0]
 			vecs = vecs[1:]
 		}
 	}
+	fmt.Printf("!!!connector 333 proc %p!!!\n",proc)
 	size := mheap.Size(proc.Mp)
 	select {
 	case <-reg.Ctx.Done():
 		batch.Clean(bat, proc.Mp)
 		process.FreeRegisters(proc)
-		return true, nil
+		return true, fmt.Errorf("context is done")
 	case reg.Ch <- bat:
 		n.Mmu.Alloc(size)
 		proc.Mp.Gm.Free(size)

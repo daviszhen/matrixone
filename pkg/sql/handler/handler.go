@@ -38,6 +38,10 @@ func New(engine engine.Engine, proc *process.Process) *Handler {
 }
 
 func (hp *Handler) Process(_ uint64, val interface{}, conn goetty.IOSession) error {
+	fmt.Printf("@@@HandlerProcess enter@@@\n")
+	defer func() {
+		fmt.Printf("@@@HandlerProcess exit@@@\n")
+	}()
 	data := val.(*message.Message).Data
 	{
 		n := encoding.DecodeUint32(data[:4])
@@ -48,10 +52,12 @@ func (hp *Handler) Process(_ uint64, val interface{}, conn goetty.IOSession) err
 	}
 	ps, _, err := protocol.DecodeScope(data)
 	if err != nil {
+		fmt.Printf("@@@HandlerProcess 000 @@@\n")
 		return err
 	}
 	s := recoverScope(ps, hp.proc)
 	s.Proc.Payload = s.NodeInfo.Data
+	fmt.Printf("@@@HandlerProcess 111 @@@\n")
 	fmt.Printf("===addr %v\n",s.NodeInfo.Addr)
 	s.Instructions[len(s.Instructions)-1] = vm.Instruction{
 		Op: vm.Output,
@@ -60,6 +66,7 @@ func (hp *Handler) Process(_ uint64, val interface{}, conn goetty.IOSession) err
 			Func: writeBack,
 		},
 	}
+	fmt.Printf("@@@HandlerProcess 222 @@@\n")
 	if err := s.ParallelRun(hp.engine); err != nil {
 		conn.WriteAndFlush(&message.Message{Code: []byte(err.Error())})
 	}
