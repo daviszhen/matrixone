@@ -1,0 +1,27 @@
+#!/bin/zsh
+diff ${1}/Q1.1      ${2}/Q1.1
+diff ${1}/Q1.2      ${2}/Q1.2
+diff ${1}/Q1.3      ${2}/Q1.3
+diff ${1}/Q2.1      ${2}/Q2.1
+diff ${1}/Q2.2      ${2}/Q2.2
+diff ${1}/Q2.3      ${2}/Q2.3
+diff ${1}/Q3.1      ${2}/Q3.1
+diff ${1}/Q3.2      ${2}/Q3.2
+diff ${1}/Q3.3      ${2}/Q3.3
+diff ${1}/Q3.4      ${2}/Q3.4
+diff ${1}/Q4.1      ${2}/Q4.1
+diff ${1}/Q4.2      ${2}/Q4.2
+diff ${1}/Q4.3      ${2}/Q4.3
+diff ${1}/joinQ1.1  ${2}/joinQ1.1
+diff ${1}/joinQ1.2  ${2}/joinQ1.2
+diff ${1}/joinQ1.3  ${2}/joinQ1.3
+diff ${1}/joinQ2.1  ${2}/joinQ2.1
+diff ${1}/joinQ2.2  ${2}/joinQ2.2
+diff ${1}/joinQ2.3  ${2}/joinQ2.3
+diff ${1}/joinQ3.1  ${2}/joinQ3.1
+diff ${1}/joinQ3.2  ${2}/joinQ3.2
+diff ${1}/joinQ3.3  ${2}/joinQ3.3
+diff ${1}/joinQ3.4  ${2}/joinQ3.4
+diff ${1}/joinQ4.1  ${2}/joinQ4.1
+diff ${1}/joinQ4.2  ${2}/joinQ4.2
+diff ${1}/joinQ4.3  ${2}/joinQ4.3
