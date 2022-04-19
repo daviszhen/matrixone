@@ -482,24 +482,28 @@ func (s *Scope) MergeRun(e engine.Engine) error {
 			go func(cs *Scope) {
 				if rerr := cs.Run(e); rerr != nil {
 					err = rerr
+					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		case Merge:
 			go func(cs *Scope) {
 				if rerr := cs.MergeRun(e); rerr != nil {
 					err = rerr
+					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		case Remote:
 			go func(cs *Scope) {
 				if rerr := cs.RemoteRun(e); rerr != nil {
 					err = rerr
+					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		case Parallel:
 			go func(cs *Scope) {
 				if rerr := cs.ParallelRun(e); rerr != nil {
 					err = rerr
+					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		}
@@ -592,7 +596,6 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 func (s *Scope) ParallelRun(e engine.Engine) error {
 	var jop *join.Argument
 	var top *times.Argument
-
 	{
 		for _, in := range s.Instructions {
 			if in.Op == vm.Join {
@@ -603,18 +606,21 @@ func (s *Scope) ParallelRun(e engine.Engine) error {
 			}
 		}
 	}
+
 	if jop != nil {
 		if s.DataSource == nil {
 			return s.RunCQWithSubquery(e, jop)
 		}
 		return s.RunCQ(e, jop)
 	}
+
 	if top != nil {
 		if s.DataSource == nil {
 			return s.RunCAQWithSubquery(e, top)
 		}
 		return s.RunCAQ(e, top)
 	}
+
 	switch t := s.Instructions[0].Arg.(type) {
 	case *transform.Argument:
 		if t.Typ == transform.Bare {
@@ -641,6 +647,7 @@ func (s *Scope) RunQ(e engine.Engine) error {
 	var rds []engine.Reader
 
 	mcpu := runtime.NumCPU()
+	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -651,7 +658,7 @@ func (s *Scope) RunQ(e engine.Engine) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, nil)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	for i := 0; i < mcpu; i++ {
@@ -807,6 +814,7 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 	var rds []engine.Reader
 
 	mcpu := runtime.NumCPU()
+	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -817,7 +825,7 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, nil)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	arg := s.Instructions[0].Arg.(*transform.Argument)
@@ -1008,6 +1016,7 @@ func (s *Scope) RunCQ(e engine.Engine, op *join.Argument) error {
 		}()
 	}
 	mcpu := runtime.NumCPU()
+	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -1018,7 +1027,7 @@ func (s *Scope) RunCQ(e engine.Engine, op *join.Argument) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, nil)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	for i := 0; i < mcpu; i++ {
@@ -1298,8 +1307,55 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 					if rerr := s.ParallelRun(e); rerr != nil {
 						err = rerr
 					}
-				}(s.PreScopes[i])
+				}
 			}
+			if flg {
+				s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
+					Op: vm.Connector,
+					Arg: &connector.Argument{
+						Mmu: s.Proc.Mp.Gm,
+						Reg: s.Proc.Reg.MergeReceivers[i],
+					},
+				})
+
+			}
+			/*
+				s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
+					Op: vm.Connector,
+					Arg: &connector.Argument{
+						Mmu: s.Proc.Mp.Gm,
+						Reg: s.Proc.Reg.MergeReceivers[i],
+					},
+				})
+			*/
+		}
+	}
+	for i := range s.PreScopes {
+		switch s.PreScopes[i].Magic {
+		case Normal:
+			go func(s *Scope) {
+				if rerr := s.Run(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
+		case Merge:
+			go func(s *Scope) {
+				if rerr := s.MergeRun(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
+		case Remote:
+			go func(s *Scope) {
+				if rerr := s.RemoteRun(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
+		case Parallel:
+			go func(s *Scope) {
+				if rerr := s.ParallelRun(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
 		}
 		if err != nil {
 			for i, in := range s.Instructions {
@@ -1371,6 +1427,7 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 		}()
 	}
 	mcpu := runtime.NumCPU()
+	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -1381,7 +1438,7 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, nil)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	for i := 0; i < mcpu; i++ {

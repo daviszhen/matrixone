@@ -16,7 +16,6 @@ package pipeline
 
 import (
 	"bytes"
-
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/connector"
 	"github.com/matrixorigin/matrixone/pkg/vm"
@@ -68,11 +67,9 @@ func (p *Pipeline) Run(r engine.Reader, proc *process.Process) (bool, error) {
 		return false, err
 	}
 	for {
-		// read data from storage engine
 		if bat, err = r.Read(p.refCnts, p.attrs); err != nil {
 			return false, err
 		}
-		// processing the batch according to the instructions
 		proc.Reg.InputBatch = bat
 		if end, err = vm.Run(p.instructions, proc); err != nil || end { // end is true means pipeline successfully completed
 			return end, err
@@ -99,7 +96,7 @@ func (p *Pipeline) RunMerge(proc *process.Process) (bool, error) {
 		}
 		proc.Cancel()
 	}()
-	if err := vm.Prepare(p.instructions, proc); err != nil {
+	if err = vm.Prepare(p.instructions, proc); err != nil {
 		return false, err
 	}
 	for {

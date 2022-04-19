@@ -41,12 +41,12 @@ func (rm *RoutineManager) getParameterUnit() *config.ParameterUnit {
 }
 
 func (rm *RoutineManager) Created(rs goetty.IOSession) {
-	defer func() {
-		if err := recover(); err != nil {
-			logutil.Errorf("create routine manager failed. err:%v",err)
-		}
-	}()
-	pro := NewMysqlClientProtocol(nextConnectionID(),rs, int(rm.pu.SV.GetMaxBytesInOutbufToFlush()),rm.pu.SV)
+	//defer func() {
+	//	if err := recover(); err != nil {
+	//		logutil.Errorf("create routine manager failed. err:%v",err)
+	//	}
+	//}()
+	pro := NewMysqlClientProtocol(nextConnectionID(), rs, int(rm.pu.SV.GetMaxBytesInOutbufToFlush()), rm.pu.SV)
 	exe := NewMysqlCmdExecutor()
 	exe.SetRoutineManager(rm)
 
@@ -69,16 +69,16 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 When the io is closed, the Closed will be called.
 */
 func (rm *RoutineManager) Closed(rs goetty.IOSession) {
-	defer func() {
-		if err := recover(); err != nil {
-			logutil.Errorf("close routine manager failed. err:%v",err)
-		}
-	}()
+	//defer func() {
+	//	if err := recover(); err != nil {
+	//		logutil.Errorf("close routine manager failed. err:%v", err)
+	//	}
+	//}()
 	rm.rwlock.Lock()
 	defer rm.rwlock.Unlock()
 	defer delete(rm.clients, rs)
 
-	rt, ok :=rm.clients[rs]
+	rt, ok := rm.clients[rs]
 	if !ok {
 		return
 	}
@@ -86,10 +86,9 @@ func (rm *RoutineManager) Closed(rs goetty.IOSession) {
 	rt.Quit()
 }
 
-
 /*
 KILL statement
- */
+*/
 func (rm *RoutineManager) killStatement(id uint64) error {
 	rm.rwlock.Lock()
 	defer rm.rwlock.Unlock()
@@ -102,18 +101,18 @@ func (rm *RoutineManager) killStatement(id uint64) error {
 	}
 
 	if rt != nil {
-		logutil.Infof("will close the statement %d",id)
+		logutil.Infof("will close the statement %d", id)
 		rt.notifyClose()
 	}
 	return nil
 }
 
 func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received uint64) error {
-	defer func() {
-		if err := recover(); err != nil {
-			logutil.Errorf("handle message failed. err:%v",err)
-		}
-	}()
+	//defer func() {
+	//	if err := recover(); err != nil {
+	//		logutil.Errorf("handle message failed. err:%v", err)
+	//	}
+	//}()
 	if rm.pu.SV.GetRejectWhenHeartbeatFromPDLeaderIsTimeout() {
 		if !rm.pdHook.CanAcceptSomething() {
 			logutil.Errorf("The Heartbeat From PDLeader Is Timeout. The Server Go Offline.")
@@ -162,8 +161,8 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 		logutil.Infof("HANDLE HANDSHAKE")
 
 		/*
-		di := MakeDebugInfo(payload,80,8)
-		logutil.Infof("RP[%v] Payload80[%v]",rs.RemoteAddr(),di)
+			di := MakeDebugInfo(payload,80,8)
+			logutil.Infof("RP[%v] Payload80[%v]",rs.RemoteAddr(),di)
 		*/
 
 		err := protocol.handleHandshake(payload)

@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/errno"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/connector"
@@ -41,11 +40,11 @@ import (
 // Compile is the entrance of the compute-layer, it compiles AST tree to scope list.
 // A scope is an execution unit.
 func (e *Exec) Compile(u interface{}, fill func(interface{}, *batch.Batch) error) (err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = moerr.NewPanicError(e)
-		}
-	}()
+	//defer func() {
+	//	if e := recover(); e != nil {
+	//		err = moerr.NewPanicError(e)
+	//	}
+	//}()
 
 	// do semantic analysis and build plan for sql
 	// do ast rewrite
