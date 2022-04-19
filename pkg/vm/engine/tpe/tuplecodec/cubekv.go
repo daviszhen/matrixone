@@ -982,7 +982,11 @@ func (ck *CubeKV) GetShardsWithRange(startKey TupleKey, endKey TupleKey) (interf
 	wantRange := Range{startKey: startKey, endKey: endKey}
 
 	var shardInfos []ShardInfo
-	var stores = make(map[uint64]string)
+	type Store struct {
+		addr   string
+		shards []metapb.Shard
+	}
+	var store2shards = make(map[uint64]Store)
 
 	logutil.Infof("origin startKey %v endKey %v", startKey, endKey)
 
@@ -1001,8 +1005,11 @@ func (ck *CubeKV) GetShardsWithRange(startKey TupleKey, endKey TupleKey) (interf
 		}
 
 		if ok {
-			if _, exist := stores[store.ID]; !exist {
-				stores[store.ID] = store.ClientAddress
+			if stuff, exist := store2shards[store.ID]; !exist {
+				store2shards[store.ID] = Store{store.ClientAddress, []metapb.Shard{shard}}
+			} else {
+				stuff.shards = append(stuff.shards, shard)
+				store2shards[store.ID] = Store{stuff.addr, stuff.shards}
 			}
 			shardInfos = append(shardInfos, ShardInfo{
 				startKey: shard.GetStart(),
@@ -1047,12 +1054,13 @@ func (ck *CubeKV) GetShardsWithRange(startKey TupleKey, endKey TupleKey) (interf
 
 	//all nodes that hold the table
 	var nodes []ShardNode
-	for id, addr := range stores {
-		if !duplicateFunc(nodes, addr) {
+	for id, sh := range store2shards {
+		if !duplicateFunc(nodes, sh.addr) {
 			nodes = append(nodes, ShardNode{
-				Addr:         addr,
+				Addr:         sh.addr,
 				StoreIDbytes: Uint64ToString(id),
 				StoreID:      id,
+				Shards:       CubeShards{sh.shards},
 			})
 		}
 	}
