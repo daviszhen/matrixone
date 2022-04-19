@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matrixorigin/matrixone/pkg/encoding"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/dedup"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/deleteTag"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/limit"
@@ -511,10 +510,6 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 	if Address == s.NodeInfo.Addr {
 		return s.ParallelRun(e)
 	}
-	{
-		buf.Write(encoding.EncodeUint32(uint32(len(s.Proc.Payload))))
-		buf.Write(s.Proc.Payload)
-	}
 	ps := Transfer(s)
 	err := protocol.EncodeScope(ps, &buf)
 	if err != nil {
@@ -648,7 +643,7 @@ func (s *Scope) RunQ(e engine.Engine) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, s.Proc.Payload)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	for i := 0; i < mcpu; i++ {
@@ -664,7 +659,6 @@ func (s *Scope) RunQ(e engine.Engine) error {
 			},
 		}
 		ss[i].Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-		ss[i].Proc.Payload = s.Proc.Payload
 		ss[i].Proc.Id = s.Proc.Id
 		ss[i].Proc.Lim = s.Proc.Lim
 	}
@@ -815,7 +809,7 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, s.Proc.Payload)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	arg := s.Instructions[0].Arg.(*transform.Argument)
@@ -833,7 +827,6 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 		}
 		ss[i].Instructions = append(ss[i].Instructions, dupInstruction(s.Instructions[0]))
 		ss[i].Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-		ss[i].Proc.Payload = s.Proc.Payload
 		ss[i].Proc.Id = s.Proc.Id
 		ss[i].Proc.Lim = s.Proc.Lim
 	}
@@ -1005,7 +998,7 @@ func (s *Scope) RunCQ(e engine.Engine, op *join.Argument) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, s.Proc.Payload)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	for i := 0; i < mcpu; i++ {
@@ -1021,7 +1014,6 @@ func (s *Scope) RunCQ(e engine.Engine, op *join.Argument) error {
 			},
 		}
 		ss[i].Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-		ss[i].Proc.Payload = s.Proc.Payload
 		ss[i].Proc.Id = s.Proc.Id
 		ss[i].Proc.Lim = s.Proc.Lim
 		{
@@ -1052,7 +1044,6 @@ func (s *Scope) RunCQ(e engine.Engine, op *join.Argument) error {
 	rs.Instructions = append(rs.Instructions, s.Instructions...)
 	ctx, cancel := context.WithCancel(context.Background())
 	rs.Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-	rs.Proc.Payload = s.Proc.Payload
 	rs.Proc.Cancel = cancel
 	rs.Proc.Id = s.Proc.Id
 	rs.Proc.Lim = s.Proc.Lim
@@ -1086,7 +1077,6 @@ func (s *Scope) RunCQWithSubquery(e engine.Engine, op *join.Argument) error {
 		rs := new(Scope)
 		bats = make([]*batch.Batch, len(op.Vars))
 		rs.Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-		rs.Proc.Payload = s.Proc.Payload
 		rs.PreScopes = s.PreScopes[1:]
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc.Cancel = cancel
@@ -1230,41 +1220,63 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 			}
 		}
 		for i := range s.PreScopes {
-			s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
-				Op: vm.Connector,
-				Arg: &connector.Argument{
-					Mmu: s.Proc.Mp.Gm,
-					Reg: s.Proc.Reg.MergeReceivers[i],
-				},
-			})
-		}
-		for i := range s.PreScopes {
-			switch s.PreScopes[i].Magic {
-			case Normal:
-				go func(s *Scope) {
-					if rerr := s.Run(e); rerr != nil {
-						err = rerr
+			flg := true
+			for j, in := range s.PreScopes[i].Instructions {
+				if in.Op == vm.Connector {
+					flg = false
+					s.PreScopes[i].Instructions[j].Arg = &connector.Argument{
+						Mmu: s.Proc.Mp.Gm,
+						Reg: s.Proc.Reg.MergeReceivers[i],
 					}
-				}(s.PreScopes[i])
-			case Merge:
-				go func(s *Scope) {
-					if rerr := s.MergeRun(e); rerr != nil {
-						err = rerr
-					}
-				}(s.PreScopes[i])
-			case Remote:
-				go func(s *Scope) {
-					if rerr := s.RemoteRun(e); rerr != nil {
-						err = rerr
-					}
-				}(s.PreScopes[i])
-			case Parallel:
-				go func(s *Scope) {
-					if rerr := s.ParallelRun(e); rerr != nil {
-						err = rerr
-					}
-				}(s.PreScopes[i])
+				}
 			}
+			if flg {
+				s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
+					Op: vm.Connector,
+					Arg: &connector.Argument{
+						Mmu: s.Proc.Mp.Gm,
+						Reg: s.Proc.Reg.MergeReceivers[i],
+					},
+				})
+
+			}
+			/*
+				s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
+					Op: vm.Connector,
+					Arg: &connector.Argument{
+						Mmu: s.Proc.Mp.Gm,
+						Reg: s.Proc.Reg.MergeReceivers[i],
+					},
+				})
+			*/
+		}
+	}
+	for i := range s.PreScopes {
+		switch s.PreScopes[i].Magic {
+		case Normal:
+			go func(s *Scope) {
+				if rerr := s.Run(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
+		case Merge:
+			go func(s *Scope) {
+				if rerr := s.MergeRun(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
+		case Remote:
+			go func(s *Scope) {
+				if rerr := s.RemoteRun(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
+		case Parallel:
+			go func(s *Scope) {
+				if rerr := s.ParallelRun(e); rerr != nil {
+					err = rerr
+				}
+			}(s.PreScopes[i])
 		}
 		if err != nil {
 			for i, in := range s.Instructions {
@@ -1346,7 +1358,7 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 			return err
 		}
 		defer rel.Close()
-		rds = rel.NewReader(mcpu, nil, s.Proc.Payload)
+		rds = rel.NewReader(mcpu, nil, s.NodeInfo.Data)
 	}
 	ss := make([]*Scope, mcpu)
 	for i := 0; i < mcpu; i++ {
@@ -1362,7 +1374,6 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 			},
 		}
 		ss[i].Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-		ss[i].Proc.Payload = s.Proc.Payload
 		ss[i].Proc.Id = s.Proc.Id
 		ss[i].Proc.Lim = s.Proc.Lim
 		{
@@ -1412,7 +1423,6 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 	rs.Instructions = append(rs.Instructions, s.Instructions...)
 	ctx, cancel := context.WithCancel(context.Background())
 	rs.Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-	rs.Proc.Payload = s.Proc.Payload
 	rs.Proc.Cancel = cancel
 	rs.Proc.Id = s.Proc.Id
 	rs.Proc.Lim = s.Proc.Lim
@@ -1446,7 +1456,6 @@ func (s *Scope) RunCAQWithSubquery(e engine.Engine, op *times.Argument) error {
 		rs := new(Scope)
 		bats = make([]*batch.Batch, len(op.Vars))
 		rs.Proc = process.New(mheap.New(guest.New(s.Proc.Mp.Gm.Limit, s.Proc.Mp.Gm.Mmu)))
-		rs.Proc.Payload = s.Proc.Payload
 		rs.PreScopes = s.PreScopes[1:]
 		ctx, cancel := context.WithCancel(context.Background())
 		rs.Proc.Cancel = cancel
@@ -1596,7 +1605,6 @@ func newMergeScope(ss []*Scope, typ int, proc *process.Process) []*Scope {
 			m := len(rs[i].PreScopes)
 			ctx, cancel := context.WithCancel(context.Background())
 			rs[i].Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
-			ss[i].Proc.Payload = proc.Payload
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Id = proc.Id
@@ -1651,7 +1659,6 @@ func newMergeOrderScope(ss []*Scope, arg *mergeorder.Argument, proc *process.Pro
 			m := len(rs[i].PreScopes)
 			ctx, cancel := context.WithCancel(context.Background())
 			rs[i].Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
-			rs[i].Proc.Payload = proc.Payload
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Id = proc.Id
@@ -1706,7 +1713,6 @@ func newMergeLimitScope(ss []*Scope, limit uint64, proc *process.Process) []*Sco
 			m := len(rs[i].PreScopes)
 			ctx, cancel := context.WithCancel(context.Background())
 			rs[i].Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
-			rs[i].Proc.Payload = proc.Payload
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Id = proc.Id
@@ -1764,7 +1770,6 @@ func newMergeTopScope(ss []*Scope, arg *mergetop.Argument, proc *process.Process
 			m := len(rs[i].PreScopes)
 			ctx, cancel := context.WithCancel(context.Background())
 			rs[i].Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
-			rs[i].Proc.Payload = proc.Payload
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Id = proc.Id
@@ -1819,7 +1824,6 @@ func newMergeDedupScope(ss []*Scope, proc *process.Process) []*Scope {
 			m := len(rs[i].PreScopes)
 			ctx, cancel := context.WithCancel(context.Background())
 			rs[i].Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
-			rs[i].Proc.Payload = proc.Payload
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Cancel = cancel
 			rs[i].Proc.Id = proc.Id

@@ -1061,9 +1061,7 @@ func (h *driver) doExecWithRequest(cr CustomRequest) ([]byte, error) {
 			os.Exit(-1)
 		}
 	}()
-	fmt.Println("before_get")
 	ret, err := f.Get()
-	fmt.Println("after_get")
 	a = 1
 	return ret, err
 }
