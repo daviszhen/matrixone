@@ -647,7 +647,6 @@ func (s *Scope) RunQ(e engine.Engine) error {
 	var rds []engine.Reader
 
 	mcpu := runtime.NumCPU()
-	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -814,7 +813,6 @@ func (s *Scope) RunAQ(e engine.Engine) error {
 	var rds []engine.Reader
 
 	mcpu := runtime.NumCPU()
-	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -1016,7 +1014,6 @@ func (s *Scope) RunCQ(e engine.Engine, op *join.Argument) error {
 		}()
 	}
 	mcpu := runtime.NumCPU()
-	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
@@ -1307,55 +1304,8 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 					if rerr := s.ParallelRun(e); rerr != nil {
 						err = rerr
 					}
-				}
+				}(s.PreScopes[i])
 			}
-			if flg {
-				s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
-					Op: vm.Connector,
-					Arg: &connector.Argument{
-						Mmu: s.Proc.Mp.Gm,
-						Reg: s.Proc.Reg.MergeReceivers[i],
-					},
-				})
-
-			}
-			/*
-				s.PreScopes[i].Instructions = append(s.PreScopes[i].Instructions, vm.Instruction{
-					Op: vm.Connector,
-					Arg: &connector.Argument{
-						Mmu: s.Proc.Mp.Gm,
-						Reg: s.Proc.Reg.MergeReceivers[i],
-					},
-				})
-			*/
-		}
-	}
-	for i := range s.PreScopes {
-		switch s.PreScopes[i].Magic {
-		case Normal:
-			go func(s *Scope) {
-				if rerr := s.Run(e); rerr != nil {
-					err = rerr
-				}
-			}(s.PreScopes[i])
-		case Merge:
-			go func(s *Scope) {
-				if rerr := s.MergeRun(e); rerr != nil {
-					err = rerr
-				}
-			}(s.PreScopes[i])
-		case Remote:
-			go func(s *Scope) {
-				if rerr := s.RemoteRun(e); rerr != nil {
-					err = rerr
-				}
-			}(s.PreScopes[i])
-		case Parallel:
-			go func(s *Scope) {
-				if rerr := s.ParallelRun(e); rerr != nil {
-					err = rerr
-				}
-			}(s.PreScopes[i])
 		}
 		if err != nil {
 			for i, in := range s.Instructions {
@@ -1427,7 +1377,6 @@ func (s *Scope) RunCAQ(e engine.Engine, op *times.Argument) error {
 		}()
 	}
 	mcpu := runtime.NumCPU()
-	mcpu = 1
 	{
 		db, err := e.Database(s.DataSource.SchemaName)
 		if err != nil {
