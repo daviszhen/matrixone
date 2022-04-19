@@ -563,7 +563,6 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 			break
 		}
 		bat, _, err := protocol.DecodeBatchWithProcess(val.(*message.Message).Data, s.Proc)
-		fmt.Printf("$$$Address %v Scope.RemoteRun receives batch %p from %v:%v err %v\n",Address,bat,addr.IP, addr.Port+100,err)
 		if err != nil {
 			select {
 			case <-arg.Reg.Ctx.Done():
@@ -589,10 +588,6 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 func (s *Scope) ParallelRun(e engine.Engine) error {
 	var jop *join.Argument
 	var top *times.Argument
-	fmt.Printf("###Scope ParallelRun enter @@@\n")
-	defer func() {
-		fmt.Printf("###Scope ParallelRun exit @@@\n")
-	}()
 	{
 		for _, in := range s.Instructions {
 			if in.Op == vm.Join {
@@ -603,21 +598,21 @@ func (s *Scope) ParallelRun(e engine.Engine) error {
 			}
 		}
 	}
-	fmt.Printf("###Scope ParallelRun 000 @@@\n")
+
 	if jop != nil {
 		if s.DataSource == nil {
 			return s.RunCQWithSubquery(e, jop)
 		}
 		return s.RunCQ(e, jop)
 	}
-	fmt.Printf("###Scope ParallelRun 111 @@@\n")
+
 	if top != nil {
 		if s.DataSource == nil {
 			return s.RunCAQWithSubquery(e, top)
 		}
 		return s.RunCAQ(e, top)
 	}
-	fmt.Printf("###Scope ParallelRun 222 @@@\n")
+
 	switch t := s.Instructions[0].Arg.(type) {
 	case *transform.Argument:
 		if t.Typ == transform.Bare {

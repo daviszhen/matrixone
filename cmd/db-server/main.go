@@ -246,7 +246,6 @@ func main() {
 		addr = cfg.CubeConfig.ClientAddr
 	}
 
-	fmt.Printf("===Addr %v\n",addr)
 	//put the node info to the computation
 	compile.InitAddress(addr)
 

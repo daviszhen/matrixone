@@ -33,10 +33,6 @@ var (
 )
 
 func (td *TpeDatabase) Relations() []string {
-	fmt.Printf("TpeDatabase.Relations-enter\n")
-	defer func() {
-		fmt.Printf("TpeDatabase.Relations-exit\n")
-	}()
 	var names []string
 	tableDescs, err := td.computeHandler.ListTables(td.id)
 	if err != nil {
@@ -49,10 +45,6 @@ func (td *TpeDatabase) Relations() []string {
 }
 
 func (td *TpeDatabase) Relation(name string) (engine.Relation, error) {
-	fmt.Printf("TpeDatabase.Relation-enter\n")
-	defer func() {
-		fmt.Printf("TpeDatabase.Relation-exit\n")
-	}()
 	tableDesc, err := td.computeHandler.GetTable(td.id, name)
 	if err != nil {
 		return nil, err

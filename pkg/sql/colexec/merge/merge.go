@@ -16,8 +16,6 @@ package merge
 
 import (
 	"bytes"
-	"fmt"
-
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
@@ -32,20 +30,13 @@ func Prepare(_ *process.Process, arg interface{}) error {
 }
 
 func Call(proc *process.Process, arg interface{}) (bool, error) {
-	fmt.Printf("%%%%merge.call enter proc %p receive len %d \n",proc,len(proc.Reg.MergeReceivers))
-	defer func() {
-		fmt.Printf("%%%%merge.call exit proc %p receive len %d \n",proc,len(proc.Reg.MergeReceivers))
-	}()
 	n := arg.(*Argument)
 	for {
-		fmt.Printf("%%%%merge.call 000\n")
 		if len(proc.Reg.MergeReceivers) == 0 {
 			return true, nil
 		}
-		fmt.Printf("%%%%merge.call 111\n")
 		reg := proc.Reg.MergeReceivers[n.ctr.i]
 		bat := <-reg.Ch
-		fmt.Printf("%%%%merge.call 222\n")
 		if bat == nil {
 			proc.Reg.MergeReceivers = append(proc.Reg.MergeReceivers[:n.ctr.i], proc.Reg.MergeReceivers[n.ctr.i+1:]...)
 			if n.ctr.i >= len(proc.Reg.MergeReceivers) {
@@ -60,7 +51,6 @@ func Call(proc *process.Process, arg interface{}) (bool, error) {
 		if n.ctr.i = n.ctr.i + 1; n.ctr.i >= len(proc.Reg.MergeReceivers) {
 			n.ctr.i = 0
 		}
-		fmt.Printf("%%%%merge.call 444\n")
 		return false, nil
 	}
 }

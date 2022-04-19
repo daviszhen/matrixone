@@ -16,7 +16,6 @@ package times
 
 import (
 	"bytes"
-	"fmt"
 	"unsafe"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -124,11 +123,6 @@ func Call(proc *process.Process, arg interface{}) (bool, error) {
 }
 
 func (ctr *Container) probe(bat *batch.Batch, proc *process.Process) error {
-	fmt.Printf("++++++begin probe: %p\n", bat)
-	defer func() {
-		fmt.Printf("++++++exit probe: %p\n", bat)
-	}()
-
 	defer batch.Clean(bat, proc.Mp)
 	if ctr.attrs == nil {
 		ctr.attrs = make([]string, 0, 4)

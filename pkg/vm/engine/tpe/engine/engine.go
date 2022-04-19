@@ -16,7 +16,6 @@ package engine
 
 import (
 	"errors"
-	"fmt"
 	"github.com/matrixorigin/matrixcube/pb/metapb"
 	"github.com/matrixorigin/matrixone/pkg/vm/driver/pb"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -103,10 +102,6 @@ func (te *TpeEngine) Create(epoch uint64, name string, typ int) error {
 }
 
 func (te *TpeEngine) Databases() []string {
-	fmt.Printf("TpeEngine.Databases-enter\n")
-	defer func() {
-		fmt.Printf("TpeEngine.Databases-exit\n")
-	}()
 	var names []string
 	if dbDescs, err := te.computeHandler.ListDatabases(); err == nil {
 		for _, desc := range dbDescs {
@@ -117,10 +112,6 @@ func (te *TpeEngine) Databases() []string {
 }
 
 func (te *TpeEngine) Database(name string) (engine.Database, error) {
-	fmt.Printf("TpeEngine.Database-enter\n")
-	defer func() {
-		fmt.Printf("TpeEngine.Database-exit\n")
-	}()
 	dbDesc, err := te.computeHandler.GetDatabase(name)
 	if err != nil {
 		return nil, err
@@ -139,10 +130,6 @@ func (te *TpeEngine) Database(name string) (engine.Database, error) {
 }
 
 func (te *TpeEngine) Node(ip string) *engine.NodeInfo {
-	fmt.Printf("TpeEngine.Node-enter\n")
-	defer func() {
-		fmt.Printf("TpeEngine.Node-exit\n")
-	}()
 	return &engine.NodeInfo{
 		Mcpu: 1,
 	}
