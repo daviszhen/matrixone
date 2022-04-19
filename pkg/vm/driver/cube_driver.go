@@ -1048,9 +1048,8 @@ func (h *driver) doAsyncExecWithGroup(cr CustomRequest, cb func(CustomRequest, [
 
 func (h *driver) doExecWithRequest(cr CustomRequest) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultRPCTimeout)
-	defer cancel()
 	f := h.doExec(ctx, cr)
+	defer cancel()
 	defer f.Close()
-	ret, err := f.Get()
-	return ret, err
+	return f.Get()
 }

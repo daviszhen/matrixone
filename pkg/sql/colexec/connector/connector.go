@@ -16,7 +16,6 @@ package connector
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -46,7 +45,6 @@ func Call(proc *process.Process, arg interface{}) (bool, error) {
 		}
 	}
 	if len(bat.Zs) == 0 {
-
 		return false, nil
 	}
 	vecs := n.vecs[:0]
@@ -70,7 +68,7 @@ func Call(proc *process.Process, arg interface{}) (bool, error) {
 	case <-reg.Ctx.Done():
 		batch.Clean(bat, proc.Mp)
 		process.FreeRegisters(proc)
-		return true, fmt.Errorf("context is done")
+		return true, nil
 	case reg.Ch <- bat:
 		n.Mmu.Alloc(size)
 		proc.Mp.Gm.Free(size)

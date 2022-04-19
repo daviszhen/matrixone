@@ -639,9 +639,9 @@ type ReadContext struct {
 
 	SingleReaderContext
 
-	DumpData bool // dumpData flag
+	DumpData 	bool // dumpData flag
 
-	Opt *batch.DumpOption
+	Opt	*batch.DumpOption
 }
 
 func (rc *ReadContext) AddReadCount() int {

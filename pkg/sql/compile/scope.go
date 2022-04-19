@@ -482,28 +482,24 @@ func (s *Scope) MergeRun(e engine.Engine) error {
 			go func(cs *Scope) {
 				if rerr := cs.Run(e); rerr != nil {
 					err = rerr
-					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		case Merge:
 			go func(cs *Scope) {
 				if rerr := cs.MergeRun(e); rerr != nil {
 					err = rerr
-					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		case Remote:
 			go func(cs *Scope) {
 				if rerr := cs.RemoteRun(e); rerr != nil {
 					err = rerr
-					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		case Parallel:
 			go func(cs *Scope) {
 				if rerr := cs.ParallelRun(e); rerr != nil {
 					err = rerr
-					s.Proc.Cancel()
 				}
 			}(s.PreScopes[i])
 		}
@@ -596,6 +592,7 @@ func (s *Scope) RemoteRun(e engine.Engine) error {
 func (s *Scope) ParallelRun(e engine.Engine) error {
 	var jop *join.Argument
 	var top *times.Argument
+
 	{
 		for _, in := range s.Instructions {
 			if in.Op == vm.Join {
@@ -606,21 +603,18 @@ func (s *Scope) ParallelRun(e engine.Engine) error {
 			}
 		}
 	}
-
 	if jop != nil {
 		if s.DataSource == nil {
 			return s.RunCQWithSubquery(e, jop)
 		}
 		return s.RunCQ(e, jop)
 	}
-
 	if top != nil {
 		if s.DataSource == nil {
 			return s.RunCAQWithSubquery(e, top)
 		}
 		return s.RunCAQ(e, top)
 	}
-
 	switch t := s.Instructions[0].Arg.(type) {
 	case *transform.Argument:
 		if t.Typ == transform.Bare {

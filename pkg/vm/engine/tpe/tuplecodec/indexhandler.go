@@ -165,13 +165,11 @@ func (ihi *IndexHandlerImpl) parallelReader(indexReadCtx *ReadContext) (*batch.B
 		//logutil.Infof("readCtx before prefix %v %v",
 		//	indexReadCtx.PrefixForScanKey,
 		//	indexReadCtx.ParallelReaderContext)
-		logutil.Infof("before_GetRangeWithPrefixLimit")
 		keys, values, complete, nextScanKey, err := ihi.kv.GetRangeWithPrefixLimit(
 			indexReadCtx.ShardNextScanKey,
 			indexReadCtx.ShardScanEndKey,
 			indexReadCtx.PrefixForScanKey,
 			uint64(needRead))
-		logutil.Infof("after_GetRangeWithPrefixLimit")
 		if err != nil {
 			return nil, 0, err
 		}

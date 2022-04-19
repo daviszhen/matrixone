@@ -897,9 +897,7 @@ func (ck *CubeKV) GetRangeWithPrefixLimit(startKey TupleKey, endKey TupleKey, pr
 
 	for readCnt < limit {
 		needCnt := limit - readCnt
-		logutil.Infof("before_TpeScan")
 		scanKeys, scanValues, complete, nextScanKey, err = ck.Cube.TpeScan(lastKey, endKey, prefix, needCnt, true)
-		logutil.Infof("after_TpeScan")
 		if err != nil {
 			return nil, nil, false, nil, err
 		}
@@ -1066,7 +1064,7 @@ func (ck *CubeKV) GetShardsWithRange(startKey TupleKey, endKey TupleKey) (interf
 		logutil.Warnf("there are no nodes hold the range [%v %v)", startKey, endKey)
 	}
 	for i, node := range nodes {
-		logutil.Infof("yindex %d all_nodes %v\n", i, node)
+		logutil.Infof("yindex %d all_nodes %v", i, node)
 	}
 
 	logutil.Infof("shardinfo count %d ", len(shardInfos))

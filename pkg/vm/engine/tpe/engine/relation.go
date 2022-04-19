@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/extend"
+
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -71,8 +72,8 @@ func (trel *TpeRelation) Nodes() engine.Nodes {
 			logutil.Errorf("decode cubeshards failed.err : %v",err)
 			return nil
 		}
-		logutil.Infof("readCtx index %d storeID %v cubeshards \n %v \n",i,trel.storeID,cs)
-		logutil.Infof("readCtx index %d storeID %v all_nodes_tpe \n %v \n", i, trel.storeID, node)
+		logutil.Infof("readCtx table %s index %d storeID %v cubeshards \n %v \n",trel.desc.Name,i,trel.storeID,cs)
+		logutil.Infof("readCtx table %s index %d storeID %v all_nodes_tpe \n %v \n",trel.desc.Name, i, trel.storeID, node)
 	}
 	return trel.nodes
 }
@@ -225,7 +226,6 @@ func (trel *TpeRelation) parallelReader(cnt int,payload []byte) []engine.Reader 
 	}
 	var retReaders []engine.Reader = make([]engine.Reader, cnt)
 	var tpeReaders []*TpeReader = make([]*TpeReader, tcnt)
-
 	//split shards into multiple readers
 	shardsThisNodeWillRead := &tuplecodec.CubeShards{}
 	err := json.Unmarshal(payload, shardsThisNodeWillRead)
@@ -235,8 +235,8 @@ func (trel *TpeRelation) parallelReader(cnt int,payload []byte) []engine.Reader 
 	}
 
 	for i, shard := range shardsThisNodeWillRead.Shards {
-		logutil.Infof("+++parallelReader shardIndex %d shardID %d startKey %v  endKey %v\n",
-			i,shard.GetID(),shard.GetStart(),shard.GetEnd())
+		logutil.Infof("+++parallelReader table %s shardIndex %d shardID %d startKey %v  endKey %v\n",
+			trel.desc.Name,i,shard.GetID(),shard.GetStart(),shard.GetEnd())
 	}
 
 	shardInfos := shardsThisNodeWillRead.Shards
@@ -250,7 +250,6 @@ func (trel *TpeRelation) parallelReader(cnt int,payload []byte) []engine.Reader 
 
 	//for test
 	//one reader for all shards
-	trel.useOneThread = true
 	if trel.useOneThread {
 		shardCountPerReader = shardInfosCount
 	}

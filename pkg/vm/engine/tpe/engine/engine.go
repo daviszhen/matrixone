@@ -130,9 +130,6 @@ func (te *TpeEngine) Database(name string) (engine.Database, error) {
 }
 
 func (te *TpeEngine) Node(ip string) *engine.NodeInfo {
-	return &engine.NodeInfo{
-		Mcpu: 1,
-	}
 	var ni *engine.NodeInfo
 	if te.tpeConfig.Cube != nil {
 		te.tpeConfig.Cube.RaftStore().GetRouter().Every(uint64(pb.KVGroup), true, func(shard metapb.Shard, store metapb.Store) bool {

@@ -51,12 +51,12 @@ func (_ Def) CmdRun(
 				return
 			}
 
-			//if p := recover(); p != nil {
-			//	err = we.With(
-			//		e4.Info("%v", p),
-			//	)(errPanic)
-			//	return
-			//}
+			if p := recover(); p != nil {
+				err = we.With(
+					e4.Info("%v", p),
+				)(errPanic)
+				return
+			}
 
 		}()
 		defer he(&err,
