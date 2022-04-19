@@ -16,7 +16,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/connector"
@@ -35,12 +34,7 @@ func recoverScope(ps protocol.Scope, proc *process.Process) *compile.Scope {
 	s.NodeInfo.Id = ps.NodeInfo.Id
 	s.NodeInfo.Addr = ps.NodeInfo.Addr
 	s.NodeInfo.Data = ps.NodeInfo.Data
-	fmt.Printf("---recoverScope id %v addr %v data len %d \n",
-		s.NodeInfo.Id,
-		s.NodeInfo.Addr,
-		len(s.NodeInfo.Data))
 	s.Proc = process.New(mheap.New(guest.New(proc.Mp.Gm.Limit, proc.Mp.Gm.Mmu)))
-	s.Proc.Payload = proc.Payload
 	if len(ps.PreScopes) > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.Proc.Cancel = cancel
