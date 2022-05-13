@@ -35,3 +35,4 @@ pkg/vm/engine/tpe/engine/read_profile
 3node-aoe/
 mock-config/
 mock-config-aoe/
+!pkg/vectorize/bin
