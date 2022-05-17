@@ -147,6 +147,7 @@ type aoeHandler struct {
 	port       int64
 	kvStorage  storage.DataStorage
 	aoeStorage storage.DataStorage
+	eng        engine.Engine
 }
 
 type tpeHandler struct {
@@ -154,6 +155,7 @@ type tpeHandler struct {
 }
 
 type taeHandler struct {
+	eng engine.Engine
 }
 
 func initAoe(configFilePath string) *aoeHandler {
@@ -234,6 +236,7 @@ func initAoe(configFilePath string) *aoeHandler {
 		port:       cubePort,
 		kvStorage:  kvStorage,
 		aoeStorage: aoeStorage,
+		eng:        eng,
 	}
 }
 
@@ -305,6 +308,12 @@ func closeTpe(tpe *tpeHandler) {
 }
 
 func initTae() *taeHandler {
+	targetDir := config.GlobalSystemVariables.GetStorePath()
+	if err := recreateDir(targetDir); err != nil {
+		logutil.Infof("Recreate dir error:%v\n", err)
+		os.Exit(RecreateDirExit)
+	}
+
 	return nil
 }
 

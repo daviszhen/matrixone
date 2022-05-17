@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 )
 
 // CatalogSchemaAttribute defines the attribute of the schema
@@ -578,4 +579,74 @@ func FillInitialDataForMoUser() *batch.Batch {
 	schema := DefineSchemaForMoUser()
 	data := PrepareInitialDataForMoUser()
 	return PrepareInitialDataForSchema(schema, data)
+}
+
+// InitDB setups the initial catalog tables in tae
+func InitDB(tae engine.Engine) error {
+	//TODO: fix it after the tae is ready
+	var txnCtx engine.Snapshot = nil
+
+	/*
+		stage 1: create catalog tables
+	*/
+	//1.get database mo_catalog handler
+	catalogDbName := PrepareInitialDataForMoDatabase()[0][0]
+	catalogDB, err := tae.Database(catalogDbName, txnCtx)
+	if err != nil {
+		return err
+	}
+
+	//2. create table mo_global_variables
+	gvSch := DefineSchemaForMoGlobalVariables()
+	gvDefs := convertCatalogSchemaToTableDef(gvSch)
+	err = catalogDB.Create(0, gvSch.GetName(), gvDefs, txnCtx)
+	if err != nil {
+		return err
+	}
+
+	//3. create table mo_user
+	userSch := DefineSchemaForMoUser()
+	userDefs := convertCatalogSchemaToTableDef(userSch)
+	err = catalogDB.Create(0, userSch.GetName(), userDefs, txnCtx)
+	if err != nil {
+		return err
+	}
+
+	/*
+		stage 2: create information_schema database.
+		Views in the information_schema need to created by 'create view'
+	*/
+	//1. create database information_schema
+	err = tae.Create(0, "information_schema", 0, txnCtx)
+	if err != nil {
+		return err
+	}
+	//TODO: create views after the computation engine is ready
+	return nil
+}
+
+func convertCatalogSchemaToTableDef(sch *CatalogSchema) []engine.TableDef {
+	var defs []engine.TableDef
+	var primaryKeyName []string
+
+	for _, attr := range sch.GetAttributes() {
+		if attr.GetIsPrimaryKey() {
+			primaryKeyName = append(primaryKeyName, attr.GetName())
+		}
+
+		defs = append(defs, &engine.AttributeDef{Attr: engine.Attribute{
+			Name:    attr.GetName(),
+			Alg:     0,
+			Type:    attr.GetType(),
+			Default: engine.DefaultExpr{},
+			Primary: attr.GetIsPrimaryKey(),
+		}})
+	}
+
+	if len(primaryKeyName) != 0 {
+		defs = append(defs, &engine.PrimaryIndexDef{
+			Names: primaryKeyName,
+		})
+	}
+	return defs
 }
