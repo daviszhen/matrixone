@@ -18,6 +18,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/db"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/moengine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tpe/tuplecodec"
 	"math"
 	"os"
@@ -72,6 +74,8 @@ const (
 	CreateTpeExit           = 13
 	RunRPCExit              = 14
 	ShutdownExit            = 15
+	CreateTaeExit           = 16
+	InitCatalogExit         = 17
 )
 
 var (
@@ -156,6 +160,7 @@ type tpeHandler struct {
 
 type taeHandler struct {
 	eng engine.Engine
+	tae *db.DB
 }
 
 func initAoe(configFilePath string) *aoeHandler {
@@ -314,11 +319,20 @@ func initTae() *taeHandler {
 		os.Exit(RecreateDirExit)
 	}
 
-	return nil
+	tae, err := db.Open(targetDir+"/tae", nil)
+	if err != nil {
+		logutil.Infof("Open tae failed. error:%v", err)
+		os.Exit(CreateTaeExit)
+	}
+
+	return &taeHandler{
+		eng: moengine.NewEngine(tae),
+		tae: tae,
+	}
 }
 
 func closeTae(tae *taeHandler) {
-
+	_ = tae.tae.Close()
 }
 
 func main() {
@@ -356,6 +370,20 @@ func main() {
 	if err := config.LoadvarsConfigFromFile(configFilePath, &config.GlobalSystemVariables); err != nil {
 		logutil.Infof("Load config error:%v\n", err)
 		os.Exit(LoadConfigExit)
+	}
+
+	//just initialize the tae after configuration has been loaded
+	if len(args) == 2 && args[1] == "init_db" {
+		fmt.Println("Initialize the TAE engine ...")
+		taeWrapper := initTae()
+		err := frontend.InitDB(taeWrapper.eng)
+		if err != nil {
+			logutil.Infof("Initialize catalog failed. error:%v", err)
+			os.Exit(InitCatalogExit)
+		}
+		fmt.Println("Initialize the TAE engine Done")
+		closeTae(taeWrapper)
+		os.Exit(0)
 	}
 
 	if *cpuProfilePathFlag != "" {
