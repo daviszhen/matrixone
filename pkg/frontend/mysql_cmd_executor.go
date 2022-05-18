@@ -1278,7 +1278,8 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) error {
 			switch t := stmt.(type) {
 			case *tree.ShowDatabases, *tree.CreateDatabase, *tree.ShowCreateDatabase, *tree.ShowWarnings, *tree.ShowErrors,
 				*tree.ShowStatus, *tree.DropDatabase, *tree.Load,
-				*tree.Use, *tree.SetVar:
+				*tree.Use, *tree.SetVar,
+				*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
 			case *tree.ShowColumns:
 				if t.Table.ToTableName().SchemaName == "" {
 					return NewMysqlError(ER_NO_DB_ERROR)

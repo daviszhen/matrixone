@@ -108,6 +108,7 @@ type Session struct {
 	closeRef *CloseExportData
 
 	//tae txn
+	//TODO: add aoe dump impl of Txn interface for unifying the logic of txn
 	taeTxn   moengine.Txn
 	txnState *TxnState
 }
