@@ -19,7 +19,10 @@ import (
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+	"github.com/matrixorigin/matrixone/pkg/sql/plan2"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/moengine"
 	"github.com/matrixorigin/matrixone/pkg/vm/mempool"
 	"github.com/matrixorigin/matrixone/pkg/vm/mmu/guest"
@@ -126,6 +129,7 @@ func (tti *TaeTxnDumpImpl) GetError() error {
 type TxnHandler struct {
 	//tae txn
 	//TODO: add aoe dump impl of Txn interface for unifying the logic of txn
+	storage  engine.Engine
 	taeTxn   moengine.Txn
 	txnState *TxnState
 }
@@ -134,6 +138,7 @@ func InitTxnHandler() *TxnHandler {
 	return &TxnHandler{
 		taeTxn:   InitTaeTxnImpl(),
 		txnState: InitTxnState(),
+		storage:  config.StorageEngine,
 	}
 }
 
@@ -157,11 +162,14 @@ type Session struct {
 
 	ep *tree.ExportParam
 
-	closeRef   *CloseExportData
-	txnHandler *TxnHandler
+	closeRef      *CloseExportData
+	txnHandler    *TxnHandler
+	txnCompileCtx *TxnCompilerContext
+	storage       engine.Engine
 }
 
 func NewSession(proto Protocol, pdHook *PDCallbackImpl, gm *guest.Mmu, mp *mempool.Mempool, PU *config.ParameterUnit) *Session {
+	txnHandler := InitTxnHandler()
 	return &Session{
 		protocol: proto,
 		pdHook:   pdHook,
@@ -173,7 +181,10 @@ func NewSession(proto Protocol, pdHook *PDCallbackImpl, gm *guest.Mmu, mp *mempo
 			Fields:  &tree.Fields{},
 			Lines:   &tree.Lines{},
 		},
-		txnHandler: InitTxnHandler(),
+		txnHandler: txnHandler,
+		//TODO:fix database name after the catalog is ready
+		txnCompileCtx: InitTxnCompilerContext(txnHandler, proto.GetDatabaseName()),
+		storage:       config.StorageEngine,
 	}
 }
 
@@ -183,6 +194,27 @@ func (ses *Session) GetEpochgc() *PDCallbackImpl {
 
 func (ses *Session) GetTxnHandler() *TxnHandler {
 	return ses.txnHandler
+}
+
+func (ses *Session) IsTaeEngine() bool {
+	_, ok := ses.storage.(moengine.TxnEngine)
+	return ok
+}
+
+func (ses *Session) GetStorage() engine.Engine {
+	return ses.storage
+}
+
+func (ses *Session) GetDatabaseName() string {
+	return ses.protocol.GetDatabaseName()
+}
+
+func (ses *Session) GetUserName() string {
+	return ses.protocol.GetUserName()
+}
+
+func (th *TxnHandler) GetStorage() engine.Engine {
+	return th.storage
 }
 
 func (th *TxnHandler) getTxnState() int {
@@ -219,14 +251,14 @@ func (th *TxnHandler) IsInTaeTxn() bool {
 }
 
 func (th *TxnHandler) IsTaeEngine() bool {
-	_, ok := config.StorageEngine.(moengine.TxnEngine)
+	_, ok := th.storage.(moengine.TxnEngine)
 	return ok
 }
 
 func (th *TxnHandler) Begin() error {
 	logutil.Infof("begin begin")
 	var err error
-	if taeEng, ok := config.StorageEngine.(moengine.TxnEngine); ok {
+	if taeEng, ok := th.storage.(moengine.TxnEngine); ok {
 		switch th.txnState.getState() {
 		case TxnInit, TxnEnd, TxnErr:
 			//begin a transaction
@@ -251,7 +283,7 @@ func (th *TxnHandler) Begin() error {
 func (th *TxnHandler) BeginAutocommit() error {
 	logutil.Infof("begin autocommit")
 	var err error
-	if taeEng, ok := config.StorageEngine.(moengine.TxnEngine); ok {
+	if taeEng, ok := th.storage.(moengine.TxnEngine); ok {
 		switch th.txnState.getState() {
 		case TxnInit, TxnEnd, TxnErr:
 			//begin a transaction
@@ -281,7 +313,7 @@ func (th *TxnHandler) BeginAutocommitIfNeeded() (bool, error) {
 	if th.IsInTaeTxn() {
 		return false, nil
 	}
-	if taeEng, ok := config.StorageEngine.(moengine.TxnEngine); ok {
+	if taeEng, ok := th.storage.(moengine.TxnEngine); ok {
 		switch th.txnState.getState() {
 		case TxnInit, TxnEnd, TxnErr:
 			//begin a transaction
@@ -426,4 +458,121 @@ func (th *TxnHandler) ClearTxn() error {
 		th.txnState.switchToState(TxnInit, err)
 	}
 	return err
+}
+
+var _ plan2.CompilerContext = &TxnCompilerContext{}
+
+type TxnCompilerContext struct {
+	dbName     string ``
+	txnHandler *TxnHandler
+}
+
+func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
+	return &TxnCompilerContext{txnHandler: txn, dbName: db}
+}
+
+func (tcc *TxnCompilerContext) DefaultDatabase() string {
+	return tcc.dbName
+}
+
+func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
+	newTxn, err := tcc.txnHandler.BeginAutocommitIfNeeded()
+	if err != nil {
+		logutil.Errorf("error %v", err)
+		return false
+	}
+
+	//open database
+	_, err = tcc.txnHandler.GetStorage().Database(name, tcc.txnHandler.GetTxn().GetCtx())
+	if err != nil {
+		logutil.Errorf("error %v", err)
+		err2 := tcc.txnHandler.RollbackAfterAutocommitOnly()
+		if err2 != nil {
+			return false
+		}
+		return false
+	}
+
+	if newTxn {
+		err2 := tcc.txnHandler.CommitAfterAutocommitOnly()
+		if err2 != nil {
+			logutil.Errorf("error %v", err)
+			return false
+		}
+	}
+	return true
+}
+
+func (tcc *TxnCompilerContext) Resolve(name string) (*plan2.ObjectRef, *plan2.TableDef) {
+	//TODO: fix it when the interface is changed.
+	var dbName string
+	var tableName string
+	newTxn, err := tcc.txnHandler.BeginAutocommitIfNeeded()
+	if err != nil {
+		logutil.Errorf("error %v", err)
+		return nil, nil
+	}
+
+	//open database
+	db, err := tcc.txnHandler.GetStorage().Database(dbName, tcc.txnHandler.GetTxn().GetCtx())
+	if err != nil {
+		logutil.Errorf("error %v", err)
+		err2 := tcc.txnHandler.RollbackAfterAutocommitOnly()
+		if err2 != nil {
+			return nil, nil
+		}
+		return nil, nil
+	}
+
+	//open table
+	table, err := db.Relation(tableName, tcc.txnHandler.GetTxn().GetCtx())
+	if err != nil {
+		logutil.Errorf("error %v", err)
+		err2 := tcc.txnHandler.RollbackAfterAutocommitOnly()
+		if err2 != nil {
+			return nil, nil
+		}
+		return nil, nil
+	}
+
+	engineDefs := table.TableDefs(tcc.txnHandler.GetTxn().GetCtx())
+
+	var defs []*plan2.ColDef
+	for _, def := range engineDefs {
+		if attr, ok := def.(*engine.AttributeDef); ok {
+			defs = append(defs, &plan2.ColDef{
+				Name: attr.Attr.Name,
+				Typ: &plan2.Type{
+					Id:        plan.Type_TypeId(attr.Attr.Type.Oid),
+					Width:     attr.Attr.Type.Width,
+					Precision: attr.Attr.Type.Precision,
+				},
+				Primary: attr.Attr.Primary,
+			})
+		}
+	}
+
+	//convert
+	obj := &plan2.ObjectRef{
+		SchemaName: dbName,
+		ObjName:    tableName,
+	}
+
+	tableDef := &plan2.TableDef{
+		Name: tableName,
+		Cols: defs,
+	}
+
+	if newTxn {
+		err2 := tcc.txnHandler.CommitAfterAutocommitOnly()
+		if err2 != nil {
+			logutil.Errorf("error %v", err)
+			return nil, nil
+		}
+	}
+	return obj, tableDef
+}
+
+func (tcc *TxnCompilerContext) Cost(obj *plan2.ObjectRef, e *plan2.Expr) *plan2.Cost {
+	return &plan2.Cost{}
 }

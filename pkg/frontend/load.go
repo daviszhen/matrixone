@@ -1679,7 +1679,7 @@ func (mce *MysqlCmdExecutor) LoadLoop(load *tree.Load, dbHandler engine.Database
 				case NOTIFY_EVENT_READ_SIMDCSV_ERROR,
 					NOTIFY_EVENT_OUTPUT_SIMDCSV_ERROR,
 					NOTIFY_EVENT_WRITE_BATCH_ERROR:
-					if ses.GetTxnHandler().IsTaeEngine() || !errorCanBeIgnored(ne.err) {
+					if ses.IsTaeEngine() || !errorCanBeIgnored(ne.err) {
 						retErr = ne.err
 						quit = true
 					}

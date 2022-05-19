@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
 	"os"
 	"runtime/pprof"
 	"strconv"
@@ -1174,6 +1175,14 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	defer func() {
 		pdHook.DecQueryCountAtEpoch(epoch, statementCount)
 	}()
+
+	//TODO: fix it after process/compile/batch is ready
+	if ses.IsTaeEngine() {
+		_, err := parsers.Parse(dialect.MYSQL, sql)
+		if err != nil {
+			return err
+		}
+	}
 
 	proc := process.New(mheap.New(ses.GuestMmu))
 	proc.Id = mce.getNextProcessId()
