@@ -503,10 +503,7 @@ func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	return true
 }
 
-func (tcc *TxnCompilerContext) Resolve(name string) (*plan2.ObjectRef, *plan2.TableDef) {
-	//TODO: fix it when the interface is changed.
-	var dbName string
-	var tableName string
+func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.ObjectRef, *plan2.TableDef) {
 	newTxn, err := tcc.txnHandler.BeginAutocommitIfNeeded()
 	if err != nil {
 		logutil.Errorf("error %v", err)
