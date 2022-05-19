@@ -85,6 +85,58 @@ func (ts *TxnState) String() string {
 	return fmt.Sprintf("state:%d fromState:%d err:%v", ts.state, ts.fromState, ts.err)
 }
 
+var _ moengine.Txn = &TaeTxnDumpImpl{}
+
+//TaeTxnDumpImpl is just a placeholder and does nothing
+type TaeTxnDumpImpl struct {
+}
+
+func InitTaeTxnImpl() *TaeTxnDumpImpl {
+	return &TaeTxnDumpImpl{}
+}
+
+func (tti *TaeTxnDumpImpl) GetCtx() []byte {
+	return nil
+}
+
+func (tti *TaeTxnDumpImpl) GetID() uint64 {
+	return 0
+}
+
+func (tti *TaeTxnDumpImpl) Commit() error {
+	return nil
+}
+
+func (tti *TaeTxnDumpImpl) Rollback() error {
+	return nil
+}
+
+func (tti *TaeTxnDumpImpl) String() string {
+	return "TaeTxnDumpImpl"
+}
+
+func (tti *TaeTxnDumpImpl) Repr() string {
+	return "TaeTxnDumpImpl.Repr"
+}
+
+func (tti *TaeTxnDumpImpl) GetError() error {
+	return nil
+}
+
+type TxnHandler struct {
+	//tae txn
+	//TODO: add aoe dump impl of Txn interface for unifying the logic of txn
+	taeTxn   moengine.Txn
+	txnState *TxnState
+}
+
+func InitTxnHandler() *TxnHandler {
+	return &TxnHandler{
+		taeTxn:   InitTaeTxnImpl(),
+		txnState: InitTxnState(),
+	}
+}
+
 type Session struct {
 	//protocol layer
 	protocol Protocol
@@ -105,12 +157,8 @@ type Session struct {
 
 	ep *tree.ExportParam
 
-	closeRef *CloseExportData
-
-	//tae txn
-	//TODO: add aoe dump impl of Txn interface for unifying the logic of txn
-	taeTxn   moengine.Txn
-	txnState *TxnState
+	closeRef   *CloseExportData
+	txnHandler *TxnHandler
 }
 
 func NewSession(proto Protocol, pdHook *PDCallbackImpl, gm *guest.Mmu, mp *mempool.Mempool, PU *config.ParameterUnit) *Session {
@@ -125,8 +173,7 @@ func NewSession(proto Protocol, pdHook *PDCallbackImpl, gm *guest.Mmu, mp *mempo
 			Fields:  &tree.Fields{},
 			Lines:   &tree.Lines{},
 		},
-		taeTxn:   nil,
-		txnState: InitTxnState(),
+		txnHandler: InitTxnHandler(),
 	}
 }
 
@@ -134,193 +181,249 @@ func (ses *Session) GetEpochgc() *PDCallbackImpl {
 	return ses.pdHook
 }
 
-func (ses *Session) getTxnState() int {
-	return ses.txnState.getState()
+func (ses *Session) GetTxnHandler() *TxnHandler {
+	return ses.txnHandler
 }
 
-func (ses *Session) isTxnState(s int) bool {
-	return ses.txnState.isState(s)
+func (th *TxnHandler) getTxnState() int {
+	return th.txnState.getState()
 }
 
-func (ses *Session) switchToTxnState(s int, err error) {
-	ses.txnState.switchToState(s, err)
+func (th *TxnHandler) isTxnState(s int) bool {
+	return th.txnState.isState(s)
 }
 
-func (ses *Session) getFromTxnState() int {
-	return ses.txnState.getFromState()
+func (th *TxnHandler) switchToTxnState(s int, err error) {
+	th.txnState.switchToState(s, err)
 }
 
-func (ses *Session) getTxnStateError() error {
-	return ses.txnState.getError()
+func (th *TxnHandler) getFromTxnState() int {
+	return th.txnState.getFromState()
 }
 
-func (ses *Session) getTxnStateString() string {
-	return ses.txnState.String()
+func (th *TxnHandler) getTxnStateError() error {
+	return th.txnState.getError()
+}
+
+func (th *TxnHandler) getTxnStateString() string {
+	return th.txnState.String()
 }
 
 // IsInTaeTxn checks the session executes a txn
-func (ses *Session) IsInTaeTxn() bool {
-	st := ses.getTxnState()
+func (th *TxnHandler) IsInTaeTxn() bool {
+	st := th.getTxnState()
 	if st == TxnAutocommit || st == TxnBegan {
-		return ses.GetTaeTxn() != nil
+		return true
 	}
 	return false
 }
 
-func (ses *Session) BeginTaeTxn() error {
+func (th *TxnHandler) IsTaeEngine() bool {
+	_, ok := config.StorageEngine.(moengine.TxnEngine)
+	return ok
+}
+
+func (th *TxnHandler) Begin() error {
 	logutil.Infof("begin begin")
 	var err error
 	if taeEng, ok := config.StorageEngine.(moengine.TxnEngine); ok {
-		switch ses.txnState.getState() {
+		switch th.txnState.getState() {
 		case TxnInit, TxnEnd, TxnErr:
 			//begin a transaction
-			ses.taeTxn, err = taeEng.StartTxn(nil)
+			th.taeTxn, err = taeEng.StartTxn(nil)
 		case TxnBegan:
 			err = errorTaeTxnBeginInBegan
 		case TxnAutocommit:
 			err = errorTaeTxnBeginInAutocommit
 		}
 	} else {
-		ses.taeTxn = nil
+		th.taeTxn = InitTaeTxnImpl()
 	}
 
 	if err == nil {
-		ses.txnState.switchToState(TxnBegan, err)
+		th.txnState.switchToState(TxnBegan, err)
 	} else {
-		ses.txnState.switchToState(TxnErr, err)
+		th.txnState.switchToState(TxnErr, err)
 	}
 	return err
 }
 
-func (ses *Session) BeginAutocommitTaeTxn() error {
+func (th *TxnHandler) BeginAutocommit() error {
 	logutil.Infof("begin autocommit")
 	var err error
 	if taeEng, ok := config.StorageEngine.(moengine.TxnEngine); ok {
-		switch ses.txnState.getState() {
+		switch th.txnState.getState() {
 		case TxnInit, TxnEnd, TxnErr:
 			//begin a transaction
-			ses.taeTxn, err = taeEng.StartTxn(nil)
+			th.taeTxn, err = taeEng.StartTxn(nil)
 		case TxnAutocommit:
 			err = errorTaeTxnAutocommitInAutocommit
 		case TxnBegan:
 			err = errorTaeTxnAutocommitInBegan
 		}
 	} else {
-		ses.taeTxn = nil
+		th.taeTxn = InitTaeTxnImpl()
 	}
 
 	if err == nil {
-		ses.txnState.switchToState(TxnAutocommit, err)
+		th.txnState.switchToState(TxnAutocommit, err)
 	} else {
-		ses.txnState.switchToState(TxnErr, err)
+		th.txnState.switchToState(TxnErr, err)
 	}
 	return err
 }
 
-func (ses *Session) GetTaeTxn() moengine.Txn {
-	return ses.taeTxn
+// BeginAutocommitIfNeeded starts a new txn or uses an existed txn
+// true denotes a new txn
+func (th *TxnHandler) BeginAutocommitIfNeeded() (bool, error) {
+	logutil.Infof("begin autocommit if needed")
+	var err error
+	if th.IsInTaeTxn() {
+		return false, nil
+	}
+	if taeEng, ok := config.StorageEngine.(moengine.TxnEngine); ok {
+		switch th.txnState.getState() {
+		case TxnInit, TxnEnd, TxnErr:
+			//begin a transaction
+			th.taeTxn, err = taeEng.StartTxn(nil)
+		case TxnAutocommit:
+			err = errorTaeTxnAutocommitInAutocommit
+		case TxnBegan:
+			err = errorTaeTxnAutocommitInBegan
+		}
+	} else {
+		th.taeTxn = InitTaeTxnImpl()
+	}
+
+	if err == nil {
+		th.txnState.switchToState(TxnAutocommit, err)
+	} else {
+		th.txnState.switchToState(TxnErr, err)
+	}
+	return true, err
 }
 
-// CommitTaeTxnBegan commits the tae txn started by the BEGIN statement
-func (ses *Session) CommitTaeTxnBegan() error {
+func (th *TxnHandler) GetTxn() moengine.Txn {
+	return th.taeTxn
+}
+
+// CommitAfterBegin commits the tae txn started by the BEGIN statement
+func (th *TxnHandler) CommitAfterBegin() error {
 	logutil.Infof("commit began")
 	var err error
-	if ses.taeTxn != nil {
-		switch ses.getTxnState() {
-		case TxnBegan:
-			err = ses.taeTxn.Commit()
-		case TxnAutocommit:
-			err = errorIsNotAutocommitTxn
-		case TxnInit, TxnEnd, TxnErr:
-			err = errorTaeTxnHasNotBeenBegan
-		}
+	switch th.getTxnState() {
+	case TxnBegan:
+		err = th.taeTxn.Commit()
+	case TxnAutocommit:
+		err = errorIsNotAutocommitTxn
+	case TxnInit, TxnEnd, TxnErr:
+		err = errorTaeTxnHasNotBeenBegan
 	}
+
 	if err == nil {
-		ses.txnState.switchToState(TxnEnd, err)
+		th.txnState.switchToState(TxnEnd, err)
 	} else {
-		ses.txnState.switchToState(TxnErr, err)
+		th.txnState.switchToState(TxnErr, err)
 	}
 	return err
 }
 
-// CommitTaeTxnAutocommit commits the tae txn started by autocommit
-func (ses *Session) CommitTaeTxnAutocommit() error {
+// CommitAfterAutocommit commits the tae txn started by autocommit
+func (th *TxnHandler) CommitAfterAutocommit() error {
 	logutil.Infof("commit autocommit")
 	var err error
-	if ses.taeTxn != nil {
-		switch ses.getTxnState() {
-		case TxnAutocommit:
-			err = ses.taeTxn.Commit()
-		case TxnBegan:
-			err = errorIsNotBeginCommitTxn
-		case TxnInit, TxnEnd, TxnErr:
-			err = errorTaeTxnHasNotBeenBegan
-		}
+	switch th.getTxnState() {
+	case TxnAutocommit:
+		err = th.taeTxn.Commit()
+	case TxnBegan:
+		err = errorIsNotBeginCommitTxn
+	case TxnInit, TxnEnd, TxnErr:
+		err = errorTaeTxnHasNotBeenBegan
 	}
+
 	if err == nil {
-		ses.txnState.switchToState(TxnEnd, err)
+		th.txnState.switchToState(TxnEnd, err)
 	} else {
-		ses.txnState.switchToState(TxnErr, err)
+		th.txnState.switchToState(TxnErr, err)
 	}
 	return err
 }
 
-// CommitTaeTxnAutocommitOnly commits the tae txn started by autocommit
+// CommitAfterAutocommitOnly commits the tae txn started by autocommit
 // Do not check TxnBegan
-func (ses *Session) CommitTaeTxnAutocommitOnly() error {
+func (th *TxnHandler) CommitAfterAutocommitOnly() error {
 	logutil.Infof("commit autocommit only")
 	var err error
-	if ses.taeTxn != nil {
-		switch ses.getTxnState() {
-		case TxnAutocommit:
-			err = ses.taeTxn.Commit()
-		case TxnInit, TxnEnd, TxnErr:
-			err = errorTaeTxnHasNotBeenBegan
-		}
+	switch th.getTxnState() {
+	case TxnAutocommit:
+		err = th.taeTxn.Commit()
+	case TxnInit, TxnEnd, TxnErr:
+		err = errorTaeTxnHasNotBeenBegan
 	}
-	if ses.getTxnState() != TxnBegan {
+
+	if th.getTxnState() != TxnBegan {
 		if err == nil {
-			ses.txnState.switchToState(TxnEnd, err)
+			th.txnState.switchToState(TxnEnd, err)
 		} else {
-			ses.txnState.switchToState(TxnErr, err)
+			th.txnState.switchToState(TxnErr, err)
 		}
 	}
 
 	return err
 }
 
-func (ses *Session) RollbackTaeTxn() error {
+func (th *TxnHandler) Rollback() error {
 	logutil.Infof("rollback ")
 	var err error
-	if ses.taeTxn != nil {
-		switch ses.getTxnState() {
-		case TxnBegan, TxnAutocommit:
-			err = ses.taeTxn.Rollback()
-		case TxnInit, TxnEnd, TxnErr:
-			return errorTaeTxnHasNotBeenBegan
-		}
+	switch th.getTxnState() {
+	case TxnBegan, TxnAutocommit:
+		err = th.taeTxn.Rollback()
+	case TxnInit, TxnEnd, TxnErr:
+		return errorTaeTxnHasNotBeenBegan
 	}
+
 	if err == nil {
-		ses.txnState.switchToState(TxnEnd, err)
+		th.txnState.switchToState(TxnEnd, err)
 	} else {
-		ses.txnState.switchToState(TxnErr, err)
+		th.txnState.switchToState(TxnErr, err)
 	}
 	return err
 }
 
-//ClearTaeTxn commits the tae txn when the errors happen during the txn
-func (ses *Session) ClearTaeTxn() error {
+func (th *TxnHandler) RollbackAfterAutocommitOnly() error {
+	logutil.Infof("rollback autocommit only")
+	var err error
+	switch th.getTxnState() {
+	case TxnAutocommit:
+		err = th.taeTxn.Rollback()
+	case TxnInit, TxnEnd, TxnErr:
+		return errorTaeTxnHasNotBeenBegan
+	}
+
+	if th.txnState.getState() != TxnBegan {
+		if err == nil {
+			th.txnState.switchToState(TxnEnd, err)
+		} else {
+			th.txnState.switchToState(TxnErr, err)
+		}
+	}
+
+	return err
+}
+
+//ClearTxn commits the tae txn when the errors happen during the txn
+func (th *TxnHandler) ClearTxn() error {
 	logutil.Infof("clear tae txn")
 	var err error
-	switch ses.txnState.getState() {
+	switch th.txnState.getState() {
 	case TxnInit, TxnEnd, TxnErr:
-		ses.taeTxn = nil
+		th.taeTxn = InitTaeTxnImpl()
 	case TxnBegan:
 		logutil.Infof("can not commit a began txn without obvious COMMIT or ROLLBACK")
 	case TxnAutocommit:
-		err = ses.CommitTaeTxnAutocommit()
-		ses.taeTxn = nil
-		ses.txnState.switchToState(TxnInit, err)
+		err = th.CommitAfterAutocommit()
+		th.taeTxn = InitTaeTxnImpl()
+		th.txnState.switchToState(TxnInit, err)
 	}
 	return err
 }
