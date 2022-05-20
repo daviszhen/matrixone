@@ -1145,6 +1145,43 @@ func (cw *ComputationWrapperImpl) Run(ts uint64) error {
 	return cw.exec.Run(ts)
 }
 
+var _ ComputationWrapper = &TxnComputationWrapper{}
+
+type TxnComputationWrapper struct {
+	stmt   tree.Statement
+	dbName string
+}
+
+func (cwft *TxnComputationWrapper) GetAst() tree.Statement {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (cwft *TxnComputationWrapper) SetDatabaseName(db string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (cwft *TxnComputationWrapper) GetColumns() ([]interface{}, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (cwft *TxnComputationWrapper) GetAffectedRows() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (cwft *TxnComputationWrapper) Compile(u interface{}, fill func(interface{}, *batch.Batch) error) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (cwft *TxnComputationWrapper) Run(ts uint64) error {
+	//TODO implement me
+	panic("implement me")
+}
+
 /*
 GetComputationWrapper gets the execs from the computation engine
 */
