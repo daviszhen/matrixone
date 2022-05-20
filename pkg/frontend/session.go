@@ -166,6 +166,7 @@ type Session struct {
 	txnHandler    *TxnHandler
 	txnCompileCtx *TxnCompilerContext
 	storage       engine.Engine
+	sql           string
 }
 
 func NewSession(proto Protocol, pdHook *PDCallbackImpl, gm *guest.Mmu, mp *mempool.Mempool, PU *config.ParameterUnit) *Session {
@@ -194,6 +195,18 @@ func (ses *Session) GetEpochgc() *PDCallbackImpl {
 
 func (ses *Session) GetTxnHandler() *TxnHandler {
 	return ses.txnHandler
+}
+
+func (ses *Session) GetTxnCompilerContext() *TxnCompilerContext {
+	return ses.txnCompileCtx
+}
+
+func (ses *Session) SetSql(sql string) {
+	ses.sql = sql
+}
+
+func (ses *Session) GetSql() string {
+	return ses.sql
 }
 
 func (ses *Session) IsTaeEngine() bool {

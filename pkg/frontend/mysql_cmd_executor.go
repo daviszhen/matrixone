@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/sql/compile2"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
 	"os"
 	"runtime/pprof"
@@ -33,7 +34,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/sql/compile"
+	compile1 "github.com/matrixorigin/matrixone/pkg/sql/compile"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/aoe"
 	"github.com/matrixorigin/matrixone/pkg/vm/mheap"
@@ -1052,9 +1053,9 @@ func (mce *MysqlCmdExecutor) handleExplainStmt(stmt *tree.ExplainStmt) error {
 
 func GetExplainColumns(attrs []*plan.Attribute) ([]interface{}, error) {
 	//attrs := plan.BuildExplainResultColumns()
-	cols := make([]*compile.Col, len(attrs))
+	cols := make([]*compile1.Col, len(attrs))
 	for i, attr := range attrs {
-		cols[i] = &compile.Col{
+		cols[i] = &compile1.Col{
 			Name: attr.Name,
 			Typ:  attr.Type.Oid,
 		}
@@ -1099,10 +1100,10 @@ func buildMoExplainQuery(attrs []*plan.Attribute, buffer *explain.ExplainDataBuf
 //----------------------------------------------------------------------------------------------------
 
 type ComputationWrapperImpl struct {
-	exec *compile.Exec
+	exec *compile1.Exec
 }
 
-func NewComputationWrapperImpl(e *compile.Exec) *ComputationWrapperImpl {
+func NewComputationWrapperImpl(e *compile1.Exec) *ComputationWrapperImpl {
 	return &ComputationWrapperImpl{exec: e}
 }
 
@@ -1136,9 +1137,8 @@ func (cw *ComputationWrapperImpl) GetAffectedRows() uint64 {
 	return cw.exec.GetAffectedRows()
 }
 
-func (cw *ComputationWrapperImpl) Compile(u interface{},
-	fill func(interface{}, *batch.Batch) error) error {
-	return cw.exec.Compile(u, fill)
+func (cw *ComputationWrapperImpl) Compile(u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
+	return cw.exec, cw.exec.Compile(u, fill)
 }
 
 func (cw *ComputationWrapperImpl) Run(ts uint64) error {
@@ -1148,62 +1148,95 @@ func (cw *ComputationWrapperImpl) Run(ts uint64) error {
 var _ ComputationWrapper = &TxnComputationWrapper{}
 
 type TxnComputationWrapper struct {
-	stmt   tree.Statement
-	dbName string
+	stmt tree.Statement
+	plan *plan2.Plan
+	proc *process.Process
+	ses  *Session
 }
 
-func InitTxnComputationWrapper(stmt tree.Statement, db string) *TxnComputationWrapper {
+func InitTxnComputationWrapper(ses *Session, stmt tree.Statement, proc *process.Process) *TxnComputationWrapper {
 	return &TxnComputationWrapper{
-		stmt:   stmt,
-		dbName: db,
+		stmt: stmt,
+		proc: proc,
+		ses:  ses,
 	}
 }
 
 func (cwft *TxnComputationWrapper) GetAst() tree.Statement {
-	//TODO implement me
-	panic("implement me")
+	return cwft.stmt
 }
 
 func (cwft *TxnComputationWrapper) SetDatabaseName(db string) error {
-	//TODO implement me
-	panic("implement me")
+	return nil
 }
 
 func (cwft *TxnComputationWrapper) GetColumns() ([]interface{}, error) {
-	//TODO implement me
-	panic("implement me")
+	var err error
+	cols := plan2.GetResultColumnsFromPlan(cwft.plan)
+	columns := make([]interface{}, len(cols))
+	for i, col := range cols {
+		c := new(MysqlColumn)
+		c.SetName(col.Name)
+		err = convertEngineTypeToMysqlType(types.T(col.Typ.Id), c)
+		if err != nil {
+			return nil, err
+		}
+		columns[i] = c
+	}
+	return columns, err
 }
 
 func (cwft *TxnComputationWrapper) GetAffectedRows() uint64 {
-	//TODO implement me
-	panic("implement me")
+	return 0
 }
 
-func (cwft *TxnComputationWrapper) Compile(u interface{}, fill func(interface{}, *batch.Batch) error) error {
-	//TODO implement me
-	panic("implement me")
+func (cwft *TxnComputationWrapper) Compile(u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
+	var err error
+	cwft.plan, err = plan2.BuildPlan(cwft.ses.GetTxnCompilerContext(), cwft.stmt)
+	if err != nil {
+		return nil, err
+	}
+
+	cwft.proc.UnixTime = time.Now().UnixNano()
+	comp := compile2.New(cwft.ses.GetDatabaseName(), cwft.ses.GetSql(), cwft.ses.GetUserName(), cwft.ses.GetStorage(), cwft.proc)
+	err = comp.Compile(cwft.plan, cwft.ses, fill)
+	if err != nil {
+		return nil, err
+	}
+	return comp, err
 }
 
 func (cwft *TxnComputationWrapper) Run(ts uint64) error {
-	//TODO implement me
-	panic("implement me")
+	return nil
 }
 
 /*
 GetComputationWrapper gets the execs from the computation engine
 */
-var GetComputationWrapper = func(db, sql, user string, eng engine.Engine, proc *process.Process) ([]ComputationWrapper, error) {
-	comp := compile.New(db, sql, user, eng, proc)
-	execs, err := comp.Build()
-	if err != nil {
-		return nil, err
+var GetComputationWrapper = func(db, sql, user string, eng engine.Engine, proc *process.Process, ses *Session, usePlan2 bool) ([]ComputationWrapper, error) {
+	var cw []ComputationWrapper = nil
+	if usePlan2 {
+		stmts, err := parsers.Parse(dialect.MYSQL, sql)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, stmt := range stmts {
+			cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
+		}
+	} else {
+		comp := compile1.New(db, sql, user, eng, proc)
+		execs, err := comp.Build()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, e := range execs {
+			cw = append(cw, NewComputationWrapperImpl(e))
+		}
 	}
 
-	var cw []ComputationWrapper = nil
-	for _, e := range execs {
-		cw = append(cw, NewComputationWrapperImpl(e))
-	}
-	return cw, err
+	return cw, nil
 }
 
 //execute query
@@ -1213,24 +1246,18 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	pdHook := ses.GetEpochgc()
 	statementCount := uint64(1)
 	txnHandler := ses.GetTxnHandler()
+	ses.SetSql(sql)
+
+	var usePlan2 bool = ses.IsTaeEngine()
+	if ses.Pu.SV.GetUsePlan2() {
+		usePlan2 = true
+	}
 
 	//pin the epoch with 1
 	epoch, _ := pdHook.IncQueryCountAtCurrentEpoch(statementCount)
 	defer func() {
 		pdHook.DecQueryCountAtEpoch(epoch, statementCount)
 	}()
-
-	//TODO: fix it after process/compile/batch is ready
-	if ses.IsTaeEngine() {
-		stmts, err := parsers.Parse(dialect.MYSQL, sql)
-		if err != nil {
-			return err
-		}
-		var cws []ComputationWrapper = nil
-		for _, stmt := range stmts {
-			cws = append(cws, InitTxnComputationWrapper(stmt, ses.GetDatabaseName()))
-		}
-	}
 
 	proc := process.New(mheap.New(ses.GuestMmu))
 	proc.Id = mce.getNextProcessId()
@@ -1242,7 +1269,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		sql,
 		proto.GetUserName(),
 		ses.Pu.StorageEngine,
-		proc)
+		proc, ses, usePlan2)
 	if err != nil {
 		return NewMysqlError(ER_PARSE_ERROR, err,
 			"You have an error in your SQL syntax; check the manual that corresponds to your MatrixOne server version for the right syntax to use")
@@ -1411,10 +1438,12 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		}
 
 		cmpBegin := time.Now()
-		if err = cw.Compile(ses, getDataFromPipeline); err != nil {
+		var ret interface{}
+		if ret, err = cw.Compile(ses, getDataFromPipeline); err != nil {
 			return err
 		}
 
+		var runner ComputationRunner = ret.(ComputationRunner)
 		if ses.Pu.SV.GetRecordTimeElapsedOfSqlRequest() {
 			logutil.Infof("time of Exec.Build : %s", time.Since(cmpBegin).String())
 		}
@@ -1478,7 +1507,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 					return err
 				}
 			}
-			if er := cw.Run(epoch); er != nil {
+			if er := runner.Run(epoch); er != nil {
 				return er
 			}
 			if ses.ep.Outfile {
@@ -1518,7 +1547,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			/*
 				Step 1: Start
 			*/
-			if er := cw.Run(epoch); er != nil {
+			if er := runner.Run(epoch); er != nil {
 				return er
 			}
 			if ses.Pu.SV.GetRecordTimeElapsedOfSqlRequest() {
