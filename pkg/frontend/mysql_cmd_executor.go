@@ -1152,6 +1152,13 @@ type TxnComputationWrapper struct {
 	dbName string
 }
 
+func InitTxnComputationWrapper(stmt tree.Statement, db string) *TxnComputationWrapper {
+	return &TxnComputationWrapper{
+		stmt:   stmt,
+		dbName: db,
+	}
+}
+
 func (cwft *TxnComputationWrapper) GetAst() tree.Statement {
 	//TODO implement me
 	panic("implement me")
@@ -1215,9 +1222,13 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 
 	//TODO: fix it after process/compile/batch is ready
 	if ses.IsTaeEngine() {
-		_, err := parsers.Parse(dialect.MYSQL, sql)
+		stmts, err := parsers.Parse(dialect.MYSQL, sql)
 		if err != nil {
 			return err
+		}
+		var cws []ComputationWrapper = nil
+		for _, stmt := range stmts {
+			cws = append(cws, InitTxnComputationWrapper(stmt, ses.GetDatabaseName()))
 		}
 	}
 

@@ -649,12 +649,60 @@ func InitDB(tae engine.Engine) error {
 		return err
 	}
 
+	//write initial data into mo_global_variables
+	gvTable, err := catalogDB.Relation(gvSch.GetName(), txnCtx.GetCtx())
+	if err != nil {
+		logutil.Infof("get table %v failed.error:%v", gvSch.GetName(), err)
+		err2 := txnCtx.Rollback()
+		if err2 != nil {
+			logutil.Infof("txnCtx rollback failed. error:%v", err2)
+			return err2
+		}
+		return err
+	}
+
+	gvBatch := FillInitialDataForMoGlobalVariables()
+	err = gvTable.Write(0, gvBatch, txnCtx.GetCtx())
+	if err != nil {
+		logutil.Infof("write into table %v failed.error:%v", gvSch.GetName(), err)
+		err2 := txnCtx.Rollback()
+		if err2 != nil {
+			logutil.Infof("txnCtx rollback failed. error:%v", err2)
+			return err2
+		}
+		return err
+	}
+
 	//3. create table mo_user
 	userSch := DefineSchemaForMoUser()
 	userDefs := convertCatalogSchemaToTableDef(userSch)
 	err = catalogDB.Create(0, userSch.GetName(), userDefs, txnCtx.GetCtx())
 	if err != nil {
 		logutil.Infof("create table %v failed.error:%v", userSch.GetName(), err)
+		err2 := txnCtx.Rollback()
+		if err2 != nil {
+			logutil.Infof("txnCtx rollback failed. error:%v", err2)
+			return err2
+		}
+		return err
+	}
+
+	//write initial data into mo_user
+	userTable, err := catalogDB.Relation(userSch.GetName(), txnCtx.GetCtx())
+	if err != nil {
+		logutil.Infof("get table %v failed.error:%v", userSch.GetName(), err)
+		err2 := txnCtx.Rollback()
+		if err2 != nil {
+			logutil.Infof("txnCtx rollback failed. error:%v", err2)
+			return err2
+		}
+		return err
+	}
+
+	userBatch := FillInitialDataForMoUser()
+	err = userTable.Write(0, userBatch, txnCtx.GetCtx())
+	if err != nil {
+		logutil.Infof("write into table %v failed.error:%v", userSch.GetName(), err)
 		err2 := txnCtx.Rollback()
 		if err2 != nil {
 			logutil.Infof("txnCtx rollback failed. error:%v", err2)
@@ -714,6 +762,8 @@ func sanityCheck(tae engine.Engine) error {
 		DefineSchemaForMoDatabase(),
 		DefineSchemaForMoTables(),
 		DefineSchemaForMoColumns(),
+		DefineSchemaForMoGlobalVariables(),
+		DefineSchemaForMoUser(),
 	}
 	catalogDbName := "mo_catalog"
 	err = isWantedDatabase(taeEngine, txnCtx, catalogDbName, wantTablesOfMoCatalog, wantSchemasOfCatalog)
@@ -770,12 +820,12 @@ func isWantedDatabase(taeEngine moengine.TxnEngine, txnCtx moengine.Txn,
 
 	//TODO:fix it after tae is ready
 	//check table attributes
-	//for i, tableName := range tables {
-	//	err = isWantedTable(db, txnCtx, tableName, schemas[i])
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
+	for i, tableName := range tables {
+		err = isWantedTable(db, txnCtx, tableName, schemas[i])
+		if err != nil {
+			return err
+		}
+	}
 
 	return err
 }
