@@ -897,14 +897,15 @@ func isWantedTable(db engine.Database, txnCtx moengine.Txn,
 		x[i] = 1
 		fieldNames[i] = schema.GetAttribute(i).GetName()
 	}
-	logutil.Infof("tableName %s fieldNames %v", tableName, fieldNames)
+	fmt.Printf("\nTable:%s \n\nAttributes:\n%v \n\n", tableName, fieldNames)
+	fmt.Printf("Datas:\n\n")
 	result, err := readers[0].Read(x, fieldNames)
 	if err != nil {
 		return err
 	}
 	for i := 0; i < vector.Length(result.Vecs[0]); i++ {
-		lines := FormatLineInBatch(result, i)
-		fmt.Println(lines)
+		line := FormatLineInBatch(result, i)
+		fmt.Println(line)
 	}
 	return nil
 }

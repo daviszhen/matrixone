@@ -535,7 +535,7 @@ func (mce *MysqlCmdExecutor) handleChangeDB(db string) error {
 	var txnCtx []byte = nil
 	var newTxn bool = false
 	var err error = nil
-	newTxn, err = txnHandler.BeginAutocommitIfNeeded()
+	newTxn, err = txnHandler.StartByAutocommitIfNeeded()
 	if err != nil {
 		return err
 	}
@@ -744,7 +744,7 @@ func (mce *MysqlCmdExecutor) handleLoadData(load *tree.Load) error {
 	}
 
 	txnHandler := ses.GetTxnHandler()
-	newTxn, err := txnHandler.BeginAutocommitIfNeeded()
+	newTxn, err := txnHandler.StartByAutocommitIfNeeded()
 	if err != nil {
 		return err
 	}
@@ -1198,10 +1198,29 @@ func (cwft *TxnComputationWrapper) Compile(u interface{}, fill func(interface{},
 	}
 
 	cwft.proc.UnixTime = time.Now().UnixNano()
+	txnHandler := cwft.ses.GetTxnHandler()
+	newTxn, err := txnHandler.StartByAutocommitIfNeeded()
+	if err != nil {
+		return nil, err
+	}
+	cwft.proc.Snapshot = txnHandler.GetTxn().GetCtx()
 	comp := compile2.New(cwft.ses.GetDatabaseName(), cwft.ses.GetSql(), cwft.ses.GetUserName(), cwft.ses.GetStorage(), cwft.proc)
 	err = comp.Compile(cwft.plan, cwft.ses, fill)
 	if err != nil {
+		if newTxn {
+			err2 := txnHandler.RollbackAfterAutocommitOnly()
+			if err2 != nil {
+				return nil, err2
+			}
+		}
 		return nil, err
+	}
+
+	if newTxn {
+		err2 := txnHandler.CommitAfterAutocommitOnly()
+		if err2 != nil {
+			return nil, err2
+		}
 	}
 	return comp, err
 }
@@ -1289,7 +1308,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		//check transaction states
 		switch stmt.(type) {
 		case *tree.BeginTransaction:
-			err = txnHandler.Begin()
+			err = txnHandler.StartByBegin()
 			if err != nil {
 				return err
 			}
