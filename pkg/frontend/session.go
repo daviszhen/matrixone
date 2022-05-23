@@ -519,40 +519,18 @@ func (tcc *TxnCompilerContext) DefaultDatabase() string {
 }
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
-	newTxn, err := tcc.txnHandler.StartByAutocommitIfNeeded()
-	if err != nil {
-		logutil.Errorf("error %v", err)
-		return false
-	}
-
+	var err error
 	//open database
 	_, err = tcc.txnHandler.GetStorage().Database(name, tcc.txnHandler.GetTxn().GetCtx())
 	if err != nil {
 		logutil.Errorf("error %v", err)
-		err2 := tcc.txnHandler.RollbackAfterAutocommitOnly()
-		if err2 != nil {
-			return false
-		}
 		return false
 	}
 
-	if newTxn {
-		err2 := tcc.txnHandler.CommitAfterAutocommitOnly()
-		if err2 != nil {
-			logutil.Errorf("error %v", err)
-			return false
-		}
-	}
 	return true
 }
 
 func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.ObjectRef, *plan2.TableDef) {
-	newTxn, err := tcc.txnHandler.StartByAutocommitIfNeeded()
-	if err != nil {
-		logutil.Errorf("error %v", err)
-		return nil, nil
-	}
-
 	if len(dbName) == 0 {
 		dbName = tcc.DefaultDatabase()
 	}
@@ -561,10 +539,6 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	db, err := tcc.txnHandler.GetStorage().Database(dbName, tcc.txnHandler.GetTxn().GetCtx())
 	if err != nil {
 		logutil.Errorf("error %v", err)
-		err2 := tcc.txnHandler.RollbackAfterAutocommitOnly()
-		if err2 != nil {
-			return nil, nil
-		}
 		return nil, nil
 	}
 
@@ -575,10 +549,6 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	table, err := db.Relation(tableName, tcc.txnHandler.GetTxn().GetCtx())
 	if err != nil {
 		logutil.Errorf("error %v", err)
-		err2 := tcc.txnHandler.RollbackAfterAutocommitOnly()
-		if err2 != nil {
-			return nil, nil
-		}
 		return nil, nil
 	}
 
@@ -608,14 +578,6 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	tableDef := &plan2.TableDef{
 		Name: tableName,
 		Cols: defs,
-	}
-
-	if newTxn {
-		err2 := tcc.txnHandler.CommitAfterAutocommitOnly()
-		if err2 != nil {
-			logutil.Errorf("error %v", err)
-			return nil, nil
-		}
 	}
 	return obj, tableDef
 }
