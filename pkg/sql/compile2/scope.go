@@ -65,7 +65,7 @@ func (s *Scope) CreateTable(ts uint64, snapshot engine.Snapshot, engine engine.E
 	if qry.GetDatabase() != "" {
 		dbName = qry.GetDatabase()
 	}
-	dbSource, err := engine.Database(dbName, nil)
+	dbSource, err := engine.Database(dbName, snapshot)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (s *Scope) DropTable(ts uint64, snapshot engine.Snapshot, engine engine.Eng
 	qry := s.Plan.GetDdl().GetDropTable()
 
 	dbName := qry.GetDatabase()
-	dbSource, err := engine.Database(dbName, nil)
+	dbSource, err := engine.Database(dbName, snapshot)
 	if err != nil {
 		return err
 	}

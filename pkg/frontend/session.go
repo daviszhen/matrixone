@@ -442,7 +442,7 @@ func (th *TxnHandler) Rollback() error {
 	case TxnBegan, TxnAutocommit:
 		err = th.taeTxn.Rollback()
 	case TxnInit, TxnEnd:
-		return errorTaeTxnHasNotBeenBegan
+		err = errorTaeTxnHasNotBeenBegan
 	case TxnErr:
 		err = errorTaeTxnInIllegalState
 	}
@@ -538,7 +538,7 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	//open database
 	db, err := tcc.txnHandler.GetStorage().Database(dbName, tcc.txnHandler.GetTxn().GetCtx())
 	if err != nil {
-		logutil.Errorf("error %v", err)
+		logutil.Errorf("get database %v error %v", dbName, err)
 		return nil, nil
 	}
 
@@ -548,7 +548,7 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	//open table
 	table, err := db.Relation(tableName, tcc.txnHandler.GetTxn().GetCtx())
 	if err != nil {
-		logutil.Errorf("error %v", err)
+		logutil.Errorf("get table %v error %v", tableName, err)
 		return nil, nil
 	}
 

@@ -87,7 +87,7 @@ func TestTxnHandler(t *testing.T) {
 		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
 	})
 
-	convey.Convey("tae begin ... commit/rollback/autocommit ... commit/rollback/autocommit", t, func() {
+	convey.Convey("tae begin ... commit ... commit", t, func() {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
@@ -95,16 +95,45 @@ func TestTxnHandler(t *testing.T) {
 		txn := InitTxnHandler(tae)
 		txnImpl := mock_frontend.NewMockTxn(ctrl)
 		txnImpl.EXPECT().GetError().Return(nil).AnyTimes()
+		txnImpl.EXPECT().Commit().Return(nil).AnyTimes()
 
 		tae.EXPECT().StartTxn(gomock.Any()).Return(txnImpl, nil).AnyTimes()
 		err := txn.StartByBegin()
 		convey.So(err, convey.ShouldBeNil)
 
-		err = txn.StartByBegin()
+		err = txn.CommitAfterBegin()
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnEnd)
+
+		err = txn.CommitAfterBegin()
 		convey.So(err, convey.ShouldNotBeNil)
 		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
 
-		err = txn.StartByAutocommit()
+		err = txn.CleanTxn()
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
+	})
+
+	convey.Convey("tae begin ... rollback ... rollback", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		tae := mock_frontend.NewMockTxnEngine(ctrl)
+		txn := InitTxnHandler(tae)
+		txnImpl := mock_frontend.NewMockTxn(ctrl)
+		txnImpl.EXPECT().GetError().Return(nil).AnyTimes()
+		txnImpl.EXPECT().Commit().Return(nil).AnyTimes()
+		txnImpl.EXPECT().Rollback().Return(nil).AnyTimes()
+
+		tae.EXPECT().StartTxn(gomock.Any()).Return(txnImpl, nil).AnyTimes()
+		err := txn.StartByBegin()
+		convey.So(err, convey.ShouldBeNil)
+
+		err = txn.Rollback()
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnEnd)
+
+		err = txn.Rollback()
 		convey.So(err, convey.ShouldNotBeNil)
 		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
 
