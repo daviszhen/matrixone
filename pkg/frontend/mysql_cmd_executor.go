@@ -551,8 +551,8 @@ func (mce *MysqlCmdExecutor) handleChangeDB(db string) error {
 			return err
 		}
 	}
-	oldDB := ses.protocol.GetDatabaseName()
-	ses.protocol.SetDatabaseName(db)
+	oldDB := ses.GetDatabaseName()
+	ses.SetDatabaseName(db)
 
 	logutil.Infof("User %s change database from [%s] to [%s]\n", ses.protocol.GetUserName(), oldDB, ses.protocol.GetDatabaseName())
 
@@ -1564,51 +1564,11 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			*tree.Delete:
 			runBegin := time.Now()
 
-			//use aoe and plan2
-			if !ses.IsTaeEngine() && usePlan2 {
-				switch ddl := cw.GetAst().(type) {
-				case *tree.CreateDatabase:
-					name := string(ddl.Name)
-					if ddl.IfNotExists {
-						_, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
-						if err != nil {
-							err := ses.storage.Create(epoch, name, 0, txnHandler.GetTxn().GetCtx())
-							if err != nil {
-								return err
-							}
-						}
-					} else {
-						err := ses.storage.Create(epoch, name, 0, txnHandler.GetTxn().GetCtx())
-						if err != nil {
-							return err
-						}
-					}
-				case *tree.DropDatabase:
-					name := string(ddl.Name)
-					if ddl.IfExists {
-						_, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
-						if err == nil {
-							err := ses.storage.Delete(epoch, name, txnHandler.GetTxn().GetCtx())
-							if err != nil {
-								return err
-							}
-						}
-					} else {
-						err := ses.storage.Delete(epoch, name, txnHandler.GetTxn().GetCtx())
-						if err != nil {
-							return err
-						}
-					}
-				case *tree.CreateTable:
-
-				}
-			} else {
-				/*
-					Step 1: Start
-				*/
-				if er := runner.Run(epoch); er != nil {
-					return er
-				}
+			/*
+				Step 1: Start
+			*/
+			if er := runner.Run(epoch); er != nil {
+				return er
 			}
 
 			if ses.Pu.SV.GetRecordTimeElapsedOfSqlRequest() {

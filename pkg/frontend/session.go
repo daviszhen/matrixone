@@ -220,6 +220,11 @@ func (ses *Session) GetDatabaseName() string {
 	return ses.protocol.GetDatabaseName()
 }
 
+func (ses *Session) SetDatabaseName(db string) {
+	ses.protocol.SetDatabaseName(db)
+	ses.txnCompileCtx.SetDatabase(db)
+}
+
 func (ses *Session) GetUserName() string {
 	return ses.protocol.GetUserName()
 }
@@ -485,6 +490,10 @@ func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
 	return &TxnCompilerContext{txnHandler: txn, dbName: db}
 }
 
+func (tcc *TxnCompilerContext) SetDatabase(db string) {
+	tcc.dbName = db
+}
+
 func (tcc *TxnCompilerContext) DefaultDatabase() string {
 	return tcc.dbName
 }
@@ -538,6 +547,9 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 		}
 		return nil, nil
 	}
+
+	tableNames := db.Relations(tcc.txnHandler.GetTxn().GetCtx())
+	logutil.Infof("tableNames %v", tableNames)
 
 	//open table
 	table, err := db.Relation(tableName, tcc.txnHandler.GetTxn().GetCtx())
