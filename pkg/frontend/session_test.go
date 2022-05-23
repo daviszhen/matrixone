@@ -45,29 +45,71 @@ func TestTxnHandler(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
+		txnImpl := mock_frontend.NewMockTxn(ctrl)
+		txnImpl.EXPECT().Commit().Return(nil)
+
 		tae := mock_frontend.NewMockTxnEngine(ctrl)
+		tae.EXPECT().StartTxn(gomock.Any()).Return(txnImpl, nil)
+
 		txn := InitTxnHandler(tae)
 		convey.So(txn.IsInTaeTxn(), convey.ShouldBeFalse)
 		convey.So(txn.IsTaeEngine(), convey.ShouldBeTrue)
 		convey.So(txn.isTxnState(TxnInit), convey.ShouldBeTrue)
 		convey.So(txn.GetStorage(), convey.ShouldNotBeNil)
-		convey.So(txn.ClearTxn(), convey.ShouldBeNil)
-
+		convey.So(txn.CleanTxn(), convey.ShouldBeNil)
+		convey.So(txn.StartByBegin(), convey.ShouldBeNil)
+		convey.So(txn.CommitAfterBegin(), convey.ShouldBeNil)
 	})
 
-	convey.Convey("tae begin", t, func() {
+	convey.Convey("tae begin ... begin/autocommit", t, func() {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
 		tae := mock_frontend.NewMockTxnEngine(ctrl)
 		txn := InitTxnHandler(tae)
 		txnImpl := mock_frontend.NewMockTxn(ctrl)
+		txnImpl.EXPECT().GetError().Return(nil).AnyTimes()
 
-		tae.EXPECT().StartTxn(gomock.Any()).Return(txnImpl, nil)
+		tae.EXPECT().StartTxn(gomock.Any()).Return(txnImpl, nil).AnyTimes()
 		err := txn.StartByBegin()
 		convey.So(err, convey.ShouldBeNil)
 
+		err = txn.StartByBegin()
+		convey.So(err, convey.ShouldNotBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
+
 		err = txn.StartByAutocommit()
 		convey.So(err, convey.ShouldNotBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
+
+		err = txn.CleanTxn()
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
+	})
+
+	convey.Convey("tae begin ... commit/rollback/autocommit ... commit/rollback/autocommit", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		tae := mock_frontend.NewMockTxnEngine(ctrl)
+		txn := InitTxnHandler(tae)
+		txnImpl := mock_frontend.NewMockTxn(ctrl)
+		txnImpl.EXPECT().GetError().Return(nil).AnyTimes()
+
+		tae.EXPECT().StartTxn(gomock.Any()).Return(txnImpl, nil).AnyTimes()
+		err := txn.StartByBegin()
+		convey.So(err, convey.ShouldBeNil)
+
+		err = txn.StartByBegin()
+		convey.So(err, convey.ShouldNotBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
+
+		err = txn.StartByAutocommit()
+		convey.So(err, convey.ShouldNotBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
+
+		err = txn.CleanTxn()
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
 	})
 }

@@ -1564,12 +1564,19 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			*tree.Delete:
 			runBegin := time.Now()
 
+			//use aoe and plan2
+			//if !ses.IsTaeEngine() && usePlan2 {
+			//	if er := mce.handleDDl(ses, cw.GetAst(), epoch); er != nil {
+			//		return er
+			//	}
+			//} else {
 			/*
 				Step 1: Start
 			*/
 			if er := runner.Run(epoch); er != nil {
 				return er
 			}
+			//}
 
 			if ses.Pu.SV.GetRecordTimeElapsedOfSqlRequest() {
 				logutil.Infof("time of Exec.Run : %s", time.Since(runBegin).String())
@@ -1604,6 +1611,53 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		}
 	}
 
+	return nil
+}
+
+func (mce *MysqlCmdExecutor) handleDDl(ses *Session, stmt tree.Statement, epoch uint64) error {
+	txnHandler := ses.GetTxnHandler()
+	switch ddl := stmt.(type) {
+	case *tree.CreateDatabase:
+		name := string(ddl.Name)
+		needCreate := true
+		if ddl.IfNotExists {
+			_, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
+			if err == nil { //exists
+				needCreate = false
+			}
+		}
+		if needCreate {
+			err := ses.storage.Create(epoch, name, 0, txnHandler.GetTxn().GetCtx())
+			if err != nil {
+				return err
+			}
+		}
+	case *tree.DropDatabase:
+		name := string(ddl.Name)
+		needDrop := true
+		if ddl.IfExists {
+			_, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
+			if err != nil { //no exists
+				needDrop = false
+			}
+		}
+
+		if needDrop {
+			err := ses.storage.Delete(epoch, name, txnHandler.GetTxn().GetCtx())
+			if err != nil {
+				return err
+			}
+		}
+	case *tree.CreateTable:
+		//dbName := string(ddl.Table.Schema())
+		//tableName := string(ddl.Table.Name())
+		//
+		////check db exists
+		//db, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
+		//if err == nil { //exists
+		//
+		//}
+	}
 	return nil
 }
 
