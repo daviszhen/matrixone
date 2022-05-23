@@ -462,7 +462,7 @@ func (th *TxnHandler) RollbackAfterAutocommitOnly() error {
 	case TxnAutocommit:
 		err = th.taeTxn.Rollback()
 	case TxnInit, TxnEnd:
-		return errorTaeTxnHasNotBeenBegan
+		err = errorTaeTxnHasNotBeenBegan
 	case TxnErr:
 		err = errorTaeTxnInIllegalState
 	}

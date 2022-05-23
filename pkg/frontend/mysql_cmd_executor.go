@@ -1700,8 +1700,6 @@ func (mce *MysqlCmdExecutor) ExecRequest(req *Request) (*Response, error) {
 		err := mce.doComQuery(query)
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_INIT_DB, err)
-		} else {
-			resp = NewGeneralOkResponse(COM_INIT_DB)
 		}
 
 		return resp, nil
