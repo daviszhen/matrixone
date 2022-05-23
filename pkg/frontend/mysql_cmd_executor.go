@@ -1573,17 +1573,19 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 				logutil.Infof("time of SendResponse %s", time.Since(echoTime).String())
 			}
 		}
+	handleSucceeded:
+		txnErr = txnHandler.CommitAfterAutocommitOnly()
+		if txnErr != nil {
+			return txnErr
+		}
+		goto handleNext
 	handleFailed:
 		txnErr = txnHandler.RollbackAfterAutocommitOnly()
 		if txnErr != nil {
 			return txnErr
 		}
 		return err
-	handleSucceeded:
-		txnErr = txnHandler.CommitAfterAutocommitOnly()
-		if txnErr != nil {
-			return txnErr
-		}
+	handleNext:
 	} // end of for
 
 	return nil

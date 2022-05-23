@@ -523,7 +523,7 @@ func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	//open database
 	_, err = tcc.txnHandler.GetStorage().Database(name, tcc.txnHandler.GetTxn().GetCtx())
 	if err != nil {
-		logutil.Errorf("error %v", err)
+		logutil.Errorf("get database %v failed. error %v", name, err)
 		return false
 	}
 
@@ -543,7 +543,7 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	}
 
 	tableNames := db.Relations(tcc.txnHandler.GetTxn().GetCtx())
-	logutil.Infof("tableNames %v", tableNames)
+	logutil.Infof("dbName %v tableNames %v", dbName, tableNames)
 
 	//open table
 	table, err := db.Relation(tableName, tcc.txnHandler.GetTxn().GetCtx())
