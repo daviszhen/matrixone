@@ -127,18 +127,16 @@ func (tti *TaeTxnDumpImpl) GetError() error {
 }
 
 type TxnHandler struct {
-	//tae txn
-	//TODO: add aoe dump impl of Txn interface for unifying the logic of txn
 	storage  engine.Engine
 	taeTxn   moengine.Txn
 	txnState *TxnState
 }
 
-func InitTxnHandler() *TxnHandler {
+func InitTxnHandler(storage engine.Engine) *TxnHandler {
 	return &TxnHandler{
 		taeTxn:   InitTaeTxnImpl(),
 		txnState: InitTxnState(),
-		storage:  config.StorageEngine,
+		storage:  storage,
 	}
 }
 
@@ -170,7 +168,7 @@ type Session struct {
 }
 
 func NewSession(proto Protocol, pdHook *PDCallbackImpl, gm *guest.Mmu, mp *mempool.Mempool, PU *config.ParameterUnit) *Session {
-	txnHandler := InitTxnHandler()
+	txnHandler := InitTxnHandler(config.StorageEngine)
 	return &Session{
 		protocol: proto,
 		pdHook:   pdHook,

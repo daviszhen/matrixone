@@ -1563,12 +1563,54 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword,
 			*tree.Delete:
 			runBegin := time.Now()
-			/*
-				Step 1: Start
-			*/
-			if er := runner.Run(epoch); er != nil {
-				return er
+
+			//use aoe and plan2
+			if !ses.IsTaeEngine() && usePlan2 {
+				switch ddl := cw.GetAst().(type) {
+				case *tree.CreateDatabase:
+					name := string(ddl.Name)
+					if ddl.IfNotExists {
+						_, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
+						if err != nil {
+							err := ses.storage.Create(epoch, name, 0, txnHandler.GetTxn().GetCtx())
+							if err != nil {
+								return err
+							}
+						}
+					} else {
+						err := ses.storage.Create(epoch, name, 0, txnHandler.GetTxn().GetCtx())
+						if err != nil {
+							return err
+						}
+					}
+				case *tree.DropDatabase:
+					name := string(ddl.Name)
+					if ddl.IfExists {
+						_, err := ses.storage.Database(name, txnHandler.GetTxn().GetCtx())
+						if err == nil {
+							err := ses.storage.Delete(epoch, name, txnHandler.GetTxn().GetCtx())
+							if err != nil {
+								return err
+							}
+						}
+					} else {
+						err := ses.storage.Delete(epoch, name, txnHandler.GetTxn().GetCtx())
+						if err != nil {
+							return err
+						}
+					}
+				case *tree.CreateTable:
+
+				}
+			} else {
+				/*
+					Step 1: Start
+				*/
+				if er := runner.Run(epoch); er != nil {
+					return er
+				}
 			}
+
 			if ses.Pu.SV.GetRecordTimeElapsedOfSqlRequest() {
 				logutil.Infof("time of Exec.Run : %s", time.Since(runBegin).String())
 			}
