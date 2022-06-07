@@ -1868,6 +1868,8 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 							case "current_user":
 								fallthrough
 							case "connection_id":
+								fallthrough
+							default:
 								err = mce.handleSelectXXX(param)
 							}
 							if err != nil {
