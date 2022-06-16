@@ -1934,28 +1934,28 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		}
 
 		//check database
-		if proto.GetDatabaseName() == "" {
-			//if none database has been selected, database operations must be failed.
-			switch t := stmt.(type) {
-			case *tree.ShowDatabases, *tree.CreateDatabase, *tree.ShowCreateDatabase, *tree.ShowWarnings, *tree.ShowErrors,
-				*tree.ShowStatus, *tree.ShowVariables, *tree.DropDatabase, *tree.Load,
-				*tree.Use, *tree.SetVar,
-				*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-			case *tree.ShowColumns:
-				if t.Table.ToTableName().SchemaName == "" {
-					err = NewMysqlError(ER_NO_DB_ERROR)
-					goto handleFailed
-				}
-			case *tree.ShowTables:
-				if t.DBName == "" {
-					err = NewMysqlError(ER_NO_DB_ERROR)
-					goto handleFailed
-				}
-			default:
-				err = NewMysqlError(ER_NO_DB_ERROR)
-				goto handleFailed
-			}
-		}
+		//if proto.GetDatabaseName() == "" {
+		//	//if none database has been selected, database operations must be failed.
+		//	switch t := stmt.(type) {
+		//	case *tree.ShowDatabases, *tree.CreateDatabase, *tree.ShowCreateDatabase, *tree.ShowWarnings, *tree.ShowErrors,
+		//		*tree.ShowStatus, *tree.ShowVariables, *tree.DropDatabase, *tree.Load,
+		//		*tree.Use, *tree.SetVar,
+		//		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
+		//	case *tree.ShowColumns:
+		//		if t.Table.ToTableName().SchemaName == "" {
+		//			err = NewMysqlError(ER_NO_DB_ERROR)
+		//			goto handleFailed
+		//		}
+		//	case *tree.ShowTables:
+		//		if t.DBName == "" {
+		//			err = NewMysqlError(ER_NO_DB_ERROR)
+		//			goto handleFailed
+		//		}
+		//	default:
+		//		err = NewMysqlError(ER_NO_DB_ERROR)
+		//		goto handleFailed
+		//	}
+		//}
 
 		selfHandle = false
 
