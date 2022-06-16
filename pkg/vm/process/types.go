@@ -55,6 +55,29 @@ type Limitation struct {
 	PartitionRows int64
 }
 
+// session information
+type SessionInfo struct {
+	User         string
+	ConnectionID uint64
+	Database     string
+}
+
+func (si *SessionInfo) GetUser() string {
+	return si.User
+}
+
+func (si *SessionInfo) GetCharset() string {
+	return "utf8"
+}
+
+func (si *SessionInfo) GetConnectionID() uint64 {
+	return si.ConnectionID
+}
+
+func (si *SessionInfo) GetDatabase() string {
+	return si.Database
+}
+
 // Process contains context used in query execution
 // one or more pipeline will be generated for one query,
 // and one pipeline has one process instance.
@@ -70,6 +93,8 @@ type Process struct {
 
 	// snapshot is transaction context
 	Snapshot []byte
+
+	SessionInfo *SessionInfo
 
 	// snapshot is transaction context
 	Cancel context.CancelFunc

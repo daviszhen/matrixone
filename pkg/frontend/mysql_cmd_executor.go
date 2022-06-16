@@ -1813,6 +1813,11 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	proc.Lim.Size = ses.Pu.SV.GetProcessLimitationSize()
 	proc.Lim.BatchRows = ses.Pu.SV.GetProcessLimitationBatchRows()
 	proc.Lim.PartitionRows = ses.Pu.SV.GetProcessLimitationPartitionRows()
+	proc.SessionInfo = &process.SessionInfo{
+		User:         ses.GetUserName(),
+		ConnectionID: uint64(proto.ConnectionID()),
+		Database:     ses.GetDatabaseName(),
+	}
 
 	cws, err := GetComputationWrapper(proto.GetDatabaseName(),
 		sql,
@@ -1891,41 +1896,41 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 				ses.ep = st.Ep
 				ses.closeRef = mce.exportDataClose
 			}
-			if sc, ok := st.Select.(*tree.SelectClause); ok {
-				if len(sc.Exprs) == 1 {
-					if fe, ok := sc.Exprs[0].Expr.(*tree.FuncExpr); ok {
-						if un, ok := fe.Func.FunctionReference.(*tree.UnresolvedName); ok {
-							param := strings.ToLower(un.Parts[0])
-							if param == "database" ||
-								param == "current_user" ||
-								param == "connection_id" {
-								err = mce.handleSelectXXX(param)
-								if err != nil {
-									goto handleFailed
-								}
-
-								//next statement
-								goto handleSucceeded
-							}
-						}
-					} else if ve, ok := sc.Exprs[0].Expr.(*tree.VarExpr); ok {
-						//TODO: fix multiple variables in single statement like `select @@a,@@b,@@c`
-						err = mce.handleSelectVariables(ve)
-						if err != nil {
-							goto handleFailed
-						}
-
-						//next statement
-						goto handleSucceeded
-					} else if nv, ok := sc.Exprs[0].Expr.(*tree.NumVal); ok && nv.Value.String() == "1" {
-						err = mce.handleSelect1(nv)
-						if err != nil {
-							goto handleFailed
-						}
-						goto handleSucceeded
-					}
-				}
-			}
+			//if sc, ok := st.Select.(*tree.SelectClause); ok {
+			//	if len(sc.Exprs) == 1 {
+			//		if fe, ok := sc.Exprs[0].Expr.(*tree.FuncExpr); ok {
+			//			if un, ok := fe.Func.FunctionReference.(*tree.UnresolvedName); ok {
+			//				param := strings.ToLower(un.Parts[0])
+			//				if param == "database" ||
+			//					param == "current_user" ||
+			//					param == "connection_id" {
+			//					err = mce.handleSelectXXX(param)
+			//					if err != nil {
+			//						goto handleFailed
+			//					}
+			//
+			//					//next statement
+			//					goto handleSucceeded
+			//				}
+			//			}
+			//		} else if ve, ok := sc.Exprs[0].Expr.(*tree.VarExpr); ok {
+			//			//TODO: fix multiple variables in single statement like `select @@a,@@b,@@c`
+			//			err = mce.handleSelectVariables(ve)
+			//			if err != nil {
+			//				goto handleFailed
+			//			}
+			//
+			//			//next statement
+			//			goto handleSucceeded
+			//		} else if nv, ok := sc.Exprs[0].Expr.(*tree.NumVal); ok && nv.Value.String() == "1" {
+			//			err = mce.handleSelect1(nv)
+			//			if err != nil {
+			//				goto handleFailed
+			//			}
+			//			goto handleSucceeded
+			//		}
+			//	}
+			//}
 		}
 
 		//check database

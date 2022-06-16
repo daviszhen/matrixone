@@ -2291,4 +2291,40 @@ var builtins = map[int][]Function{
 			Fn:          unary.Cot[float64],
 		},
 	},
+	DATABASE: {
+		{
+			Index:       0,
+			Volatile:    true,
+			Flag:        plan.Function_STRICT,
+			Layout:      STANDARD_FUNCTION,
+			Args:        []types.T{},
+			ReturnTyp:   types.T_varchar,
+			TypeCheckFn: strictTypeCheck,
+			Fn:          unary.Database,
+		},
+	},
+	USER: {
+		{
+			Index:       0,
+			Volatile:    true,
+			Flag:        plan.Function_STRICT,
+			Layout:      STANDARD_FUNCTION,
+			Args:        []types.T{},
+			ReturnTyp:   types.T_varchar,
+			TypeCheckFn: strictTypeCheck,
+			Fn:          unary.User,
+		},
+	},
+	CONNECTION_ID: {
+		{
+			Index:       0,
+			Volatile:    true,
+			Flag:        plan.Function_STRICT,
+			Layout:      STANDARD_FUNCTION,
+			Args:        []types.T{},
+			ReturnTyp:   types.T_uint64,
+			TypeCheckFn: strictTypeCheck,
+			Fn:          unary.ConnectionID,
+		},
+	},
 }
