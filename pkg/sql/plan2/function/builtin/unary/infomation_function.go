@@ -159,7 +159,7 @@ func doConnectionID(proc *process.Process, params ...interface{}) (interface{}, 
 
 // ConnectionID returns the connection ID (thread ID) for the connection
 func ConnectionID(vectors []*vector.Vector, proc *process.Process) (*vector.Vector, error) {
-	return adapter(vectors, proc, types.Type{Oid: types.T_varchar, Size: 24},
+	return adapter(vectors, proc, types.Type{Oid: types.T_uint64, Size: 8},
 		0,
 		evaluateMemoryCapacityForConnectionID,
 		doConnectionID)

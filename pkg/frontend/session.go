@@ -625,8 +625,9 @@ func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 }
 
 func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (engine.Relation, error) {
-	if len(dbName) == 0 {
-		dbName = tcc.DefaultDatabase()
+	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
+	if err != nil {
+		return nil, err
 	}
 
 	//open database
@@ -648,7 +649,21 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (eng
 	return table, nil
 }
 
+func (tcc *TxnCompilerContext) ensureDatabaseIsNotEmpty(dbName string) (string, error) {
+	if len(dbName) == 0 {
+		dbName = tcc.DefaultDatabase()
+	}
+	if len(dbName) == 0 {
+		return "", NewMysqlError(ER_NO_DB_ERROR)
+	}
+	return dbName, nil
+}
+
 func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.ObjectRef, *plan2.TableDef) {
+	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
+	if err != nil {
+		return nil, nil
+	}
 	table, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil, nil
@@ -709,6 +724,10 @@ func (tcc *TxnCompilerContext) ResolveVariable(varName string, isSystemVar, isGl
 }
 
 func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string) []*plan2.ColDef {
+	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
+	if err != nil {
+		return nil
+	}
 	relation, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil
@@ -737,6 +756,10 @@ func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string)
 }
 
 func (tcc *TxnCompilerContext) GetHideKeyDef(dbName string, tableName string) *plan2.ColDef {
+	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
+	if err != nil {
+		return nil
+	}
 	relation, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil
@@ -764,6 +787,10 @@ func (tcc *TxnCompilerContext) GetHideKeyDef(dbName string, tableName string) *p
 func (tcc *TxnCompilerContext) Cost(obj *plan2.ObjectRef, e *plan2.Expr) *plan2.Cost {
 	dbName := obj.GetSchemaName()
 	tableName := obj.GetObjName()
+	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
+	if err != nil {
+		return nil
+	}
 	table, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil
