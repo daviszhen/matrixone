@@ -449,6 +449,39 @@ func Test_mce(t *testing.T) {
 			"drop database T",
 		}
 
+		sql1Col := &MysqlColumn{}
+		sql1Col.SetName("DATABASE()")
+		sql1Col.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+
+		sql2Col := &MysqlColumn{}
+		sql2Col.SetName("@@max_allowed_packet")
+		sql2Col.SetColumnType(defines.MYSQL_TYPE_LONGLONG)
+
+		sql3Col := &MysqlColumn{}
+		sql3Col.SetName("@@version_comment")
+		sql3Col.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+
+		sql4Col := &MysqlColumn{}
+		sql4Col.SetName("@@tx_isolation")
+		sql4Col.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+
+		var self_handle_sql_columns = [][]interface{}{
+			[]interface{}{
+				sql1Col,
+			},
+			[]interface{}{
+				sql2Col,
+			},
+			[]interface{}{
+				sql3Col,
+			},
+			[]interface{}{
+				sql4Col,
+			},
+			[]interface{}{},
+			[]interface{}{},
+		}
+
 		for i := 0; i < len(self_handle_sql); i++ {
 			select_2 := mock_frontend.NewMockComputationWrapper(ctrl)
 			stmts, err = parsers.Parse(dialect.MYSQL, self_handle_sql[i])
@@ -460,6 +493,7 @@ func Test_mce(t *testing.T) {
 			select_2.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
 			select_2.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
 			select_2.EXPECT().GetAffectedRows().Return(uint64(0)).AnyTimes()
+			select_2.EXPECT().GetColumns().Return(self_handle_sql_columns[i], nil).AnyTimes()
 			cws = append(cws, select_2)
 		}
 

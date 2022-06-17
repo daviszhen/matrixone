@@ -1898,66 +1898,78 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 				ses.ep = st.Ep
 				ses.closeRef = mce.exportDataClose
 			}
-			//if sc, ok := st.Select.(*tree.SelectClause); ok {
-			//	if len(sc.Exprs) == 1 {
-			//		if fe, ok := sc.Exprs[0].Expr.(*tree.FuncExpr); ok {
-			//			if un, ok := fe.Func.FunctionReference.(*tree.UnresolvedName); ok {
-			//				param := strings.ToLower(un.Parts[0])
-			//				if param == "database" ||
-			//					param == "current_user" ||
-			//					param == "connection_id" {
-			//					err = mce.handleSelectXXX(param)
-			//					if err != nil {
-			//						goto handleFailed
-			//					}
-			//
-			//					//next statement
-			//					goto handleSucceeded
-			//				}
-			//			}
-			//		} else if ve, ok := sc.Exprs[0].Expr.(*tree.VarExpr); ok {
-			//			//TODO: fix multiple variables in single statement like `select @@a,@@b,@@c`
-			//			err = mce.handleSelectVariables(ve)
-			//			if err != nil {
-			//				goto handleFailed
-			//			}
-			//
-			//			//next statement
-			//			goto handleSucceeded
-			//		} else if nv, ok := sc.Exprs[0].Expr.(*tree.NumVal); ok && nv.Value.String() == "1" {
-			//			err = mce.handleSelect1(nv)
-			//			if err != nil {
-			//				goto handleFailed
-			//			}
-			//			goto handleSucceeded
-			//		}
-			//	}
-			//}
+
+			//we need it in plan1.
+			//The code block here will be removed after the plan1 is offline.
+			if !usePlan2 {
+				if sc, ok := st.Select.(*tree.SelectClause); ok {
+					if len(sc.Exprs) == 1 {
+						if fe, ok := sc.Exprs[0].Expr.(*tree.FuncExpr); ok {
+							if un, ok := fe.Func.FunctionReference.(*tree.UnresolvedName); ok {
+								param := strings.ToLower(un.Parts[0])
+								if param == "database" ||
+									param == "current_user" ||
+									param == "connection_id" {
+									err = mce.handleSelectXXX(param)
+									if err != nil {
+										goto handleFailed
+									}
+
+									//next statement
+									goto handleSucceeded
+								}
+							}
+						} else if ve, ok := sc.Exprs[0].Expr.(*tree.VarExpr); ok {
+							//TODO: fix multiple variables in single statement like `select @@a,@@b,@@c`
+							err = mce.handleSelectVariables(ve)
+							if err != nil {
+								goto handleFailed
+							}
+
+							//next statement
+							goto handleSucceeded
+						} else if nv, ok := sc.Exprs[0].Expr.(*tree.NumVal); ok && nv.Value.String() == "1" {
+							err = mce.handleSelect1(nv)
+							if err != nil {
+								goto handleFailed
+							}
+							goto handleSucceeded
+						}
+					}
+				}
+			}
 		}
 
 		//check database
-		//if proto.GetDatabaseName() == "" {
-		//	//if none database has been selected, database operations must be failed.
-		//	switch t := stmt.(type) {
-		//	case *tree.ShowDatabases, *tree.CreateDatabase, *tree.ShowCreateDatabase, *tree.ShowWarnings, *tree.ShowErrors,
-		//		*tree.ShowStatus, *tree.ShowVariables, *tree.DropDatabase, *tree.Load,
-		//		*tree.Use, *tree.SetVar,
-		//		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-		//	case *tree.ShowColumns:
-		//		if t.Table.ToTableName().SchemaName == "" {
-		//			err = NewMysqlError(ER_NO_DB_ERROR)
-		//			goto handleFailed
-		//		}
-		//	case *tree.ShowTables:
-		//		if t.DBName == "" {
-		//			err = NewMysqlError(ER_NO_DB_ERROR)
-		//			goto handleFailed
-		//		}
-		//	default:
-		//		err = NewMysqlError(ER_NO_DB_ERROR)
-		//		goto handleFailed
-		//	}
-		//}
+		/*we need it in plan1.
+		The code block here will be removed after the plan1 is offline.
+		But when it is the plan2.
+		When the database is "", Cases like following can be executed also.
+		select @@version_comment limit 1;
+		SELECT DATABASE();
+		*/
+		if !usePlan2 && ses.DatabaseNameIsEmpty() {
+			//if none database has been selected, database operations must be failed.
+			switch t := stmt.(type) {
+			case *tree.ShowDatabases, *tree.CreateDatabase, *tree.ShowCreateDatabase, *tree.ShowWarnings, *tree.ShowErrors,
+				*tree.ShowStatus, *tree.ShowVariables, *tree.DropDatabase, *tree.Load,
+				*tree.Use, *tree.SetVar,
+				*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
+			case *tree.ShowColumns:
+				if t.Table.ToTableName().SchemaName == "" {
+					err = NewMysqlError(ER_NO_DB_ERROR)
+					goto handleFailed
+				}
+			case *tree.ShowTables:
+				if t.DBName == "" {
+					err = NewMysqlError(ER_NO_DB_ERROR)
+					goto handleFailed
+				}
+			default:
+				err = NewMysqlError(ER_NO_DB_ERROR)
+				goto handleFailed
+			}
+		}
 
 		selfHandle = false
 
@@ -1989,8 +2001,8 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			}
 		case *tree.DropDatabase:
 			// if the droped database is the same as the one in use, database must be reseted to empty.
-			if string(st.Name) == proto.GetDatabaseName() {
-				proto.SetUserName("")
+			if string(st.Name) == ses.GetDatabaseName() {
+				ses.SetUserName("")
 			}
 		case *tree.Load:
 			selfHandle = true
@@ -2071,7 +2083,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		if selfHandle {
 			goto handleSucceeded
 		}
-		if err = cw.SetDatabaseName(proto.GetDatabaseName()); err != nil {
+		if err = cw.SetDatabaseName(ses.GetDatabaseName()); err != nil {
 			goto handleFailed
 		}
 

@@ -328,6 +328,10 @@ func (ses *Session) GetUserName() string {
 	return ses.protocol.GetUserName()
 }
 
+func (ses *Session) SetUserName(uname string) {
+	ses.protocol.SetUserName(uname)
+}
+
 func (th *TxnHandler) GetStorage() engine.Engine {
 	return th.storage
 }
@@ -594,9 +598,6 @@ type TxnCompilerContext struct {
 }
 
 func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
-	if len(db) == 0 {
-		db = "mo_catalog"
-	}
 	return &TxnCompilerContext{txnHandler: txn, dbName: db, QryTyp: TXN_DEFAULT}
 }
 
