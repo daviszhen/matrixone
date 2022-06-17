@@ -1813,10 +1813,12 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	proc.Lim.Size = ses.Pu.SV.GetProcessLimitationSize()
 	proc.Lim.BatchRows = ses.Pu.SV.GetProcessLimitationBatchRows()
 	proc.Lim.PartitionRows = ses.Pu.SV.GetProcessLimitationPartitionRows()
-	proc.SessionInfo = &process.SessionInfo{
+	proc.SessionInfo = process.SessionInfo{
 		User:         ses.GetUserName(),
+		Host:         ses.Pu.SV.GetHost(),
 		ConnectionID: uint64(proto.ConnectionID()),
 		Database:     ses.GetDatabaseName(),
+		Version:      serverVersion,
 	}
 
 	cws, err := GetComputationWrapper(proto.GetDatabaseName(),

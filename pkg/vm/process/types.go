@@ -58,16 +58,35 @@ type Limitation struct {
 // session information
 type SessionInfo struct {
 	User         string
+	Host         string
+	Role         string
 	ConnectionID uint64
 	Database     string
+	Version      string
 }
 
 func (si *SessionInfo) GetUser() string {
 	return si.User
 }
 
+func (si *SessionInfo) GetHost() string {
+	return si.Host
+}
+
+func (si *SessionInfo) GetUserHost() string {
+	return si.User + "@" + si.Host
+}
+
+func (si *SessionInfo) GetRole() string {
+	return si.Role
+}
+
 func (si *SessionInfo) GetCharset() string {
-	return "utf8"
+	return "utf8mb4"
+}
+
+func (si *SessionInfo) GetCollation() string {
+	return "utf8mb4_general_ci"
 }
 
 func (si *SessionInfo) GetConnectionID() uint64 {
@@ -76,6 +95,10 @@ func (si *SessionInfo) GetConnectionID() uint64 {
 
 func (si *SessionInfo) GetDatabase() string {
 	return si.Database
+}
+
+func (si *SessionInfo) GetVersion() string {
+	return si.Version
 }
 
 // Process contains context used in query execution
@@ -94,7 +117,7 @@ type Process struct {
 	// snapshot is transaction context
 	Snapshot []byte
 
-	SessionInfo *SessionInfo
+	SessionInfo SessionInfo
 
 	// snapshot is transaction context
 	Cancel context.CancelFunc
