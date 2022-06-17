@@ -1821,9 +1821,9 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		Version:      serverVersion,
 	}
 
-	cws, err := GetComputationWrapper(proto.GetDatabaseName(),
+	cws, err := GetComputationWrapper(ses.GetDatabaseName(),
 		sql,
-		proto.GetUserName(),
+		ses.GetUserName(),
 		ses.Pu.StorageEngine,
 		proc, ses, usePlan2)
 	if err != nil {

@@ -320,6 +320,10 @@ func (ses *Session) SetDatabaseName(db string) {
 	ses.txnCompileCtx.SetDatabase(db)
 }
 
+func (ses *Session) DatabaseNameIsEmpty() bool {
+	return len(ses.GetDatabaseName()) == 0
+}
+
 func (ses *Session) GetUserName() string {
 	return ses.protocol.GetUserName()
 }
