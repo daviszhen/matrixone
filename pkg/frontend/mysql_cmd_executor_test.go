@@ -466,20 +466,20 @@ func Test_mce(t *testing.T) {
 		sql4Col.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
 
 		var self_handle_sql_columns = [][]interface{}{
-			[]interface{}{
+			{
 				sql1Col,
 			},
-			[]interface{}{
+			{
 				sql2Col,
 			},
-			[]interface{}{
+			{
 				sql3Col,
 			},
-			[]interface{}{
+			{
 				sql4Col,
 			},
-			[]interface{}{},
-			[]interface{}{},
+			{},
+			{},
 		}
 
 		for i := 0; i < len(self_handle_sql); i++ {
