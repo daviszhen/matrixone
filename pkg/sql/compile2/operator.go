@@ -16,9 +16,15 @@ package compile2
 
 import (
 	"fmt"
+
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/loopcomplement"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/loopjoin"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/loopleft"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/loopsemi"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/update"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/deletion"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/insert"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -57,6 +63,7 @@ var constBat *batch.Batch
 
 func init() {
 	constBat = batch.NewWithSize(0)
+	constBat.Zs = []int64{1}
 }
 
 func dupInstruction(in vm.Instruction) vm.Instruction {
@@ -122,6 +129,26 @@ func dupInstruction(in vm.Instruction) vm.Instruction {
 			Data: arg.Data,
 			Func: arg.Func,
 		}
+	case *loopjoin.Argument:
+		rin.Arg = &loopjoin.Argument{
+			Cond:   arg.Cond,
+			Result: arg.Result,
+		}
+	case *loopsemi.Argument:
+		rin.Arg = &loopsemi.Argument{
+			Cond:   arg.Cond,
+			Result: arg.Result,
+		}
+	case *loopleft.Argument:
+		rin.Arg = &loopleft.Argument{
+			Cond:   arg.Cond,
+			Result: arg.Result,
+		}
+	case *loopcomplement.Argument:
+		rin.Arg = &loopcomplement.Argument{
+			Cond:   arg.Cond,
+			Result: arg.Result,
+		}
 	case *dispatch.Argument:
 	case *connector.Argument:
 	default:
@@ -147,7 +174,23 @@ func constructDeletion(n *plan.Node, eg engine.Engine, snapshot engine.Snapshot)
 	}
 	return &deletion.Argument{
 		TableSource:  relation,
-		UseDeleteKey: n.UseDeleteKey,
+		UseDeleteKey: n.DeleteInfo.UseDeleteKey,
+		CanTruncate:  n.DeleteInfo.CanTruncate,
+	}, nil
+}
+
+func constructInsert(n *plan.Node, eg engine.Engine, snapshot engine.Snapshot) (*insert.Argument, error) {
+	db, err := eg.Database(n.ObjRef.SchemaName, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	relation, err := db.Relation(n.TableDef.Name, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return &insert.Argument{
+		TargetTable:   relation,
+		TargetColDefs: n.TableDef.Cols,
 	}, nil
 }
 
@@ -289,7 +332,6 @@ func constructComplement(n *plan.Node, proc *process.Process) *complement.Argume
 		Conditions: conds,
 		Result:     result,
 	}
-
 }
 
 func constructOrder(n *plan.Node, proc *process.Process) *order.Argument {
@@ -348,6 +390,7 @@ func constructGroup(n, cn *plan.Node) *group.Argument {
 		typs[i].Width = e.Typ.Width
 		typs[i].Size = e.Typ.Size
 		typs[i].Scale = e.Typ.Scale
+		typs[i].Precision = e.Typ.Precision
 	}
 	return &group.Argument{
 		Aggs:  aggs,
@@ -413,6 +456,58 @@ func constructMergeOrder(n *plan.Node, proc *process.Process) *mergeorder.Argume
 	}
 }
 
+func constructLoopJoin(n *plan.Node, proc *process.Process) *loopjoin.Argument {
+	result := make([]loopjoin.ResultPos, len(n.ProjectList))
+	for i, expr := range n.ProjectList {
+		result[i].Rel, result[i].Pos = constructJoinResult(expr)
+	}
+	return &loopjoin.Argument{
+		Result: result,
+		Cond:   colexec.RewriteFilterExprList(n.OnList),
+	}
+}
+
+func constructLoopSemi(n *plan.Node, proc *process.Process) *loopsemi.Argument {
+	result := make([]int32, len(n.ProjectList))
+	for i, expr := range n.ProjectList {
+		rel, pos := constructJoinResult(expr)
+		if rel != 0 {
+			panic(errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("complement result '%s' not support now", expr)))
+		}
+		result[i] = pos
+	}
+	return &loopsemi.Argument{
+		Result: result,
+		Cond:   colexec.RewriteFilterExprList(n.OnList),
+	}
+}
+
+func constructLoopLeft(n *plan.Node, proc *process.Process) *loopleft.Argument {
+	result := make([]loopleft.ResultPos, len(n.ProjectList))
+	for i, expr := range n.ProjectList {
+		result[i].Rel, result[i].Pos = constructJoinResult(expr)
+	}
+	return &loopleft.Argument{
+		Result: result,
+		Cond:   colexec.RewriteFilterExprList(n.OnList),
+	}
+}
+
+func constructLoopComplement(n *plan.Node, proc *process.Process) *loopcomplement.Argument {
+	result := make([]int32, len(n.ProjectList))
+	for i, expr := range n.ProjectList {
+		rel, pos := constructJoinResult(expr)
+		if rel != 0 {
+			panic(errors.New(errno.SyntaxErrororAccessRuleViolation, fmt.Sprintf("complement result '%s' not support now", expr)))
+		}
+		result[i] = pos
+	}
+	return &loopcomplement.Argument{
+		Result: result,
+		Cond:   colexec.RewriteFilterExprList(n.OnList),
+	}
+}
+
 func constructJoinResult(expr *plan.Expr) (int32, int32) {
 	e, ok := expr.Expr.(*plan.Expr_Col)
 	if !ok {
@@ -449,9 +544,51 @@ func constructJoinCondition(expr *plan.Expr) (*plan.Expr, *plan.Expr) {
 	return e.F.Args[0], e.F.Args[1]
 }
 
+func isEquiJoin(exprs []*plan.Expr) bool {
+	for _, expr := range exprs {
+		if e, ok := expr.Expr.(*plan.Expr_F); ok {
+			if !supportedJoinCondition(e.F.Func.GetObj()) {
+				return false
+			}
+			lpos, rpos := hasColExpr(e.F.Args[0], -1), hasColExpr(e.F.Args[1], -1)
+			if lpos == -1 || rpos == -1 || (lpos != rpos) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func supportedJoinCondition(id int64) bool {
 	fid, _ := function.DecodeOverloadID(id)
 	return fid == function.EQUAL
+}
+
+func hasColExpr(expr *plan.Expr, pos int32) int32 {
+	switch e := expr.Expr.(type) {
+	case *plan.Expr_Col:
+		if pos == -1 {
+			return e.Col.ColPos
+		}
+		if pos != e.Col.ColPos {
+			return -1
+		}
+		return pos
+	case *plan.Expr_F:
+		for i := range e.F.Args {
+			pos0 := hasColExpr(e.F.Args[i], pos)
+			switch {
+			case pos0 == -1:
+			case pos == -1:
+				pos = pos0
+			case pos != pos0:
+				return -1
+			}
+		}
+		return pos
+	default:
+		return pos
+	}
 }
 
 func exprRelPos(expr *plan.Expr) int32 {

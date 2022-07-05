@@ -17,9 +17,11 @@ package compile2
 import (
 	"context"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/deletion"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/update"
 	"runtime"
+
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/deletion"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/insert"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec2/update"
 
 	"github.com/matrixorigin/matrixone/pkg/errno"
 
@@ -134,11 +136,25 @@ func (s *Scope) Delete(ts uint64, snapshot engine.Snapshot, engine engine.Engine
 	s.Magic = Merge
 	arg := s.Instructions[len(s.Instructions)-1].Arg.(*deletion.Argument)
 	arg.Ts = ts
+	if arg.CanTruncate {
+		return arg.TableSource.Truncate(snapshot)
+	}
 	defer arg.TableSource.Close(snapshot)
 	if err := s.MergeRun(engine); err != nil {
 		return 0, err
 	}
 	return arg.AffectedRows, nil
+}
+
+func (s *Scope) Insert(ts uint64, snapshot engine.Snapshot, engine engine.Engine) (uint64, error) {
+	s.Magic = Merge
+	arg := s.Instructions[len(s.Instructions)-1].Arg.(*insert.Argument)
+	arg.Ts = ts
+	defer arg.TargetTable.Close(snapshot)
+	if err := s.MergeRun(engine); err != nil {
+		return 0, err
+	}
+	return arg.Affected, nil
 }
 
 func (s *Scope) Update(ts uint64, snapshot engine.Snapshot, engine engine.Engine) (uint64, error) {

@@ -21,6 +21,14 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+const (
+	JoinSideNone       int8 = 0
+	JoinSideLeft            = 1 << iota
+	JoinSideRight           = 1 << iota
+	JoinSideBoth            = JoinSideLeft | JoinSideRight
+	JoinSideCorrelated      = 1 << iota
+)
+
 type TableDef = plan.TableDef
 type ColDef = plan.ColDef
 type ObjectRef = plan.ObjectRef
@@ -69,28 +77,6 @@ type BaseOptimizer struct {
 	ctx   CompilerContext
 }
 
-//use for build select
-type BinderContext struct {
-	// when build_projection we may set columnAlias and then use in build_orderby
-	columnAlias map[string]*Expr
-	// when build_cte will set cteTables and use in build_from
-	cteTables map[string]*TableDef
-
-	// use for build subquery
-	subqueryIsCorrelated bool
-	// unused, commented out for now.
-	// subqueryIsScalar     bool
-
-	subqueryParentIds []int32
-
-	// use to storage the using columns.
-	// select R.*, S.* from R, S using(a) where S.a > 10
-	// then we store {'a':'S'},
-	// when we use buildUnresolvedName(), and the colName = 'a' and tableName = 'S', we reset tableName=''
-	// because the ProjectNode(after JoinNode) had coalesced the using cols
-	usingCols map[string]string
-}
-
 ///////////////////////////////
 // Data structures for refactor
 ///////////////////////////////
@@ -99,28 +85,33 @@ type QueryBuilder struct {
 	qry     *plan.Query
 	compCtx CompilerContext
 
-	ctxByNode  []*BindContext
-	tagsByNode [][]int32
-	nextTag    int32
+	ctxByNode []*BindContext
+	nextTag   int32
+}
+
+type CTERef struct {
+	ast        *tree.CTE
+	maskedCTEs map[string]any
 }
 
 type BindContext struct {
 	binder Binder
 
-	cteTables map[string]*plan.TableDef
+	cteByName  map[string]*CTERef
+	maskedCTEs map[string]any
+
+	cteName  string
+	headings []string
 
 	groupTag     int32
 	aggregateTag int32
 	projectTag   int32
-	distinctTag  int32
 	resultTag    int32
 
 	groups     []*plan.Expr
 	aggregates []*plan.Expr
 	projects   []*plan.Expr
 	results    []*plan.Expr
-
-	headings []string
 
 	groupByAst     map[string]int32
 	aggregateByAst map[string]int32
@@ -136,7 +127,9 @@ type BindContext struct {
 	// for join tables
 	bindingTree *BindingTreeNode
 
-	corrCols []*plan.CorrColRef
+	isDistinct   bool
+	isCorrelated bool
+	hasSingleRow bool
 
 	parent     *BindContext
 	leftChild  *BindContext
@@ -195,12 +188,8 @@ type ProjectionBinder struct {
 }
 
 type OrderBinder struct {
-	*DistinctBinder
-	selectList tree.SelectExprs
-}
-
-type DistinctBinder struct {
 	*ProjectionBinder
+	selectList tree.SelectExprs
 }
 
 type LimitBinder struct {

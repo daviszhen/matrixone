@@ -219,6 +219,8 @@ const (
 	VERSION
 	COLLATION
 
+	TIMESTAMP // TIMESTAMP
+
 	// FUNCTION_END_NUMBER is not a function, just a flag to record the max number of function.
 	// TODO: every one should put the new function id in front of this one if you want to make a new function.
 	FUNCTION_END_NUMBER
@@ -291,6 +293,7 @@ var functionIdRegister = map[string]int32{
 	"ceiling":           CEIL,
 	"concat_ws":         CONCAT_WS,
 	"current_timestamp": CURRENT_TIMESTAMP,
+	"now":               CURRENT_TIMESTAMP,
 	"floor":             FLOOR,
 	"lpad":              LPAD,
 	"pi":                PI,
@@ -336,6 +339,7 @@ var functionIdRegister = map[string]int32{
 	"atan":           ATAN,
 	"cos":            COS,
 	"cot":            COT,
+	"timestamp":      TIMESTAMP,
 	"database":       DATABASE,
 	"schema":         DATABASE,
 	"user":           USER,
@@ -359,6 +363,6 @@ func GetFunctionIsWinfunByName(name string) bool {
 	if err != nil {
 		return false
 	}
-	fs := functionRegister[fid]
+	fs := functionRegister[fid].Overloads
 	return len(fs) > 0 && fs[0].Flag == plan.Function_WIN
 }

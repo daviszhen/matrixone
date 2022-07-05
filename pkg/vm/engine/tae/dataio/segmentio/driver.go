@@ -28,8 +28,8 @@ import (
 const INODE_NUM = 4096
 const INODE_SIZE = 512
 const BLOCK_SIZE = 4096
-const SIZE = 4 * 1024 * 1024 * 1024
-const LOG_START = 2 * INODE_SIZE
+const SIZE = 2 * 1024 * 1024 * 1024
+const LOG_START = 2 * BLOCK_SIZE
 const DATA_START = LOG_START + INODE_SIZE*INODE_NUM
 const DATA_SIZE = SIZE - DATA_START
 const LOG_SIZE = DATA_START - LOG_START
@@ -104,13 +104,14 @@ func (s *Driver) Init(name string) (err error) {
 	}
 
 	_, err = s.segFile.Write(sbuffer.Bytes())
-	logutil.Infof(" %s-%p | SegmentFile | Init ", s.name, &(s.name))
+	logutil.Debugf(" %s-%p | SegmentFile | Init ", s.name, &(s.name))
 	return
 }
 
 func (s *Driver) Open(name string) (err error) {
 	if _, err = os.Stat(name); os.IsNotExist(err) {
 		err = s.Init(name)
+		s.Mount()
 		return
 	}
 	if s.segFile, err = os.OpenFile(name, os.O_RDWR, os.ModePerm); err != nil {
@@ -129,7 +130,12 @@ func (s *Driver) Open(name string) (err error) {
 		state: RESIDENT,
 	}
 	s.super.lognode = log
-	logutil.Infof(" %s-%p | SegmentFile | Opened", s.name, &(s.name))
+	s.Mount()
+	cache := bytes.NewBuffer(make([]byte, 2*1024*1024))
+	if err := s.Replay(cache); err != nil {
+		return err
+	}
+	logutil.Debugf(" %s-%p | SegmentFile | Opened", s.name, &(s.name))
 	return
 }
 
@@ -137,7 +143,7 @@ func (s *Driver) Mount() {
 	s.lastInode = 1
 	var seq uint64
 	seq = 0
-	s.nodes = make(map[string]*DriverFile, INODE_NUM)
+	s.nodes = make(map[string]*DriverFile)
 	logFile := &DriverFile{
 		snode:  s.super.lognode,
 		name:   "logfile",
@@ -170,6 +176,9 @@ func (s *Driver) Destroy() {
 		panic(any(err.Error()))
 	}
 	s.segFile = nil
+	s.allocator = nil
+	s.log.allocator = nil
+	s.nodes = nil
 }
 
 func (s *Driver) Replay(cache *bytes.Buffer) error {
@@ -200,6 +209,8 @@ func (s *Driver) NewBlockFile(fname string) *DriverFile {
 	}
 	s.nodes[file.name] = file
 	s.lastInode += 1
+	file.OnZeroCB = file.close
+	file.Ref()
 	s.PrintLog(file.name, "NewBlockFile")
 	return file
 }
@@ -288,7 +299,7 @@ func (s *Driver) GetNodes() map[string]*DriverFile {
 func (s *Driver) PrintLog(name, info string) {
 	s.log.allocator.(*BitmapAllocator).mutex.RLock()
 	defer s.log.allocator.(*BitmapAllocator).mutex.RUnlock()
-	logutil.Infof(" %s-%p | %s | %s-%d-%d | Log Level1 %p-%x",
+	logutil.Debugf(" %s-%p | %s | %s-%d-%d | Log Level1 %p-%x",
 		s.name,
 		&(s.name),
 		info,

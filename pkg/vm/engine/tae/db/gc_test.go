@@ -22,7 +22,6 @@ import (
 
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/catalog"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/compute"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/tables/jobs"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/testutils"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/testutils/config"
@@ -31,13 +30,15 @@ import (
 )
 
 func TestGCBlock1(t *testing.T) {
+	testutils.EnsureNoLeak(t)
 	tae := initDB(t, nil)
 	defer tae.Close()
 	schema := catalog.MockSchemaAll(13, 12)
 	schema.BlockMaxRows = 100
 	schema.SegmentMaxBlocks = 2
 
-	bat := catalog.MockData(schema, schema.BlockMaxRows)
+	bat := catalog.MockBatch(schema, int(schema.BlockMaxRows))
+	defer bat.Close()
 	createRelationAndAppend(t, tae, "db", schema, bat, true)
 
 	txn, _ := tae.StartTxn(nil)
@@ -68,6 +69,7 @@ func TestGCBlock1(t *testing.T) {
 }
 
 func TestAutoGC1(t *testing.T) {
+	testutils.EnsureNoLeak(t)
 	opts := config.WithQuickScanAndCKPOpts(nil)
 	tae := initDB(t, opts)
 	defer tae.Close()
@@ -76,8 +78,9 @@ func TestAutoGC1(t *testing.T) {
 	schema.SegmentMaxBlocks = 4
 
 	totalRows := schema.BlockMaxRows * 21 / 2
-	bat := catalog.MockData(schema, totalRows)
-	bats := compute.SplitBatch(bat, 100)
+	bat := catalog.MockBatch(schema, int(totalRows))
+	defer bat.Close()
+	bats := bat.Split(100)
 	createRelation(t, tae, "db", schema, true)
 	pool, _ := ants.NewPool(50)
 	var wg sync.WaitGroup
@@ -113,6 +116,7 @@ func TestAutoGC1(t *testing.T) {
 // 3. Create a table w one appendable block data and commit
 // 4. Drop the table and commit
 func TestGCTable(t *testing.T) {
+	testutils.EnsureNoLeak(t)
 	opts := config.WithQuickScanAndCKPOpts(nil)
 	tae := initDB(t, opts)
 	defer tae.Close()
@@ -135,8 +139,9 @@ func TestGCTable(t *testing.T) {
 	t.Logf("Takes: %s", time.Since(now))
 	printCheckpointStats(t, tae)
 
-	bat := catalog.MockData(schema, schema.BlockMaxRows*uint32(schema.SegmentMaxBlocks+1)-1)
-	bats := compute.SplitBatch(bat, 4)
+	bat := catalog.MockBatch(schema, int(schema.BlockMaxRows*uint32(schema.SegmentMaxBlocks+1)-1))
+	defer bat.Close()
+	bats := bat.Split(4)
 
 	// 3. Create a table and append 7 rows
 	db, _ = createRelationAndAppend(t, tae, "db", schema, bats[0], false)
@@ -159,7 +164,7 @@ func TestGCTable(t *testing.T) {
 	assert.Equal(t, 0, len(names))
 
 	// 5. Create a table and append 3 block
-	db, _ = createRelationAndAppend(t, tae, "db", schema, bat, false)
+	createRelationAndAppend(t, tae, "db", schema, bat, false)
 	names = getSegmentFileNames(tae)
 	t.Log(names)
 	assert.Equal(t, 2, len(names))
@@ -180,13 +185,14 @@ func TestGCTable(t *testing.T) {
 	assert.Equal(t, 0, len(names))
 
 	// 7. Create a table
-	db, _ = createRelation(t, tae, "db", schema, false)
+	createRelation(t, tae, "db", schema, false)
 
 	// 8. Append blocks and drop
 	var wg sync.WaitGroup
 	pool, _ := ants.NewPool(5)
-	bat = catalog.MockData(schema, schema.BlockMaxRows*10)
-	bats = compute.SplitBatch(bat, 20)
+	bat = catalog.MockBatch(schema, int(schema.BlockMaxRows*10))
+	defer bat.Close()
+	bats = bat.Split(20)
 	for i := range bats[:10] {
 		wg.Add(1)
 		_ = pool.Submit(tryAppendClosure(t, bats[i], schema.Name, tae, &wg))
@@ -216,6 +222,7 @@ func TestGCTable(t *testing.T) {
 // 1. Create a db with 2 tables w/o data
 // 2. Drop the db
 func TestGCDB(t *testing.T) {
+	testutils.EnsureNoLeak(t)
 	opts := config.WithQuickScanAndCKPOpts(nil)
 	tae := initDB(t, opts)
 	defer tae.Close()
@@ -239,8 +246,10 @@ func TestGCDB(t *testing.T) {
 	printCheckpointStats(t, tae)
 	assert.Equal(t, 1, tae.Catalog.CoarseDBCnt())
 
-	bat1 := catalog.MockData(schema1, schema1.BlockMaxRows*3-1)
-	bat2 := catalog.MockData(schema2, schema2.BlockMaxRows*3-1)
+	bat1 := catalog.MockBatch(schema1, int(schema1.BlockMaxRows*3-1))
+	bat2 := catalog.MockBatch(schema2, int(schema2.BlockMaxRows*3-1))
+	defer bat1.Close()
+	defer bat2.Close()
 
 	createRelation(t, tae, "db", schema1, true)
 	createRelation(t, tae, "db", schema2, false)
@@ -280,14 +289,15 @@ func TestGCDB(t *testing.T) {
 		schema := catalog.MockSchema(3, 2)
 		schema.BlockMaxRows = 10
 		schema.SegmentMaxBlocks = 2
-		bat := catalog.MockData(schema, schema.BlockMaxRows*uint32(rand.Intn(4)+1)-1)
+		bat := catalog.MockBatch(schema, int(schema.BlockMaxRows*uint32(rand.Intn(4)+1)-1))
+		defer bat.Close()
 		txn, _ := tae.StartTxn(nil)
 		db, err := txn.GetDatabase("db")
 		if err != nil {
 			_ = txn.Rollback()
 			return
 		}
-		rel, err := db.CreateRelation(schema)
+		_, err = db.CreateRelation(schema)
 		assert.NoError(t, err)
 		err = txn.Commit()
 		if err != nil {
@@ -300,7 +310,7 @@ func TestGCDB(t *testing.T) {
 			_ = txn.Rollback()
 			return
 		}
-		rel, err = db.GetRelationByName(schema.Name)
+		rel, err := db.GetRelationByName(schema.Name)
 		assert.NoError(t, err)
 		err = rel.Append(bat)
 		assert.NoError(t, err)

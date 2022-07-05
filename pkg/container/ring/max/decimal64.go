@@ -16,6 +16,7 @@ package max
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/ring"
@@ -108,7 +109,7 @@ func (r *Decimal64Ring) Grow(m *mheap.Mheap) error {
 	}
 	r.Vs = r.Vs[:n+1]
 	r.Da = r.Da[:(n+1)*8]
-	r.Vs[n] = 0
+	r.Vs[n] = math.MinInt64
 	r.Ns = append(r.Ns, 0)
 	r.Es = append(r.Es, true)
 	return nil
@@ -140,6 +141,7 @@ func (r *Decimal64Ring) Grows(size int, m *mheap.Mheap) error {
 	for i := 0; i < size; i++ {
 		r.Ns = append(r.Ns, 0)
 		r.Es = append(r.Es, true)
+		r.Vs[i+n] = math.MinInt64
 	}
 	return nil
 }
@@ -191,6 +193,9 @@ func (r *Decimal64Ring) BulkFill(i int64, zs []int64, vec *vector.Vector) {
 
 func (r *Decimal64Ring) Add(a interface{}, x, y int64) {
 	ar := a.(*Decimal64Ring)
+	if r.Typ.Width == 0 && ar.Typ.Width != 0 {
+		r.Typ = ar.Typ
+	}
 	if r.Es[x] || ar.Vs[y] > r.Vs[x] {
 		r.Es[x] = false
 		r.Vs[x] = ar.Vs[y]
@@ -200,6 +205,9 @@ func (r *Decimal64Ring) Add(a interface{}, x, y int64) {
 
 func (r *Decimal64Ring) BatchAdd(a interface{}, start int64, os []uint8, vps []uint64) {
 	ar := a.(*Decimal64Ring)
+	if r.Typ.Width == 0 && ar.Typ.Width != 0 {
+		r.Typ = ar.Typ
+	}
 	for i := range os {
 		j := vps[i] - 1
 		if r.Es[j] || ar.Vs[int64(i)+start] > r.Vs[j] {

@@ -145,27 +145,21 @@ func (entry *SegmentEntry) MakeCommand(id uint32) (cmd txnif.TxnCmd, err error) 
 }
 
 func (entry *SegmentEntry) PPString(level common.PPLevel, depth int, prefix string) string {
-	s := fmt.Sprintf("%s%s%s", common.RepeatStr("\t", depth), prefix, entry.String())
+	var w bytes.Buffer
+	_, _ = w.WriteString(fmt.Sprintf("%s%s%s", common.RepeatStr("\t", depth), prefix, entry.String()))
 	if level == common.PPL0 {
-		return s
+		return w.String()
 	}
-	var body string
 	it := entry.MakeBlockIt(true)
 	for it.Valid() {
 		block := it.Get().GetPayload().(*BlockEntry)
 		block.RLock()
-		if len(body) == 0 {
-			body = block.PPString(level, depth+1, prefix)
-		} else {
-			body = fmt.Sprintf("%s\n%s", body, block.PPString(level, depth+1, prefix))
-		}
+		_ = w.WriteByte('\n')
+		_, _ = w.WriteString(block.PPString(level, depth+1, prefix))
 		block.RUnlock()
 		it.Next()
 	}
-	if len(body) == 0 {
-		return s
-	}
-	return fmt.Sprintf("%s\n%s", s, body)
+	return w.String()
 }
 
 func (entry *SegmentEntry) StringLocked() string {
@@ -181,6 +175,10 @@ func (entry *SegmentEntry) String() string {
 	entry.RLock()
 	defer entry.RUnlock()
 	return entry.StringLocked()
+}
+
+func (entry *SegmentEntry) BlockCnt() int {
+	return len(entry.entries)
 }
 
 func (entry *SegmentEntry) IsAppendable() bool {
@@ -283,7 +281,7 @@ func (entry *SegmentEntry) deleteEntryLocked(block *BlockEntry) error {
 }
 
 func (entry *SegmentEntry) RemoveEntry(block *BlockEntry) (err error) {
-	logutil.Info("[Catalog]", common.OperationField("remove"),
+	logutil.Debug("[Catalog]", common.OperationField("remove"),
 		common.OperandField(block.String()))
 	entry.Lock()
 	defer entry.Unlock()
@@ -345,18 +343,7 @@ func (entry *SegmentEntry) Clone() CheckpointItem {
 	}
 	return cloned
 }
-func (entry *SegmentEntry) ReplayFile(cache *bytes.Buffer) {
-	colCnt := len(entry.table.GetSchema().ColDefs)
-	indexCnt := make(map[int]int)
-	if entry.table.GetSchema().IsSingleSortKey() {
-		indexCnt[entry.table.GetSchema().GetSingleSortKey().Idx] = 2
-	} else if entry.table.GetSchema().IsCompoundSortKey() {
-		panic("implement me")
-	}
-	if err := entry.GetSegmentData().GetSegmentFile().Replay(colCnt, indexCnt, cache); err != nil {
-		panic(err)
-	}
-}
+
 func (entry *SegmentEntry) CloneCreate() CheckpointItem {
 	cloned := &SegmentEntry{
 		BaseEntry: entry.BaseEntry.CloneCreate(),

@@ -18,12 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/buffer/base"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/catalog"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/common"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/containers"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/iface/handle"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/iface/txnif"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/logstore/entry"
@@ -108,7 +107,7 @@ func (store *txnStore) BindTxn(txn txnif.AsyncTxn) {
 	store.txn = txn
 }
 
-func (store *txnStore) BatchDedup(dbId, id uint64, pks ...*vector.Vector) (err error) {
+func (store *txnStore) BatchDedup(dbId, id uint64, pks ...containers.Vector) (err error) {
 	db, err := store.getOrSetDB(dbId)
 	if err != nil {
 		return err
@@ -120,7 +119,7 @@ func (store *txnStore) BatchDedup(dbId, id uint64, pks ...*vector.Vector) (err e
 	return db.BatchDedup(id, pks...)
 }
 
-func (store *txnStore) Append(dbId, id uint64, data *batch.Batch) error {
+func (store *txnStore) Append(dbId, id uint64, data *containers.Batch) error {
 	store.IncreateWriteCnt()
 	db, err := store.getOrSetDB(dbId)
 	if err != nil {
@@ -132,7 +131,7 @@ func (store *txnStore) Append(dbId, id uint64, data *batch.Batch) error {
 	return db.Append(id, data)
 }
 
-func (store *txnStore) RangeDelete(dbId uint64, id *common.ID, start, end uint32) (err error) {
+func (store *txnStore) RangeDelete(dbId uint64, id *common.ID, start, end uint32, dt handle.DeleteType) (err error) {
 	db, err := store.getOrSetDB(dbId)
 	if err != nil {
 		return err
@@ -140,7 +139,7 @@ func (store *txnStore) RangeDelete(dbId uint64, id *common.ID, start, end uint32
 	// if table.IsDeleted() {
 	// 	return txnbase.ErrNotFound
 	// }
-	return db.RangeDelete(id, start, end)
+	return db.RangeDelete(id, start, end, dt)
 }
 
 func (store *txnStore) GetByFilter(dbId, tid uint64, filter *handle.Filter) (id *common.ID, offset uint32, err error) {

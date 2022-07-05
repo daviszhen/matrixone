@@ -29,7 +29,7 @@ import (
 
 func TestSingleSql(t *testing.T) {
 	// input := "explain verbose SELECT N_REGIONKEY + 2 as a, N_REGIONKEY/2, N_REGIONKEY* N_NATIONKEY, N_REGIONKEY % N_NATIONKEY, N_REGIONKEY - N_NATIONKEY FROM NATION WHERE -N_NATIONKEY < -20"
-	// input := "explain verbose SELECT N_REGIONKEY + 2 as a FROM NATION WHERE -N_NATIONKEY < -20"
+	input := "explain verbose SELECT N_REGIONKEY + 2 as a FROM NATION WHERE -N_NATIONKEY < -20"
 	// input := "explain verbose select c_custkey from (select c_custkey from CUSTOMER group by c_custkey ) a"
 	// input := "explain SELECT N_NAME, N_REGIONKEY FROM NATION WHERE N_REGIONKEY > 0 AND N_NAME LIKE '%AA'"
 	// input := "explain verbose SELECT N_NAME, N_REGIONKEY a FROM NATION WHERE N_NATIONKEY > 0 AND N_NATIONKEY < 10"
@@ -46,7 +46,7 @@ func TestSingleSql(t *testing.T) {
 	//	from lineitem,part
 	//	where l_shipdate < date '1996-04-01' + interval '1 month'`
 	//input := "explain select abs(N_REGIONKEY) from NATION"
-	input := "explain verbose SELECT l.L_ORDERKEY a FROM CUSTOMER c, ORDERS o, LINEITEM l WHERE c.C_CUSTKEY = o.O_CUSTKEY and l.L_ORDERKEY = o.O_ORDERKEY and o.O_ORDERKEY < 10"
+	//input := "explain verbose SELECT l.L_ORDERKEY a FROM CUSTOMER c, ORDERS o, LINEITEM l WHERE c.C_CUSTKEY = o.O_CUSTKEY and l.L_ORDERKEY = o.O_ORDERKEY and o.O_ORDERKEY < 10"
 
 	mock := plan2.NewMockOptimizer()
 	err := runOneStmt(mock, t, input)
@@ -68,7 +68,7 @@ func TestBasicSqlExplain(t *testing.T) {
 		"explain verbose SELECT N_NAME, MAX(N_REGIONKEY) FROM NATION GROUP BY N_NAME HAVING MAX(N_REGIONKEY) > 10",
 		"explain SELECT N_NAME, N_REGIONKEY FROM NATION WHERE N_REGIONKEY > 0 AND N_NAME LIKE '%AA' ORDER BY N_NAME DESC, N_REGIONKEY limit 10",
 		"explain SELECT N_NAME, N_REGIONKEY FROM NATION WHERE N_REGIONKEY > 0 AND N_NAME LIKE '%AA' ORDER BY N_NAME DESC, N_REGIONKEY LIMIT 10 offset 20",
-		"explain verbose select case when p_type like 'PROMO%' then l_extendedprice * (1 - l_discount) when p_type like 'PRX%' then l_extendedprice * (2 - l_discount) else 0 end from lineitem,part where l_shipdate < date '1996-04-01' + interval '1 month'",
+		"explain verbose select case when p_type like 'PROMO%' then l_extendedprice * (1 - l_discount) when p_type like 'PRX%' then l_extendedprice * (2 - l_discount) else 0 end from lineitem,part where l_shipdate < date '1996-04-01' + interval '1' month",
 	}
 	mockOptimizer := plan2.NewMockOptimizer()
 	runTestShouldPass(mockOptimizer, t, sqls)
@@ -194,10 +194,10 @@ func TestCollectionQuery(t *testing.T) {
 
 func TestDMLInsert(t *testing.T) {
 	sqls := []string{
-		"explain INSERT NATION VALUES (1, 'NAME1',21, 'COMMENT1'), (2, 'NAME2', 22, 'COMMENT2')",
-		"explain verbose INSERT NATION VALUES (1, 'NAME1',21, 'COMMENT1'), (2, 'NAME2', 22, 'COMMENT2')",
-		"explain INSERT NATION (N_NATIONKEY, N_REGIONKEY, N_NAME) VALUES (1, 21, 'NAME1'), (2, 22, 'NAME2')",
-		"explain verbose INSERT NATION (N_NATIONKEY, N_REGIONKEY, N_NAME) VALUES (1, 21, 'NAME1'), (2, 22, 'NAME2')",
+		//"explain INSERT NATION VALUES (1, 'NAME1',21, 'COMMENT1'), (2, 'NAME2', 22, 'COMMENT2')",
+		//"explain verbose INSERT NATION VALUES (1, 'NAME1',21, 'COMMENT1'), (2, 'NAME2', 22, 'COMMENT2')",
+		//"explain INSERT NATION (N_NATIONKEY, N_REGIONKEY, N_NAME) VALUES (1, 21, 'NAME1'), (2, 22, 'NAME2')",
+		//"explain verbose INSERT NATION (N_NATIONKEY, N_REGIONKEY, N_NAME) VALUES (1, 21, 'NAME1'), (2, 22, 'NAME2')",
 		"explain INSERT INTO NATION SELECT * FROM NATION2",
 		"explain verbose INSERT INTO NATION SELECT * FROM NATION2",
 	}

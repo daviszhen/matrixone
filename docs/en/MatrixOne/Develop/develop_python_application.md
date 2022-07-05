@@ -1,18 +1,18 @@
 # **Build a simple stock analysis Python App with MatrixOne**
 
-This tutorial shows you how build a simple Python application with MatrixOne.
+This tutorial shows you how to build a simple Python application with MatrixOne.
 
 ## **About the demo**
 
 This demo will store the historical stock data of the China stock market and make a simple analysis to find the best stocks to buy.
 
-The basic idea is that we track the P/E (Price-to-Earnings), P/B (Price-to-Book) level of each stock, which can represent a company's market capitalization. If you are not familiar with these two concepts, please refer to [P/E](https://www.investopedia.com/terms/p/price-earningsratio.asp) and [P/B](https://www.investopedia.com/terms/p/price-to-bookratio.asp).
+The basic idea is that we track the P/E (Price-to-Earnings) and P/B (Price-to-Book) level of each stock since these can represent a company's market capitalization. If you are not familiar with these two concepts, please refer to [P/E](https://www.investopedia.com/terms/p/price-earningsratio.asp) and [P/B](https://www.investopedia.com/terms/p/price-to-bookratio.asp).
 
 Every day after the market closes, we compare the P/E and P/B value with the historical lowest P/E and P/B. If the current P/E or P/B is even lower than the historical lowest, the stock is very likely under-estimated. We can further investigate its reason of falling and judge if it's a good time to buy it. 
 
 ## **Before you start**
 
-Before you start, you need to have a Tushare account and get an API token. If you haven't signed up for Tushare, you can sign it up at [https://tushare.pro/](https://tushare.pro/) and you can get your API token at [https://tushare.pro/user/token#](https://tushare.pro/user/token#).
+Before you start, you need to have a Tushare account and get an API token. If you haven't signed up for Tushare, you can sign up for it at [https://tushare.pro/](https://tushare.pro/) and you can find your API token at [https://tushare.pro/user/token#](https://tushare.pro/user/token#).
 
 !!! info 
     Tushare is an open source utility for crawling historical data of China stocks. It has a complete dataset, but pay attention to their rules of API access limit and frequency. 
@@ -35,9 +35,9 @@ pip3 install -r requirements.txt
 
 ## **Step1: prepare and load historical dataset**
 
-At first, we need to load the historical stock data in MatrixOne. 
+First, we need to load the historical stock data in MatrixOne. 
 
-As `Tushare` interface only allows a fetch of 5000 rows of data at once, we just collect the latest 5000 trade days data for each stock. Each year there are roughly 250 trade dates. 5000 makes almost 20 years of data, which largely satisfies our demo.
+As `Tushare` interface only allows a fetch of 5000 rows of data at once, we only have to collect the latest 5000 trade days data for each stock. Each year there are roughly 250 trade dates. 5000 makes almost 20 years of data, which largely satisfies our demo.
 
 The below code will set up tushare interface and get the list of stocks.
 

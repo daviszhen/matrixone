@@ -17,8 +17,7 @@ package catalog
 import (
 	"sync"
 
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/compute"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/containers"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/iface/handle"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/iface/txnif"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/txn/txnbase"
@@ -94,6 +93,10 @@ type mockTableHandle struct {
 	entry   *TableEntry
 }
 
+func (h *mockTableHandle) GetDB() (handle.Database, error) {
+	return h.Txn.GetStore().GetDatabase(h.GetMeta().(*TableEntry).GetDB().GetName())
+}
+
 func newMockDBHandle(catalog *Catalog, txn txnif.AsyncTxn, entry *DBEntry) *mockDBHandle {
 	return &mockDBHandle{
 		TxnDatabase: &txnbase.TxnDatabase{
@@ -129,6 +132,10 @@ func (h *mockDBHandle) CreateRelation(def any) (rel handle.Relation, err error) 
 	h.Txn.GetStore().AddTxnEntry(0, tbl)
 	rel = newMockTableHandle(h.catalog, h.Txn, tbl)
 	return
+}
+
+func (h *mockDBHandle) TruncateByName(name string) (rel handle.Relation, err error) {
+	panic("not implemented")
 }
 
 func (h *mockDBHandle) DropRelationByName(name string) (rel handle.Relation, err error) {
@@ -193,13 +200,13 @@ func (txn *mockTxn) DropDatabase(name string) (handle.Database, error) {
 	return newMockDBHandle(txn.catalog, txn, entry), nil
 }
 
-func MockData(schema *Schema, rows uint32) *batch.Batch {
+func MockBatch(schema *Schema, rows int) *containers.Batch {
 	if schema.IsSingleSortKey() {
 		sortKey := schema.GetSingleSortKey()
-		return compute.MockBatchWithAttrs(schema.Types(), schema.Attrs(), uint64(rows), sortKey.Idx, nil)
+		return containers.MockBatchWithAttrs(schema.Types(), schema.Attrs(), schema.Nullables(), rows, sortKey.Idx, nil)
 	} else if schema.IsCompoundSortKey() {
-		return compute.MockBatchWithAttrs(schema.Types(), schema.Attrs(), uint64(rows), schema.HiddenKey.Idx, nil)
+		return containers.MockBatchWithAttrs(schema.Types(), schema.Attrs(), schema.Nullables(), rows, schema.HiddenKey.Idx, nil)
 	} else {
-		return compute.MockBatchWithAttrs(schema.Types(), schema.Attrs(), uint64(rows), schema.HiddenKey.Idx, nil)
+		return containers.MockBatchWithAttrs(schema.Types(), schema.Attrs(), schema.Nullables(), rows, schema.HiddenKey.Idx, nil)
 	}
 }

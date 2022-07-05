@@ -18,11 +18,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
-	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/catalog"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/common"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/compute"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/containers"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/iface/handle"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/iface/txnif"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/model"
@@ -156,11 +154,11 @@ func (h *txnRelation) Rows() int64 {
 func (h *txnRelation) Size(attr string) int64           { return 0 }
 func (h *txnRelation) GetCardinality(attr string) int64 { return 0 }
 
-func (h *txnRelation) BatchDedup(cols ...*vector.Vector) error {
+func (h *txnRelation) BatchDedup(cols ...containers.Vector) error {
 	return h.Txn.GetStore().BatchDedup(h.table.entry.GetDB().ID, h.table.entry.GetID(), cols...)
 }
 
-func (h *txnRelation) Append(data *batch.Batch) error {
+func (h *txnRelation) Append(data *containers.Batch) error {
 	return h.Txn.GetStore().Append(h.table.entry.GetDB().ID, h.table.entry.GetID(), data)
 }
 
@@ -215,24 +213,30 @@ func (h *txnRelation) UpdateByFilter(filter *handle.Filter, col uint16, v any) (
 		err = h.Update(id, row, col, v)
 		return
 	}
-	bat := batch.New(true, []string{})
+	bat := containers.NewBatch()
+	defer bat.Close()
 	for _, def := range schema.ColDefs {
 		if def.IsHidden() {
 			continue
 		}
-		colVal, err := h.table.GetValue(id, row, uint16(def.Idx))
-		if err != nil {
-			return err
+		var colVal any
+		if int(col) == def.Idx {
+			colVal = v
+		} else {
+			colVal, err = h.table.GetValue(id, row, uint16(def.Idx))
+			if err != nil {
+				return err
+			}
 		}
-		vec := vector.New(def.Type)
-		compute.AppendValue(vec, colVal)
-		bat.Vecs = append(bat.Vecs, vec)
-		bat.Attrs = append(bat.Attrs, def.Name)
+		vec := containers.MakeVector(def.Type, def.Nullable())
+		vec.Append(colVal)
+		bat.AddVector(def.Name, vec)
 	}
-	if err = h.table.RangeDelete(id, row, row); err != nil {
+	if err = h.table.RangeDelete(id, row, row, handle.DT_Normal); err != nil {
 		return
 	}
 	err = h.Append(bat)
+	// FIXME!: We need to revert previous delete if append fails.
 	return
 }
 
@@ -255,20 +259,20 @@ func (h *txnRelation) DeleteByFilter(filter *handle.Filter) (err error) {
 	if err != nil {
 		return
 	}
-	return h.RangeDelete(id, row, row)
+	return h.RangeDelete(id, row, row, handle.DT_Normal)
 }
 
-func (h *txnRelation) DeleteByHiddenKeys(keys *vector.Vector) (err error) {
+func (h *txnRelation) DeleteByHiddenKeys(keys containers.Vector) (err error) {
 	id := &common.ID{
 		TableID: h.table.entry.ID,
 	}
 	var row uint32
 	dbId := h.table.entry.GetDB().ID
-	err = compute.ForEachValue(keys, false, func(key any, _ uint32) (err error) {
+	err = keys.Foreach(func(key any, _ int) (err error) {
 		id.SegmentID, id.BlockID, row = model.DecodeHiddenKeyFromValue(key)
-		err = h.Txn.GetStore().RangeDelete(dbId, id, row, row)
+		err = h.Txn.GetStore().RangeDelete(dbId, id, row, row, handle.DT_Normal)
 		return
-	})
+	}, nil)
 	return
 }
 
@@ -279,11 +283,11 @@ func (h *txnRelation) DeleteByHiddenKey(key any) error {
 		SegmentID: sid,
 		BlockID:   bid,
 	}
-	return h.Txn.GetStore().RangeDelete(h.table.entry.GetDB().ID, id, row, row)
+	return h.Txn.GetStore().RangeDelete(h.table.entry.GetDB().ID, id, row, row, handle.DT_Normal)
 }
 
-func (h *txnRelation) RangeDelete(id *common.ID, start, end uint32) error {
-	return h.Txn.GetStore().RangeDelete(h.table.entry.GetDB().ID, id, start, end)
+func (h *txnRelation) RangeDelete(id *common.ID, start, end uint32, dt handle.DeleteType) error {
+	return h.Txn.GetStore().RangeDelete(h.table.entry.GetDB().ID, id, start, end, dt)
 }
 
 func (h *txnRelation) GetValueByHiddenKey(key any, col int) (any, error) {
@@ -302,4 +306,8 @@ func (h *txnRelation) GetValue(id *common.ID, row uint32, col uint16) (any, erro
 
 func (h *txnRelation) LogTxnEntry(entry txnif.TxnEntry, readed []*common.ID) (err error) {
 	return h.Txn.GetStore().LogTxnEntry(h.table.entry.GetDB().ID, h.table.entry.GetID(), entry, readed)
+}
+
+func (h *txnRelation) GetDB() (handle.Database, error) {
+	return h.Txn.GetStore().GetDatabase(h.GetMeta().(*catalog.TableEntry).GetDB().GetName())
 }
