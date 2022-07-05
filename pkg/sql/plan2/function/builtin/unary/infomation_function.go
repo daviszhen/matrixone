@@ -15,11 +15,16 @@
 package unary
 
 import (
+	"errors"
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
+)
+
+var (
+	errorParameterIsInvalid = errors.New("the parameter is invalid")
 )
 
 /*
@@ -266,7 +271,7 @@ func ICULIBVersion(vectors []*vector.Vector, proc *process.Process) (*vector.Vec
 
 // Value of the AUTOINCREMENT column for the last INSERT
 func LastInsertID(vectors []*vector.Vector, proc *process.Process) (*vector.Vector, error) {
-	return adapter(vectors, proc, types.T_varchar.ToType(), 0,
+	return adapter(vectors, proc, types.T_uint64.ToType(), 0,
 		func(proc *process.Process, params ...interface{}) (int, error) {
 			return 0, nil
 		},
