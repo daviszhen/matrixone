@@ -16,7 +16,6 @@ package unary
 
 import (
 	"errors"
-	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -70,41 +69,8 @@ func adapter(vectors []*vector.Vector,
 			vector.SetCol(resultVector, result)
 		}
 		return resultVector, nil
-	} else if parameterCount == 1 {
-
-		inputVector := vectors[0]
-		if inputVector.IsScalar() {
-			if inputVector.ConstVectorIsNull() {
-				return proc.AllocScalarNullVector(resultType), nil
-			}
-			//step 1: get the input value
-			//step 2: evaluate the capacity for result vector
-			//step 3: allocate the memory for the result
-			//step 4: evaluate the function and get the result
-			//step 5: fill the result vector
-
-			var result interface{}
-			switch inputVector.Typ.Oid {
-			case types.T_varchar, types.T_char:
-				//
-				//		inputValues := inputVector.Col.(*types.Bytes)
-				//TODO: get the result
-
-			}
-
-			resultVector := vector.NewConst(resultType)
-			vector.SetCol(resultVector, result)
-			return resultVector, nil
-		} else {
-			//step 1: get the input value
-			//step 2: evaluate the capacity for result vector
-			//step 3: allocate the memory for the result
-			//step 4: evaluate the function and get the result
-			//step 5: fill the result vector
-			return nil, fmt.Errorf("to implement")
-		}
 	}
-	return nil, nil
+	return nil, errorParameterIsInvalid
 }
 
 func fillString(str string, dst *types.Bytes) error {
