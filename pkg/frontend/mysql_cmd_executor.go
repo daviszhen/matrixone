@@ -1510,7 +1510,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		case *tree.BeginTransaction:
 			fromTxnCommand = TxnBegin
 			if isAutocommitOn {
-				err = txnHandler.StartByBeginIfNeeded()
+				err = txnHandler.StartByBegin()
 			} else {
 				//1.commit an existed txn
 				//2.start a txn started
