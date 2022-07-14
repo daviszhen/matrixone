@@ -1450,6 +1450,10 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	txnHandler := ses.GetTxnHandler()
 	ses.SetSql(sql)
 	ses.ep.Outfile = false
+	isAutocommitOn, err := ses.IsAutocommitOn()
+	if err != nil {
+		return err
+	}
 
 	proc := process.New(mheap.New(ses.GuestMmu))
 	proc.Id = mce.getNextProcessId()
@@ -1489,8 +1493,6 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	stmt := cws[0].GetAst()
 	mce.beforeRun(stmt)
 	defer mce.afterRun(stmt, beginInstant)
-	// it is weired to do for loop here, why don't we ensure that run only one sql once
-	// it seems that mysql protocol has done that for us when reading packet from tcp
 	type TxnCommand int
 	const (
 		TxnNoCommand TxnCommand = iota
@@ -1602,9 +1604,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			if err = mce.handleExplainStmt(st); err != nil {
 				goto handleFailed
 			}
-			//goto handleFailed
 		case *tree.ExplainAnalyze:
-			selfHandle = true
 			err = errors.New(errno.FeatureNotSupported, "not support explain analyze statement now")
 			goto handleFailed
 		case *tree.ShowColumns:
