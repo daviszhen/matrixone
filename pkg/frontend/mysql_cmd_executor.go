@@ -1509,27 +1509,53 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		switch stmt.(type) {
 		case *tree.BeginTransaction:
 			fromTxnCommand = TxnBegin
-			err = txnHandler.StartByBeginIfNeeded()
+			if isAutocommitOn {
+				err = txnHandler.StartByBeginIfNeeded()
+			} else {
+				//1.commit an existed txn
+				//2.start a txn started
+			}
+
 			if err != nil {
 				goto handleFailed
 			}
 		case *tree.CommitTransaction:
 			fromTxnCommand = TxnCommit
-			err = txnHandler.CommitAfterBegin()
+			if isAutocommitOn {
+				err = txnHandler.CommitAfterBegin()
+			} else {
+				//commit a txn started by begin or autocommit
+			}
+
 			if err != nil {
 				goto handleFailed
 			}
 		case *tree.RollbackTransaction:
 			fromTxnCommand = TxnRollback
-			err = txnHandler.Rollback()
+			if isAutocommitOn {
+				err = txnHandler.Rollback()
+			} else {
+				//rollback a txn started by begin or autocommit
+			}
+
 			if err != nil {
 				goto handleFailed
 			}
 		default:
-			_, err = txnHandler.StartByAutocommitIfNeeded()
-			if err != nil {
-				goto handleFailed
+			if isAutocommitOn {
+				fmt.Println("----autocommit on, begin")
+				_, err = txnHandler.StartByAutocommitIfNeeded()
+				if err != nil {
+					goto handleFailed
+				}
+			} else {
+				fmt.Println("----autocommit off,begin")
+				_, err = txnHandler.StartByAutocommitIfNeeded()
+				if err != nil {
+					goto handleFailed
+				}
 			}
+
 			logutil.Infof("start autocommit txn in default")
 		}
 
@@ -1779,31 +1805,45 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			if fromTxnCommand != TxnNoCommand {
 				goto handleNext
 			}
-			txnErr = txnHandler.CommitAfterAutocommitOnly()
-			if txnErr != nil {
-				return txnErr
-			}
-			switch stmt.(type) {
-			case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-				*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update,
-				*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-				*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
-				*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete:
-				resp := NewOkResponse(rspLen, 0, 0, 0, int(COM_QUERY), "")
-				if err := mce.GetSession().protocol.SendResponse(resp); err != nil {
-					return fmt.Errorf("routine send response failed. error:%v ", err)
+			if isAutocommitOn {
+				fmt.Println("+++++autocommit on, commit")
+				txnErr = txnHandler.CommitAfterAutocommitOnly()
+				if txnErr != nil {
+					return txnErr
 				}
+				switch stmt.(type) {
+				case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
+					*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update,
+					*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+					*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
+					*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete:
+					resp := NewOkResponse(rspLen, 0, 0, 0, int(COM_QUERY), "")
+					if err := mce.GetSession().protocol.SendResponse(resp); err != nil {
+						return fmt.Errorf("routine send response failed. error:%v ", err)
+					}
+				}
+			} else {
+				fmt.Println("+++++autocommit off, commit")
+
 			}
+
 		}
 		goto handleNext
 	handleFailed:
 		if !fromLoadData {
 			//the failures due to txn begin,commit,rollback do not need to be rollback.
 			if fromTxnCommand == TxnNoCommand {
-				txnErr = txnHandler.RollbackAfterAutocommitOnly()
-				if txnErr != nil {
-					return txnErr
+				if isAutocommitOn {
+					fmt.Println("======autocommit on, rollback")
+					txnErr = txnHandler.RollbackAfterAutocommitOnly()
+					if txnErr != nil {
+						return txnErr
+					}
+				} else {
+					fmt.Println("======autocommit off, rollback")
+
 				}
+
 			}
 		}
 		return err
