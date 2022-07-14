@@ -1070,8 +1070,8 @@ func (mce *MysqlCmdExecutor) handleShowVariables(sv *tree.ShowVariables) error {
 			return errorSystemVariableDoesNotExist
 		}
 		row[1] = value
-		if _, ok := gsv.GetType().(SystemVariableBoolType); ok {
-			if value == 1 {
+		if svbt, ok := gsv.GetType().(SystemVariableBoolType); ok {
+			if svbt.IsTrue(value) {
 				row[1] = "on"
 			} else {
 				row[1] = "off"

@@ -340,6 +340,23 @@ func (ses *Session) GetConnectionID() uint32 {
 	return ses.protocol.ConnectionID()
 }
 
+func (ses *Session) IsAutocommitOn() (bool, error) {
+	autoCommit := "autocommit"
+	value, err := ses.GetSessionVar(autoCommit)
+	if err != nil {
+		return false, err
+	}
+
+	def, ok := gSysVariables.GetDefinitionOfSysVar(autoCommit)
+	if !ok {
+		return false, errorSystemVariableDoesNotExist
+	}
+	if svbt, ok2 := def.GetType().(SystemVariableBoolType); ok2 {
+		return svbt.IsTrue(value), nil
+	}
+	return false, nil
+}
+
 func (th *TxnHandler) GetStorage() engine.Engine {
 	return th.storage
 }

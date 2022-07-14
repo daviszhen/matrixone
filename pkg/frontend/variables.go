@@ -182,6 +182,15 @@ func (svbt SystemVariableBoolType) Convert(value interface{}) (interface{}, erro
 	return nil, errorConvertToBoolFailed
 }
 
+func (svbt SystemVariableBoolType) IsTrue(v interface{}) bool {
+	if vv, ok := v.(int8); ok {
+		return vv == int8(1)
+	} else if vv2, ok2 := v.(string); ok2 {
+		return vv2 == "on"
+	}
+	return false
+}
+
 func (svbt SystemVariableBoolType) Type() types.T {
 	return types.T_bool
 }
@@ -784,7 +793,11 @@ func InitGlobalSystemVariables(gsv *GlobalSystemVariables) {
 		gsv.sysVars = make(map[string]interface{})
 	}
 	for _, def := range gSysVarsDefs {
-		gsv.sysVars[def.GetName()] = def.GetDefault()
+		value, err := def.Type.Convert(def.GetDefault())
+		if err != nil {
+			panic(err)
+		}
+		gsv.sysVars[def.GetName()] = value
 	}
 }
 
@@ -797,7 +810,11 @@ func (gsv *GlobalSystemVariables) AddSysVariables(vars []SystemVariable) {
 		lname := strings.ToLower(vv.GetName())
 		vv.Name = lname
 		gSysVarsDefs[lname] = vv
-		gsv.sysVars[lname] = vv.GetDefault()
+		value, err := vv.Type.Convert(vv.GetDefault())
+		if err != nil {
+			panic(err)
+		}
+		gsv.sysVars[lname] = value
 	}
 }
 
