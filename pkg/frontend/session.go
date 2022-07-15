@@ -480,9 +480,11 @@ func (th *TxnHandler) commit(option int) error {
 			th.switchToTxnState(TxnInit, err)
 		}
 	default:
-		err = th.taeTxn.Commit()
-		if err != nil {
-			logutil.Errorf("commit tae txn error:%v", err)
+		if th.IsInTaeTxn() {
+			err = th.taeTxn.Commit()
+			if err != nil {
+				logutil.Errorf("commit tae txn error:%v", err)
+			}
 		}
 
 		th.switchToTxnState(TxnInit, err)
@@ -536,9 +538,11 @@ func (th *TxnHandler) rollback(option int) error {
 			th.switchToTxnState(TxnInit, err)
 		}
 	default:
-		err = th.taeTxn.Rollback()
-		if err != nil {
-			logutil.Errorf("rollback tae txn error:%v", err)
+		if th.IsInTaeTxn() {
+			err = th.taeTxn.Rollback()
+			if err != nil {
+				logutil.Errorf("rollback tae txn error:%v", err)
+			}
 		}
 
 		th.switchToTxnState(TxnInit, err)
