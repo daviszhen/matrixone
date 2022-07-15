@@ -467,19 +467,11 @@ const (
 
 func (th *TxnHandler) commit(option int) error {
 	var err error
-	if th.IsInTaeTxn() {
-		switch th.getTxnState() {
-		case TxnBegan:
-			switch option {
-			case TxnCommitAfterBegan:
-				err = th.taeTxn.Commit()
-				if err != nil {
-					logutil.Errorf("commit tae txn error:%v", err)
-				}
-
-				th.switchToTxnState(TxnInit, err)
-			}
-		default:
+	//if th.IsInTaeTxn() {
+	switch th.getTxnState() {
+	case TxnBegan:
+		switch option {
+		case TxnCommitAfterBegan:
 			err = th.taeTxn.Commit()
 			if err != nil {
 				logutil.Errorf("commit tae txn error:%v", err)
@@ -487,7 +479,15 @@ func (th *TxnHandler) commit(option int) error {
 
 			th.switchToTxnState(TxnInit, err)
 		}
+	default:
+		err = th.taeTxn.Commit()
+		if err != nil {
+			logutil.Errorf("commit tae txn error:%v", err)
+		}
+
+		th.switchToTxnState(TxnInit, err)
 	}
+	//}
 	return err
 }
 
@@ -523,19 +523,11 @@ const (
 
 func (th *TxnHandler) rollback(option int) error {
 	var err error
-	if th.IsInTaeTxn() {
-		switch th.getTxnState() {
-		case TxnBegan:
-			switch option {
-			case TxnRollbackAfterBeganAndAutocommit:
-				err = th.taeTxn.Rollback()
-				if err != nil {
-					logutil.Errorf("rollback tae txn error:%v", err)
-				}
-
-				th.switchToTxnState(TxnInit, err)
-			}
-		default:
+	//if th.IsInTaeTxn() {
+	switch th.getTxnState() {
+	case TxnBegan:
+		switch option {
+		case TxnRollbackAfterBeganAndAutocommit:
 			err = th.taeTxn.Rollback()
 			if err != nil {
 				logutil.Errorf("rollback tae txn error:%v", err)
@@ -543,7 +535,15 @@ func (th *TxnHandler) rollback(option int) error {
 
 			th.switchToTxnState(TxnInit, err)
 		}
+	default:
+		err = th.taeTxn.Rollback()
+		if err != nil {
+			logutil.Errorf("rollback tae txn error:%v", err)
+		}
+
+		th.switchToTxnState(TxnInit, err)
 	}
+	//}
 	return err
 }
 
