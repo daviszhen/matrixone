@@ -1450,10 +1450,6 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	txnHandler := ses.GetTxnHandler()
 	ses.SetSql(sql)
 	ses.ep.Outfile = false
-	isAutocommitOn, err := ses.IsAutocommitOn()
-	if err != nil {
-		return err
-	}
 
 	proc := process.New(mheap.New(ses.GuestMmu))
 	proc.Id = mce.getNextProcessId()
@@ -1489,10 +1485,12 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	var fromLoadData = false
 	var txnErr error
 	var rspLen uint64
+	var isAutocommitOn bool
 
 	stmt := cws[0].GetAst()
 	mce.beforeRun(stmt)
 	defer mce.afterRun(stmt, beginInstant)
+
 	type TxnCommand int
 	const (
 		TxnNoCommand TxnCommand = iota
@@ -1500,11 +1498,17 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		TxnCommit
 		TxnRollback
 	)
+	var fromTxnCommand TxnCommand
+
 	for _, cw := range cws {
 		ses.Mrs = &MysqlResultSet{}
 		stmt := cw.GetAst()
 
-		var fromTxnCommand TxnCommand = TxnNoCommand
+		fromTxnCommand = TxnNoCommand
+		isAutocommitOn, err = ses.IsAutocommitOn()
+		if err != nil {
+			goto handleFailed
+		}
 		//check transaction states
 		switch stmt.(type) {
 		case *tree.BeginTransaction:

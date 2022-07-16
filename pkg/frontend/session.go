@@ -341,6 +341,8 @@ func (ses *Session) GetConnectionID() uint32 {
 }
 
 func (ses *Session) IsAutocommitOn() (bool, error) {
+	//TODO: remove it , only for test
+	//return true, nil
 	autoCommit := "autocommit"
 	value, err := ses.GetSessionVar(autoCommit)
 	if err != nil {
