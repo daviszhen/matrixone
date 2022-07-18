@@ -43,12 +43,11 @@ var (
 )
 
 const (
-	TxnInit       = iota // when the TxnState instance has just been created
-	TxnBegan             // when the txn has been started by the BEGIN statement
-	TxnAutocommit        // when the txn has been started by the automatic creation
-	TxnEnd               // when the txn has been committed by the COMMIT statement or the automatic commit or the ROLLBACK statement
-	TxnErr               // when the txn operation generates errors
-	TxnNil               // placeholder
+	TxnInit  = iota // when the TxnState instance has just been created
+	TxnBegan        // when the txn has been started by the BEGIN statement
+	TxnEnd          // when the txn has been committed by the COMMIT statement or the automatic commit or the ROLLBACK statement
+	TxnErr          // when the txn operation generates errors
+	TxnNil          // placeholder
 )
 
 // TxnState represents for Transaction Machine
@@ -400,6 +399,11 @@ func (th *TxnHandler) IsInTaeTxn() bool {
 	return true
 }
 
+// IsInTxnWithinBeginEnd checks the txn is started by BEGIN or not.
+func (th *TxnHandler) IsInTxnWithinBeginEnd() bool {
+	return th.IsInTaeTxn() && th.isTxnState(TxnBegan)
+}
+
 func (th *TxnHandler) IsTaeEngine() bool {
 	_, ok := th.storage.(moengine.TxnEngine)
 	return ok
@@ -464,7 +468,6 @@ func (th *TxnHandler) GetTxn() moengine.Txn {
 const (
 	TxnCommitAfterBegan = iota
 	TxnCommitAfterAutocommit
-	TxnCommitAfterAutocommitOnly
 )
 
 func (th *TxnHandler) commit(option int) error {
@@ -516,13 +519,13 @@ func (th *TxnHandler) CommitAfterAutocommit() error {
 func (th *TxnHandler) CommitAfterAutocommitOnly() error {
 	logutil.Infof("commit autocommit only")
 	var err error
-	err = th.commit(TxnCommitAfterAutocommitOnly)
+	err = th.commit(TxnCommitAfterAutocommit)
 	return err
 }
 
 const (
-	TxnRollbackAfterBeganAndAutocommit = iota
-	TxnRollbackAfterAutocommitOnly
+	TxnRollbackAfterBegan = iota
+	TxnRollbackAfterAutocommit
 )
 
 func (th *TxnHandler) rollback(option int) error {
@@ -531,7 +534,7 @@ func (th *TxnHandler) rollback(option int) error {
 	switch th.getTxnState() {
 	case TxnBegan:
 		switch option {
-		case TxnRollbackAfterBeganAndAutocommit:
+		case TxnRollbackAfterBegan:
 			err = th.taeTxn.Rollback()
 			if err != nil {
 				logutil.Errorf("rollback tae txn error:%v", err)
@@ -556,14 +559,14 @@ func (th *TxnHandler) rollback(option int) error {
 func (th *TxnHandler) Rollback() error {
 	logutil.Infof("rollback ")
 	var err error
-	err = th.rollback(TxnRollbackAfterBeganAndAutocommit)
+	err = th.rollback(TxnRollbackAfterBegan)
 	return err
 }
 
 func (th *TxnHandler) RollbackAfterAutocommitOnly() error {
 	logutil.Infof("rollback autocommit only")
 	var err error
-	err = th.rollback(TxnRollbackAfterAutocommitOnly)
+	err = th.rollback(TxnRollbackAfterAutocommit)
 	return err
 }
 

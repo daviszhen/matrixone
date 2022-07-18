@@ -55,6 +55,7 @@ var (
 	errorNumericTypeIsNotSupported                 = goErrors.New("the numeric type is not supported")
 	errorUnaryMinusForNonNumericTypeIsNotSupported = goErrors.New("unary minus for no numeric type is not supported")
 	errorFunctionIsNotSupported                    = goErrors.New("function is not supported")
+	errorChangeAutocommitInTxnBeginEnd             = goErrors.New("the system variable AUTOCOMMIT can not be changed in the transaction started by BEGIN")
 )
 
 //tableInfos of a database
@@ -959,6 +960,22 @@ func (mce *MysqlCmdExecutor) handleSetVar(sv *tree.SetVar) error {
 
 	setVarFunc := func(system, global bool, name string, value interface{}) error {
 		if system {
+			if strings.ToLower(name) == "autocommit" {
+				//if it is in the txn started by BEGIN, report a error
+				if ses.txnHandler.IsInTxnWithinBeginEnd() {
+					return errorChangeAutocommitInTxnBeginEnd
+				} else if ses.txnHandler.IsInTaeTxn() {
+					//TODO:
+					//1.read current value based on Global or Session variable.
+					/*2.
+					off -> on : commit the uncommitted txn
+					on -> off : commit the uncommitted txn
+					on -> on : do nothing
+					off -> off :do nothing
+					*/
+					//3.operation on txn
+				} //it is not in the txn.
+			}
 			if global {
 				err = ses.SetGlobalVar(name, value)
 				if err != nil {
@@ -1512,12 +1529,25 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		//check transaction states
 		switch stmt.(type) {
 		case *tree.BeginTransaction:
-			fromTxnCommand = TxnBegin
+
 			if isAutocommitOn {
+				fromTxnCommand = TxnBegin
 				err = txnHandler.StartByBegin()
 			} else {
-				//1.commit an existed txn
+				//1.commit an existed txn started by BEGIN
+				if txnHandler.IsInTaeTxn() {
+					if txnHandler.IsInTxnWithinBeginEnd() {
+						err = txnHandler.CommitAfterBegin()
+					} else {
+						err = txnHandler.CommitAfterAutocommit()
+					}
+				}
+				if err != nil {
+					goto handleFailed
+				}
 				//2.start a txn started
+				fromTxnCommand = TxnBegin
+				err = txnHandler.StartByBegin()
 			}
 
 			if err != nil {
@@ -1529,6 +1559,13 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 				err = txnHandler.CommitAfterBegin()
 			} else {
 				//commit a txn started by begin or autocommit
+				if txnHandler.IsInTaeTxn() {
+					if txnHandler.IsInTxnWithinBeginEnd() {
+						err = txnHandler.CommitAfterBegin()
+					} else {
+						err = txnHandler.CommitAfterAutocommit()
+					}
+				}
 			}
 
 			if err != nil {
@@ -1540,6 +1577,13 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 				err = txnHandler.Rollback()
 			} else {
 				//rollback a txn started by begin or autocommit
+				if txnHandler.IsInTaeTxn() {
+					if txnHandler.IsInTxnWithinBeginEnd() {
+						err = txnHandler.Rollback()
+					} else {
+						err = txnHandler.RollbackAfterAutocommitOnly()
+					}
+				}
 			}
 
 			if err != nil {
@@ -1554,7 +1598,8 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 				}
 			} else {
 				fmt.Println("----autocommit off,begin")
-				_, err = txnHandler.StartByAutocommitIfNeeded()
+				//in the state 'autocommit = off', start a txn if needed
+				err = txnHandler.StartByBegin()
 				if err != nil {
 					goto handleFailed
 				}
