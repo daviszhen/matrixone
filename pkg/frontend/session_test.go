@@ -77,16 +77,16 @@ func TestTxnHandler(t *testing.T) {
 		convey.So(err, convey.ShouldBeNil)
 
 		err = txn.StartByBegin()
-		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnBegan)
 
 		err = txn.StartByAutocommit()
-		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnErr)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnBegan)
 
 		err = txn.CleanTxn()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnBegan)
 	})
 
 	convey.Convey("tae begin ... commit ... commit", t, func() {
@@ -105,11 +105,11 @@ func TestTxnHandler(t *testing.T) {
 
 		err = txn.CommitAfterBegin()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnEnd)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
 
 		err = txn.CommitAfterBegin()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnEnd)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
 
 		err = txn.CleanTxn()
 		convey.So(err, convey.ShouldBeNil)
@@ -133,11 +133,11 @@ func TestTxnHandler(t *testing.T) {
 
 		err = txn.Rollback()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnEnd)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
 
 		err = txn.Rollback()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnEnd)
+		convey.So(txn.getTxnState(), convey.ShouldEqual, TxnInit)
 
 		err = txn.CleanTxn()
 		convey.So(err, convey.ShouldBeNil)
@@ -216,7 +216,7 @@ func TestTxnHandler_StartByBegin(t *testing.T) {
 		txn2 := InitTxnHandler(storage)
 		err = txn2.StartByBegin()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn2.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(txn2.txnState.isState(TxnInit), convey.ShouldBeTrue)
 		convey.So(txn2.taeTxn, convey.ShouldNotBeNil)
 
 		txn3 := InitTxnHandler(storage)
@@ -230,7 +230,7 @@ func TestTxnHandler_StartByBegin(t *testing.T) {
 		txn4.txnState.switchToState(TxnEnd, nil)
 		err = txn4.StartByBegin()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn4.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(txn4.txnState.isState(TxnEnd), convey.ShouldBeTrue)
 		convey.So(txn4.taeTxn, convey.ShouldNotBeNil)
 	})
 
@@ -241,26 +241,36 @@ func TestTxnHandler_StartByBegin(t *testing.T) {
 		taeTxn := mock_frontend.NewMockTxn(ctrl)
 		taeTxn.EXPECT().String().Return("").AnyTimes()
 		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		cnt := 0
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				cnt++
+				if cnt%2 != 0 {
+					return taeTxn, nil
+				} else {
+					return nil, errors.New("startTxn failed")
+				}
+			}).AnyTimes()
 
 		txn := InitTxnHandler(storage)
 		txn.txnState.switchToState(TxnBegan, nil)
 		err := txn.StartByBegin()
-		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.txnState.isState(TxnBegan), convey.ShouldBeTrue)
 		convey.So(txn.taeTxn, convey.ShouldNotBeNil)
 
 		txn2 := InitTxnHandler(storage)
 		txn2.txnState.switchToState(TxnAutocommit, nil)
 		err = txn2.StartByBegin()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn2.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(txn2.txnState.isState(TxnAutocommit), convey.ShouldBeTrue)
 		convey.So(txn2.taeTxn, convey.ShouldNotBeNil)
 
 		txn3 := InitTxnHandler(storage)
 		txn3.txnState.switchToState(TxnErr, nil)
 		err = txn3.StartByBegin()
-		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn3.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn3.txnState.isState(TxnBegan), convey.ShouldBeTrue)
 		convey.So(txn3.taeTxn, convey.ShouldNotBeNil)
 	})
 }
@@ -270,7 +280,7 @@ func TestTxnHandler_StartByAutocommit(t *testing.T) {
 		txn := InitTxnHandler(nil)
 		err := txn.StartByAutocommit()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.txnState.isState(TxnAutocommit), convey.ShouldBeTrue)
+		convey.So(txn.txnState.isState(TxnInit), convey.ShouldBeTrue)
 		convey.So(txn.taeTxn, convey.ShouldNotBeNil)
 	})
 
@@ -281,7 +291,7 @@ func TestTxnHandler_StartByAutocommit(t *testing.T) {
 		txn := InitTxnHandler(storage)
 		err := txn.StartByAutocommit()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.txnState.isState(TxnAutocommit), convey.ShouldBeTrue)
+		convey.So(txn.txnState.isState(TxnInit), convey.ShouldBeTrue)
 		convey.So(txn.taeTxn, convey.ShouldNotBeNil)
 	})
 
@@ -306,27 +316,27 @@ func TestTxnHandler_StartByAutocommit(t *testing.T) {
 		txn := InitTxnHandler(storage)
 		err := txn.StartByAutocommit()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn.txnState.isState(TxnAutocommit), convey.ShouldBeTrue)
+		convey.So(txn.txnState.isState(TxnInit), convey.ShouldBeTrue)
 		convey.So(txn.taeTxn, convey.ShouldNotBeNil)
 
 		txn2 := InitTxnHandler(storage)
 		err = txn2.StartByAutocommit()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn2.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(txn2.txnState.isState(TxnInit), convey.ShouldBeTrue)
 		convey.So(txn2.taeTxn, convey.ShouldNotBeNil)
 
 		txn3 := InitTxnHandler(storage)
 		txn3.txnState.switchToState(TxnEnd, nil)
 		err = txn3.StartByAutocommit()
 		convey.So(err, convey.ShouldBeNil)
-		convey.So(txn3.txnState.isState(TxnAutocommit), convey.ShouldBeTrue)
+		convey.So(txn3.txnState.isState(TxnEnd), convey.ShouldBeTrue)
 		convey.So(txn3.taeTxn, convey.ShouldNotBeNil)
 
 		txn4 := InitTxnHandler(storage)
 		txn4.txnState.switchToState(TxnEnd, nil)
 		err = txn4.StartByAutocommit()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn4.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(txn4.txnState.isState(TxnEnd), convey.ShouldBeTrue)
 		convey.So(txn4.taeTxn, convey.ShouldNotBeNil)
 	})
 
@@ -337,25 +347,35 @@ func TestTxnHandler_StartByAutocommit(t *testing.T) {
 		taeTxn := mock_frontend.NewMockTxn(ctrl)
 		taeTxn.EXPECT().String().Return("").AnyTimes()
 		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		cnt := 0
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				cnt++
+				if cnt%2 != 0 {
+					return taeTxn, nil
+				} else {
+					return nil, errors.New("startTxn failed")
+				}
+			}).AnyTimes()
 
 		txn := InitTxnHandler(storage)
 		txn.txnState.switchToState(TxnBegan, nil)
 		err := txn.StartByAutocommit()
-		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(txn.txnState.isState(TxnBegan), convey.ShouldBeTrue)
 		convey.So(txn.taeTxn, convey.ShouldNotBeNil)
 
 		txn2 := InitTxnHandler(storage)
 		txn2.txnState.switchToState(TxnAutocommit, nil)
 		err = txn2.StartByAutocommit()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.So(txn2.txnState.isState(TxnErr), convey.ShouldBeTrue)
+		convey.So(txn2.txnState.isState(TxnAutocommit), convey.ShouldBeTrue)
 		convey.So(txn2.taeTxn, convey.ShouldNotBeNil)
 
 		txn3 := InitTxnHandler(storage)
 		txn3.txnState.switchToState(TxnErr, nil)
 		err = txn3.StartByAutocommit()
-		convey.So(err, convey.ShouldNotBeNil)
+		convey.So(err, convey.ShouldBeNil)
 		convey.So(txn3.txnState.isState(TxnErr), convey.ShouldBeTrue)
 		convey.So(txn3.taeTxn, convey.ShouldNotBeNil)
 	})

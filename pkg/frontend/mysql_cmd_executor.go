@@ -961,7 +961,7 @@ func (mce *MysqlCmdExecutor) handleSetVar(sv *tree.SetVar) error {
 	setVarFunc := func(system, global bool, name string, value interface{}) error {
 		if system {
 			if strings.ToLower(name) == "autocommit" {
-				//if it is in the txn started by BEGIN, report a error
+				//if it is in the txn started by BEGIN, report an error
 				if ses.txnHandler.IsInTxnWithinBeginEnd() {
 					return errorChangeAutocommitInTxnBeginEnd
 				} else if ses.txnHandler.IsInTaeTxn() {
@@ -973,6 +973,50 @@ func (mce *MysqlCmdExecutor) handleSetVar(sv *tree.SetVar) error {
 					on -> on : do nothing
 					off -> off :do nothing
 					*/
+					//only process session variable
+					if !global {
+						var autocommitCurrentValue interface{}
+						autocommitCurrentValue, err = ses.GetSessionVar("autocommit")
+						if err != nil {
+							return err
+						}
+						gsv, ok := gSysVariables.GetDefinitionOfSysVar(name)
+						if !ok {
+							return errorSystemVariableDoesNotExist
+						}
+						var currentValue bool
+						var expectValue bool
+						if svbt, ok := gsv.GetType().(SystemVariableBoolType); ok {
+							if svbt.IsTrue(autocommitCurrentValue) {
+								currentValue = true
+							} else {
+								currentValue = false
+							}
+							if svbt.IsTrue(value) {
+								expectValue = true
+							} else {
+								expectValue = false
+							}
+						}
+						//off -> on
+						if !currentValue && expectValue {
+							//commit the uncommitted txn
+							err = ses.txnHandler.CommitAfterAutocommit()
+							if err != nil {
+								return err
+							}
+						} else if currentValue && !expectValue { //on -> off
+							//commit the uncommitted txn
+							err = ses.txnHandler.CommitAfterAutocommit()
+							if err != nil {
+								return err
+							}
+						} else if currentValue && expectValue { //on -> on
+							//do nothing
+						} else { //off -> off
+							//do nothing
+						}
+					}
 					//3.operation on txn
 				} //it is not in the txn.
 			}
@@ -1503,6 +1547,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	var txnErr error
 	var rspLen uint64
 	var isAutocommitOn bool
+	var autocommitErr error
 
 	stmt := cws[0].GetAst()
 	mce.beforeRun(stmt)
@@ -1529,7 +1574,6 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		//check transaction states
 		switch stmt.(type) {
 		case *tree.BeginTransaction:
-
 			if isAutocommitOn {
 				fromTxnCommand = TxnBegin
 				err = txnHandler.StartByBegin()
@@ -1599,7 +1643,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			} else {
 				fmt.Println("----autocommit off,begin")
 				//in the state 'autocommit = off', start a txn if needed
-				err = txnHandler.StartByBegin()
+				_, err = txnHandler.StartByAutocommitIfNeeded()
 				if err != nil {
 					goto handleFailed
 				}
@@ -1854,34 +1898,40 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			if fromTxnCommand != TxnNoCommand {
 				goto handleNext
 			}
+			isAutocommitOn, autocommitErr = ses.IsAutocommitOn()
+			if autocommitErr != nil {
+				goto handleFailed
+			}
 			if isAutocommitOn {
 				fmt.Println("+++++autocommit on, commit")
 				txnErr = txnHandler.CommitAfterAutocommitOnly()
 				if txnErr != nil {
 					return txnErr
 				}
-				switch stmt.(type) {
-				case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-					*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update,
-					*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-					*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
-					*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete:
-					resp := NewOkResponse(rspLen, 0, 0, 0, int(COM_QUERY), "")
-					if err := mce.GetSession().protocol.SendResponse(resp); err != nil {
-						return fmt.Errorf("routine send response failed. error:%v ", err)
-					}
-				}
 			} else {
 				fmt.Println("+++++autocommit off, commit")
-
 			}
-
+			switch stmt.(type) {
+			case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
+				*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update,
+				*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+				*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
+				*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete:
+				resp := NewOkResponse(rspLen, 0, 0, 0, int(COM_QUERY), "")
+				if err := mce.GetSession().protocol.SendResponse(resp); err != nil {
+					return fmt.Errorf("routine send response failed. error:%v ", err)
+				}
+			}
 		}
 		goto handleNext
 	handleFailed:
 		if !fromLoadData {
 			//the failures due to txn begin,commit,rollback do not need to be rollback.
 			if fromTxnCommand == TxnNoCommand {
+				isAutocommitOn, autocommitErr = ses.IsAutocommitOn()
+				if autocommitErr != nil {
+					panic(autocommitErr)
+				}
 				if isAutocommitOn {
 					fmt.Println("======autocommit on, rollback")
 					txnErr = txnHandler.RollbackAfterAutocommitOnly()
@@ -2050,6 +2100,21 @@ func (mce *MysqlCmdExecutor) Close() {
 	}
 	if mce.exportDataClose != nil {
 		mce.exportDataClose.Close()
+	}
+
+	ses := mce.GetSession()
+	if ses.txnHandler.IsInTaeTxn() {
+		if ses.txnHandler.IsInTxnWithinBeginEnd() {
+			err := ses.txnHandler.Rollback()
+			if err != nil {
+				logutil.Errorf("rollback txn(begin) in Close() failed.err:%v", err)
+			}
+		} else {
+			err := ses.txnHandler.RollbackAfterAutocommitOnly()
+			if err != nil {
+				logutil.Errorf("rollback txn(autocommit) in Close() failed.err:%v", err)
+			}
+		}
 	}
 }
 

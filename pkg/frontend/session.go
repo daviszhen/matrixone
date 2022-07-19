@@ -45,9 +45,10 @@ var (
 const (
 	TxnInit  = iota // when the TxnState instance has just been created
 	TxnBegan        // when the txn has been started by the BEGIN statement
-	TxnEnd          // when the txn has been committed by the COMMIT statement or the automatic commit or the ROLLBACK statement
-	TxnErr          // when the txn operation generates errors
-	TxnNil          // placeholder
+	TxnAutocommit
+	TxnEnd // when the txn has been committed by the COMMIT statement or the automatic commit or the ROLLBACK statement
+	TxnErr // when the txn operation generates errors
+	TxnNil // placeholder
 )
 
 // TxnState represents for Transaction Machine
@@ -472,7 +473,6 @@ const (
 
 func (th *TxnHandler) commit(option int) error {
 	var err error
-	//if th.IsInTaeTxn() {
 	switch th.getTxnState() {
 	case TxnBegan:
 		switch option {
@@ -482,7 +482,8 @@ func (th *TxnHandler) commit(option int) error {
 				logutil.Errorf("commit tae txn error:%v", err)
 			}
 
-			th.switchToTxnState(TxnInit, err)
+			th.switchToTxnState(TxnEnd, err)
+			_ = th.CleanTxn()
 		}
 	default:
 		if th.IsInTaeTxn() {
@@ -492,9 +493,9 @@ func (th *TxnHandler) commit(option int) error {
 			}
 		}
 
-		th.switchToTxnState(TxnInit, err)
+		th.switchToTxnState(TxnEnd, err)
+		_ = th.CleanTxn()
 	}
-	//}
 	return err
 }
 
@@ -540,7 +541,8 @@ func (th *TxnHandler) rollback(option int) error {
 				logutil.Errorf("rollback tae txn error:%v", err)
 			}
 
-			th.switchToTxnState(TxnInit, err)
+			th.switchToTxnState(TxnEnd, err)
+			_ = th.CleanTxn()
 		}
 	default:
 		if th.IsInTaeTxn() {
@@ -550,7 +552,8 @@ func (th *TxnHandler) rollback(option int) error {
 			}
 		}
 
-		th.switchToTxnState(TxnInit, err)
+		th.switchToTxnState(TxnEnd, err)
+		_ = th.CleanTxn()
 	}
 	//}
 	return err
@@ -575,7 +578,7 @@ func (th *TxnHandler) RollbackAfterAutocommitOnly() error {
 func (th *TxnHandler) CleanTxn() error {
 	logutil.Infof("clean tae txn")
 	switch th.txnState.getState() {
-	case TxnInit, TxnEnd:
+	case TxnEnd:
 		th.taeTxn = InitTaeTxnDumpImpl()
 		th.txnState.switchToState(TxnInit, nil)
 	case TxnErr:
