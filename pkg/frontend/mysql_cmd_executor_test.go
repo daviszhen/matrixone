@@ -2,7 +2,9 @@ package frontend
 
 import (
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/moengine"
 	"testing"
 
 	"github.com/fagongzi/goetty/buf"
@@ -695,5 +697,342 @@ func Test_GetComputationWrapper(t *testing.T) {
 		cw, err := GetComputationWrapper(db, sql, user, eng, proc, ses)
 		convey.So(cw, convey.ShouldNotBeEmpty)
 		convey.So(err, convey.ShouldBeNil)
+	})
+}
+
+func Test_autocommit_on(t *testing.T) {
+	convey.Convey("set autocommit = 1->1->0->0->1 ", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		eng := mock_frontend.NewMockEngine(ctrl)
+		eng.EXPECT().Database(gomock.Any(), nil).Return(nil, nil).AnyTimes()
+
+		ioses := mock_frontend.NewMockIOSession(ctrl)
+		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
+		ioses.EXPECT().WriteAndFlush(gomock.Any()).Return(nil).AnyTimes()
+
+		runner := mock_frontend.NewMockComputationRunner(ctrl)
+		runner.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+
+		cws := []ComputationWrapper{}
+
+		sets := []string{
+			"set autocommit = 1;",
+			"set autocommit = 0;",
+			"set autocommit = 0;",
+			"set autocommit = 1;",
+		}
+
+		for _, set := range sets {
+			set1 := mock_frontend.NewMockComputationWrapper(ctrl)
+			stmts, err := parsers.Parse(dialect.MYSQL, set)
+			convey.So(err, convey.ShouldBeNil)
+			set1.EXPECT().GetAst().Return(stmts[0]).AnyTimes()
+			set1.EXPECT().SetDatabaseName(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
+			set1.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().GetAffectedRows().Return(uint64(0)).AnyTimes()
+			cws = append(cws, set1)
+		}
+
+		stubs := gostub.StubFunc(&GetComputationWrapper, cws, nil)
+		defer stubs.Reset()
+
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng)
+		if err != nil {
+			t.Error(err)
+		}
+
+		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
+
+		guestMmu := guest.New(pu.SV.GetGuestMmuLimitation(), pu.HostMmu)
+
+		var gSys GlobalSystemVariables
+		InitGlobalSystemVariables(&gSys)
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		taeTxn.EXPECT().Commit().Return(nil).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				return taeTxn, nil
+			}).AnyTimes()
+
+		config.StorageEngine = storage
+
+		defer func() {
+			config.StorageEngine = nil
+		}()
+
+		ses := NewSession(proto, guestMmu, pu.Mempool, pu, &gSys)
+
+		mce := NewMysqlCmdExecutor()
+
+		mce.PrepareSessionBeforeExecRequest(ses)
+
+		req := &Request{
+			cmd:  int(COM_QUERY),
+			data: []byte("test anywhere"),
+		}
+
+		resp, err := mce.ExecRequest(req)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(resp, convey.ShouldBeNil)
+	})
+
+	convey.Convey("set autocommit = 1; begin; end; ", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		eng := mock_frontend.NewMockEngine(ctrl)
+		eng.EXPECT().Database(gomock.Any(), nil).Return(nil, nil).AnyTimes()
+
+		ioses := mock_frontend.NewMockIOSession(ctrl)
+		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
+		ioses.EXPECT().WriteAndFlush(gomock.Any()).Return(nil).AnyTimes()
+
+		runner := mock_frontend.NewMockComputationRunner(ctrl)
+		runner.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+
+		cws := []ComputationWrapper{}
+
+		sets := []string{
+			"set autocommit = 1;",
+			"begin;",
+			"commit;",
+			"begin;",
+			"rollback;",
+			"begin;",
+			"set autocommit = 1;",
+		}
+
+		for _, set := range sets {
+			set1 := mock_frontend.NewMockComputationWrapper(ctrl)
+			stmts, err := parsers.Parse(dialect.MYSQL, set)
+			convey.So(err, convey.ShouldBeNil)
+			set1.EXPECT().GetAst().Return(stmts[0]).AnyTimes()
+			set1.EXPECT().SetDatabaseName(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
+			set1.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().GetAffectedRows().Return(uint64(0)).AnyTimes()
+			cws = append(cws, set1)
+		}
+
+		stubs := gostub.StubFunc(&GetComputationWrapper, cws, nil)
+		defer stubs.Reset()
+
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng)
+		if err != nil {
+			t.Error(err)
+		}
+
+		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
+
+		guestMmu := guest.New(pu.SV.GetGuestMmuLimitation(), pu.HostMmu)
+
+		var gSys GlobalSystemVariables
+		InitGlobalSystemVariables(&gSys)
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		taeTxn.EXPECT().Commit().Return(nil).AnyTimes()
+		taeTxn.EXPECT().Rollback().Return(nil).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				return taeTxn, nil
+			}).AnyTimes()
+
+		config.StorageEngine = storage
+
+		defer func() {
+			config.StorageEngine = nil
+		}()
+
+		ses := NewSession(proto, guestMmu, pu.Mempool, pu, &gSys)
+
+		mce := NewMysqlCmdExecutor()
+
+		mce.PrepareSessionBeforeExecRequest(ses)
+
+		req := &Request{
+			cmd:  int(COM_QUERY),
+			data: []byte("test anywhere"),
+		}
+
+		resp, err := mce.ExecRequest(req)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(resp, convey.ShouldNotBeNil)
+	})
+}
+
+func Test_autocommit_off(t *testing.T) {
+	convey.Convey("set autocommit = 0->0->1->1->0 ", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		eng := mock_frontend.NewMockEngine(ctrl)
+		eng.EXPECT().Database(gomock.Any(), nil).Return(nil, nil).AnyTimes()
+
+		ioses := mock_frontend.NewMockIOSession(ctrl)
+		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
+		ioses.EXPECT().WriteAndFlush(gomock.Any()).Return(nil).AnyTimes()
+
+		runner := mock_frontend.NewMockComputationRunner(ctrl)
+		runner.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+
+		cws := []ComputationWrapper{}
+
+		sets := []string{
+			"set autocommit = 0;",
+			"set autocommit = 0;",
+			"set autocommit = 1;",
+			"set autocommit = 1;",
+			"set autocommit = 0;",
+		}
+
+		for _, set := range sets {
+			set1 := mock_frontend.NewMockComputationWrapper(ctrl)
+			stmts, err := parsers.Parse(dialect.MYSQL, set)
+			convey.So(err, convey.ShouldBeNil)
+			set1.EXPECT().GetAst().Return(stmts[0]).AnyTimes()
+			set1.EXPECT().SetDatabaseName(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
+			set1.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().GetAffectedRows().Return(uint64(0)).AnyTimes()
+			cws = append(cws, set1)
+		}
+
+		stubs := gostub.StubFunc(&GetComputationWrapper, cws, nil)
+		defer stubs.Reset()
+
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng)
+		if err != nil {
+			t.Error(err)
+		}
+
+		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
+
+		guestMmu := guest.New(pu.SV.GetGuestMmuLimitation(), pu.HostMmu)
+
+		var gSys GlobalSystemVariables
+		InitGlobalSystemVariables(&gSys)
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		taeTxn.EXPECT().Commit().Return(nil).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				return taeTxn, nil
+			}).AnyTimes()
+
+		config.StorageEngine = storage
+
+		defer func() {
+			config.StorageEngine = nil
+		}()
+
+		ses := NewSession(proto, guestMmu, pu.Mempool, pu, &gSys)
+
+		mce := NewMysqlCmdExecutor()
+
+		mce.PrepareSessionBeforeExecRequest(ses)
+
+		req := &Request{
+			cmd:  int(COM_QUERY),
+			data: []byte("test anywhere"),
+		}
+
+		resp, err := mce.ExecRequest(req)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(resp, convey.ShouldBeNil)
+	})
+
+	convey.Convey("set autocommit = 0; begin; end; ", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		eng := mock_frontend.NewMockEngine(ctrl)
+		eng.EXPECT().Database(gomock.Any(), nil).Return(nil, nil).AnyTimes()
+
+		ioses := mock_frontend.NewMockIOSession(ctrl)
+		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
+		ioses.EXPECT().WriteAndFlush(gomock.Any()).Return(nil).AnyTimes()
+
+		runner := mock_frontend.NewMockComputationRunner(ctrl)
+		runner.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+
+		cws := []ComputationWrapper{}
+
+		sets := []string{
+			"set autocommit = 0;",
+			"begin;",
+			"commit;",
+			"begin;",
+			"rollback;",
+			"begin;",
+			"set autocommit = 1;",
+		}
+
+		for _, set := range sets {
+			set1 := mock_frontend.NewMockComputationWrapper(ctrl)
+			stmts, err := parsers.Parse(dialect.MYSQL, set)
+			convey.So(err, convey.ShouldBeNil)
+			set1.EXPECT().GetAst().Return(stmts[0]).AnyTimes()
+			set1.EXPECT().SetDatabaseName(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
+			set1.EXPECT().Run(gomock.Any()).Return(nil).AnyTimes()
+			set1.EXPECT().GetAffectedRows().Return(uint64(0)).AnyTimes()
+			cws = append(cws, set1)
+		}
+
+		stubs := gostub.StubFunc(&GetComputationWrapper, cws, nil)
+		defer stubs.Reset()
+
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng)
+		if err != nil {
+			t.Error(err)
+		}
+
+		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
+
+		guestMmu := guest.New(pu.SV.GetGuestMmuLimitation(), pu.HostMmu)
+
+		var gSys GlobalSystemVariables
+		InitGlobalSystemVariables(&gSys)
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		taeTxn.EXPECT().Commit().Return(nil).AnyTimes()
+		taeTxn.EXPECT().Rollback().Return(nil).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				return taeTxn, nil
+			}).AnyTimes()
+
+		config.StorageEngine = storage
+
+		defer func() {
+			config.StorageEngine = nil
+		}()
+
+		ses := NewSession(proto, guestMmu, pu.Mempool, pu, &gSys)
+
+		mce := NewMysqlCmdExecutor()
+
+		mce.PrepareSessionBeforeExecRequest(ses)
+
+		req := &Request{
+			cmd:  int(COM_QUERY),
+			data: []byte("test anywhere"),
+		}
+
+		resp, err := mce.ExecRequest(req)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(resp, convey.ShouldNotBeNil)
 	})
 }
