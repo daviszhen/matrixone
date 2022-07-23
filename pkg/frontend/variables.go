@@ -182,6 +182,17 @@ func (svbt SystemVariableBoolType) Convert(value interface{}) (interface{}, erro
 	return nil, errorConvertToBoolFailed
 }
 
+func (svbt SystemVariableBoolType) IsTrue(v interface{}) bool {
+	if vv, ok := v.(int8); ok {
+		return vv == int8(1)
+	} else if vv3, ok3 := v.(int64); ok3 {
+		return vv3 == int64(1)
+	} else if vv2, ok2 := v.(string); ok2 {
+		return strings.ToLower(vv2) == "on"
+	}
+	return false
+}
+
 func (svbt SystemVariableBoolType) Type() types.T {
 	return types.T_bool
 }

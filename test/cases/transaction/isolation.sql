@@ -281,8 +281,8 @@ select * from test_11;
 select * from test_11;
 -- @session}
 
-begin;
 drop table test_11;
+begin;
 select * from test_11;
 -- @session:id=1{
 select * from test_11;

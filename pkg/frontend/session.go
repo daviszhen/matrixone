@@ -145,6 +145,8 @@ type TxnHandler struct {
 	storage  engine.Engine
 	taeTxn   moengine.Txn
 	txnState *TxnState
+	txn      moengine.Txn
+	ses      *Session
 }
 
 func InitTxnHandler(storage engine.Engine) *TxnHandler {
@@ -185,6 +187,12 @@ type Session struct {
 	sysVars         map[string]interface{}
 	userDefinedVars map[string]interface{}
 	gSysVars        *GlobalSystemVariables
+
+	//the server status
+	serverStatus uint16
+
+	//the option bits
+	optionBits uint32
 }
 
 func NewSession(proto Protocol, gm *guest.Mmu, mp *mempool.Mempool, PU *config.ParameterUnit, gSysVars *GlobalSystemVariables) *Session {
@@ -206,8 +214,12 @@ func NewSession(proto Protocol, gm *guest.Mmu, mp *mempool.Mempool, PU *config.P
 		sysVars:         gSysVars.CopySysVarsToSession(),
 		userDefinedVars: make(map[string]interface{}),
 		gSysVars:        gSysVars,
+		serverStatus:    0,
+		optionBits:      0,
 	}
+	ses.SetOptionBits(OPTION_AUTOCOMMIT)
 	ses.txnCompileCtx.SetSession(ses)
+	ses.txnHandler.SetSession(ses)
 	return ses
 }
 
@@ -341,6 +353,235 @@ func (ses *Session) GetConnectionID() uint32 {
 	return ses.protocol.ConnectionID()
 }
 
+func (ses *Session) SetOptionBits(bit uint32) {
+	ses.optionBits |= bit
+}
+
+func (ses *Session) ClearOptionBits(bit uint32) {
+	ses.optionBits &= ^bit
+}
+
+func (ses *Session) OptionBitsIsSet(bit uint32) bool {
+	return ses.optionBits&bit != 0
+}
+
+func (ses *Session) SetServerStatus(bit uint16) {
+	ses.serverStatus |= bit
+}
+
+func (ses *Session) ClearServerStatus(bit uint16) {
+	ses.serverStatus &= ^bit
+}
+
+func (ses *Session) ServerStatusIsSet(bit uint16) bool {
+	return ses.serverStatus&bit != 0
+}
+
+/*
+InMultiStmtTransactionMode checks the session is in multi-statement transaction mode.
+OPTION_NOT_AUTOCOMMIT: After the autocommit is off, the multi-statement transaction is
+started implicitly by the first statement of the transaction.
+OPTION_BEGAN: Whenever the autocommit is on or off, the multi-statement transaction is
+started explicitly by the BEGIN statement.
+
+But it does not denote the transaction is active or not.
+*/
+func (ses *Session) InMultiStmtTransactionMode() bool {
+	return ses.OptionBitsIsSet(OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)
+}
+
+/*
+InActiveMultiStmtTransaction checks the session is in multi-statement transaction mode
+and there is an active transaction.
+
+But sometimes, the session does not start an active transaction even if it is in multi-
+statement transaction mode.
+
+For example: there is no active transaction.
+set autocommit = 0;
+select 1;
+
+For example: there is an active transaction.
+begin;
+select 1;
+
+When the statement starts the multi-statement transaction(select * from table), this flag
+won't be set until we access the tables.
+*/
+func (ses *Session) InActiveMultiStmtTransaction() bool {
+	return ses.ServerStatusIsSet(SERVER_STATUS_IN_TRANS)
+}
+
+/*
+TxnStart starts the transaction implicitly and idempotent
+
+When it is in multi-statement transaction mode:
+	Set SERVER_STATUS_IN_TRANS bit;
+	Starts a new transaction if there is none. Reuse the current transaction if there is one.
+
+When it is not in single statement transaction mode:
+	Starts a new transaction if there is none. Reuse the current transaction if there is one.
+*/
+func (ses *Session) TxnStart() error {
+	var err error
+	if ses.InMultiStmtTransactionMode() {
+		ses.SetServerStatus(SERVER_STATUS_IN_TRANS)
+	}
+	if !ses.txnHandler.IsValidTxn() {
+		err = ses.txnHandler.NewTxn()
+	}
+	return err
+}
+
+/*
+TxnCommitSingleStatement commits the single statement transaction.
+*/
+func (ses *Session) TxnCommitSingleStatement() error {
+	var err error
+	if !ses.InMultiStmtTransactionMode() {
+		err = ses.txnHandler.CommitTxn()
+		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		ses.ClearOptionBits(OPTION_BEGIN)
+	}
+	return err
+}
+
+/*
+TxnRollbackSingleStatement rollbacks the single statement transaction.
+*/
+func (ses *Session) TxnRollbackSingleStatement() error {
+	var err error
+	if !ses.InMultiStmtTransactionMode() {
+		err = ses.txnHandler.RollbackTxn()
+		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		ses.ClearOptionBits(OPTION_BEGIN)
+	}
+	return err
+}
+
+/*
+TxnBegin begins a new transaction.
+It commits the current transaction implicitly.
+*/
+func (ses *Session) TxnBegin() error {
+	var err error
+	if ses.InMultiStmtTransactionMode() {
+		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		err = ses.txnHandler.CommitTxn()
+	}
+	ses.ClearOptionBits(OPTION_BEGIN)
+	if err != nil {
+		return err
+	}
+	ses.SetOptionBits(OPTION_BEGIN)
+	ses.SetServerStatus(SERVER_STATUS_IN_TRANS)
+	err = ses.txnHandler.NewTxn()
+	return err
+}
+
+//TxnCommit commits the current transaction.
+func (ses *Session) TxnCommit() error {
+	var err error
+	ses.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
+	err = ses.txnHandler.CommitTxn()
+	ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+	ses.ClearOptionBits(OPTION_BEGIN)
+	return err
+}
+
+//TxnRollback rollbacks the current transaction.
+func (ses *Session) TxnRollback() error {
+	var err error
+	ses.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
+	err = ses.txnHandler.RollbackTxn()
+	ses.ClearOptionBits(OPTION_BEGIN)
+	return err
+}
+
+/*
+InActiveTransaction checks if it is in an active transaction.
+*/
+func (ses *Session) InActiveTransaction() bool {
+	if ses.InActiveMultiStmtTransaction() {
+		return true
+	} else {
+		return ses.txnHandler.IsValidTxn()
+	}
+}
+
+/*
+SetAutocommit sets the value of the system variable 'autocommit'.
+
+The rule is that we can not execute the statement 'set parameter = value' in
+an active transaction whichever it is started by BEGIN or in 'set autocommit = 0;'.
+*/
+func (ses *Session) SetAutocommit(on bool) error {
+	if ses.InActiveTransaction() {
+		return errorParameterModificationInTxn
+	}
+	if on {
+		ses.ClearOptionBits(OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT)
+		ses.SetServerStatus(SERVER_STATUS_AUTOCOMMIT)
+	} else {
+		ses.ClearServerStatus(SERVER_STATUS_AUTOCOMMIT)
+		ses.SetOptionBits(OPTION_NOT_AUTOCOMMIT)
+	}
+	return nil
+}
+
+func (th *TxnHandler) SetSession(ses *Session) {
+	th.ses = ses
+}
+
+//NewTxn commits the old transaction if it existed.
+//Then it creates the new transaction.
+func (th *TxnHandler) NewTxn() error {
+	var err error
+	if th.IsValidTxn() {
+		err = th.CommitTxn()
+		if err != nil {
+			return err
+		}
+	}
+	th.SetInvalid()
+	if taeEng, ok := th.storage.(moengine.TxnEngine); ok {
+		//begin a transaction
+		th.txn, err = taeEng.StartTxn(nil)
+		if err != nil {
+			logutil.Errorf("start tae txn error:%v", err)
+			return err
+		}
+	}
+	return err
+}
+
+//IsValidTxn checks the transaction is true or not.
+func (th *TxnHandler) IsValidTxn() bool {
+	return th.txn != nil
+}
+
+func (th *TxnHandler) SetInvalid() {
+	th.txn = nil
+}
+
+func (th *TxnHandler) CommitTxn() error {
+	if !th.IsValidTxn() {
+		return nil
+	}
+	err := th.txn.Commit()
+	th.SetInvalid()
+	return err
+}
+
+func (th *TxnHandler) RollbackTxn() error {
+	if !th.IsValidTxn() {
+		return nil
+	}
+	err := th.txn.Rollback()
+	th.SetInvalid()
+	return err
+}
+
 func (th *TxnHandler) GetStorage() engine.Engine {
 	return th.storage
 }
@@ -460,7 +701,11 @@ func (th *TxnHandler) StartByAutocommitIfNeeded() (bool, error) {
 }
 
 func (th *TxnHandler) GetTxn() moengine.Txn {
-	return th.taeTxn
+	err := th.ses.TxnStart()
+	if err != nil {
+		panic(err)
+	}
+	return th.txn
 }
 
 const (

@@ -52,6 +52,10 @@ var (
 	errorComplicateExprIsNotSupported              = goErrors.New("the complicate expression is not supported")
 	errorNumericTypeIsNotSupported                 = goErrors.New("the numeric type is not supported")
 	errorUnaryMinusForNonNumericTypeIsNotSupported = goErrors.New("unary minus for no numeric type is not supported")
+	errorOnlyCreateStatement                       = goErrors.New("Only CREATE of DDL is supported in transactions")
+	errorAdministrativeStatement                   = goErrors.New("Administrative command is unsupported in transactions")
+	errorParameterModificationInTxn                = goErrors.New("Uncommmited transaction exists. Please commit or rollback first")
+	errorUnclassifiedStatement                     = goErrors.New("Unclassified statement appears in uncommitted transaction")
 )
 
 //tableInfos of a database
@@ -986,6 +990,18 @@ func (mce *MysqlCmdExecutor) handleSetVar(sv *tree.SetVar) error {
 					return err
 				}
 			}
+
+			if strings.ToLower(name) == "autocommit" {
+				svbt := SystemVariableBoolType{}
+				newValue, err2 := svbt.Convert(value)
+				if err2 != nil {
+					return err2
+				}
+				err = ses.SetAutocommit(svbt.IsTrue(newValue))
+				if err != nil {
+					return err
+				}
+			}
 		} else {
 			err = ses.SetUserDefinedVar(name, value)
 			if err != nil {
@@ -1505,46 +1521,59 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	stmt := cws[0].GetAst()
 	mce.beforeRun(stmt)
 	defer mce.afterRun(stmt, beginInstant)
-	// it is weired to do for loop here, why don't we ensure that run only one sql once
-	// it seems that mysql protocol has done that for us when reading packet from tcp
-	type TxnCommand int
-	const (
-		TxnNoCommand TxnCommand = iota
-		TxnBegin
-		TxnCommit
-		TxnRollback
-	)
 	for _, cw := range cws {
 		ses.Mrs = &MysqlResultSet{}
 		stmt := cw.GetAst()
 
-		var fromTxnCommand = TxnNoCommand
+		/*
+				if it is in an active or multi-statement transaction, we check the type of the statement.
+				Then we decide that if we can execute the statement.
+
+			If we check the active transaction, it will generate the case below.
+			case:
+			set autocommit = 0;  <- no active transaction
+			                     <- no active transaction
+			drop table test1;    <- no active transaction, no error
+			                     <- has active transaction
+			drop table test1;    <- has active transaction, error
+			                     <- has active transaction
+
+			So, we check both the active transaction and the multi-statement transaction.
+			To be clear, when it is in the multi-statement transaction, it may not have the active transaction.
+		*/
+		if ses.InMultiStmtTransactionMode() || ses.InActiveTransaction() {
+			can := StatementCanBeExecutedInUncommittedTransaction(stmt)
+			if !can {
+				//is ddl statement
+				if IsDDL(stmt) {
+					return errorOnlyCreateStatement
+				} else if IsAdministrativeStatement(stmt) {
+					return errorAdministrativeStatement
+				} else if IsParameterModificationStatement(stmt) {
+					return errorParameterModificationInTxn
+				} else {
+					return errorUnclassifiedStatement
+				}
+			}
+		}
+
 		//check transaction states
 		switch stmt.(type) {
 		case *tree.BeginTransaction:
-			fromTxnCommand = TxnBegin
-			err = txnHandler.StartByBeginIfNeeded()
+			err = ses.TxnBegin()
 			if err != nil {
 				goto handleFailed
 			}
 		case *tree.CommitTransaction:
-			fromTxnCommand = TxnCommit
-			err = txnHandler.CommitAfterBegin()
+			err = ses.TxnCommit()
 			if err != nil {
 				goto handleFailed
 			}
 		case *tree.RollbackTransaction:
-			fromTxnCommand = TxnRollback
-			err = txnHandler.Rollback()
+			err = ses.TxnRollback()
 			if err != nil {
 				goto handleFailed
 			}
-		default:
-			_, err = txnHandler.StartByAutocommitIfNeeded()
-			if err != nil {
-				goto handleFailed
-			}
-			logutil.Infof("start autocommit txn in default")
 		}
 
 		switch st := stmt.(type) {
@@ -1790,11 +1819,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	handleSucceeded:
 		//load data handle txn failure internally
 		if !fromLoadData {
-			//txn begin,commit,rollback do not need to be committed
-			if fromTxnCommand != TxnNoCommand {
-				goto handleNext
-			}
-			txnErr = txnHandler.CommitAfterAutocommitOnly()
+			txnErr = ses.TxnCommitSingleStatement()
 			if txnErr != nil {
 				return txnErr
 			}
@@ -1813,12 +1838,9 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		goto handleNext
 	handleFailed:
 		if !fromLoadData {
-			//the failures due to txn begin,commit,rollback do not need to be rollback.
-			if fromTxnCommand == TxnNoCommand {
-				txnErr = txnHandler.RollbackAfterAutocommitOnly()
-				if txnErr != nil {
-					return txnErr
-				}
+			txnErr = ses.TxnRollbackSingleStatement()
+			if txnErr != nil {
+				return txnErr
 			}
 		}
 		return err
@@ -1977,6 +1999,65 @@ func (mce *MysqlCmdExecutor) Close() {
 	if mce.exportDataClose != nil {
 		mce.exportDataClose.Close()
 	}
+}
+
+/*
+StatementCanBeExecutedInUncommittedTransaction checks the statement can be executed in an active transaction.
+*/
+func StatementCanBeExecutedInUncommittedTransaction(stmt tree.Statement) bool {
+	switch stmt.(type) {
+	//ddl statement
+	case *tree.CreateTable, *tree.CreateDatabase, *tree.CreateIndex, *tree.CreateView:
+		return true
+		//dml statement
+	case *tree.Insert, *tree.Update, *tree.Delete, *tree.Select, *tree.Load:
+		return true
+		//transaction
+	case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
+		return true
+		//show
+	case *tree.ShowTables, *tree.ShowCreateTable, *tree.ShowCreateDatabase, *tree.ShowDatabases,
+		*tree.ShowVariables, *tree.ShowColumns, *tree.ShowErrors, *tree.ShowIndex, *tree.ShowProcessList,
+		*tree.ShowStatus, *tree.ShowTarget, *tree.ShowWarnings:
+		return true
+		//others
+	case *tree.Use, *tree.PrepareStmt, *tree.Execute, *tree.Deallocate,
+		*tree.ExplainStmt, *tree.ExplainAnalyze, *tree.ExplainFor:
+		return true
+	}
+
+	return false
+}
+
+//IsDDL checks the statement is the DDL statement.
+func IsDDL(stmt tree.Statement) bool {
+	switch stmt.(type) {
+	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
+		*tree.CreateIndex, *tree.DropIndex:
+		return true
+	}
+	return false
+}
+
+//IsAdministrativeStatement checks the statement is the administrative statement.
+func IsAdministrativeStatement(stmt tree.Statement) bool {
+	switch stmt.(type) {
+	case *tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+		*tree.CreateRole, *tree.DropRole,
+		*tree.Revoke, *tree.Grant,
+		*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword:
+		return true
+	}
+	return false
+}
+
+//IsParameterModificationStatement checks the statement is the statement of parameter modification statement.
+func IsParameterModificationStatement(stmt tree.Statement) bool {
+	switch stmt.(type) {
+	case *tree.SetVar:
+		return true
+	}
+	return false
 }
 
 func NewMysqlCmdExecutor() *MysqlCmdExecutor {
