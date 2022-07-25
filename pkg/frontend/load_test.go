@@ -17,6 +17,7 @@ package frontend
 import (
 	"errors"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/config"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -204,7 +205,10 @@ func Test_load(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 
 		guestMmu := guest.New(pu.SV.GetGuestMmuLimitation(), pu.HostMmu)
-
+		config.StorageEngine = eng
+		defer func() {
+			config.StorageEngine = nil
+		}()
 		ses := NewSession(proto, guestMmu, pu.Mempool, pu, gSysVariables)
 
 		mce := NewMysqlCmdExecutor()
