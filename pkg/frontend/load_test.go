@@ -15,6 +15,7 @@
 package frontend
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/config"
@@ -52,7 +53,14 @@ func Test_load(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		eng := mock_frontend.NewMockEngine(ctrl)
+		eng := mock_frontend.NewMockTxnEngine(ctrl)
+		txn := mock_frontend.NewMockTxn(ctrl)
+		txn.EXPECT().GetCtx().Return(nil).AnyTimes()
+		txn.EXPECT().Commit().Return(nil).AnyTimes()
+		txn.EXPECT().Rollback().Return(nil).AnyTimes()
+		txn.EXPECT().String().Return("txn0").AnyTimes()
+		eng.EXPECT().StartTxn(nil).Return(txn, nil).AnyTimes()
+
 		db := mock_frontend.NewMockDatabase(ctrl)
 		rel := mock_frontend.NewMockRelation(ctrl)
 		//table def
@@ -152,10 +160,10 @@ func Test_load(t *testing.T) {
 				if cnt == 1 {
 					return nil
 				} else if cnt == 2 {
-					return fmt.Errorf("exec timeout")
+					return context.DeadlineExceeded
 				}
 
-				return fmt.Errorf("fake error")
+				return nil
 			},
 		).AnyTimes()
 		db.EXPECT().Relation(gomock.Any(), nil).Return(rel, nil).AnyTimes()
@@ -229,7 +237,14 @@ func Test_load(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		eng := mock_frontend.NewMockEngine(ctrl)
+		eng := mock_frontend.NewMockTxnEngine(ctrl)
+		txn := mock_frontend.NewMockTxn(ctrl)
+		txn.EXPECT().GetCtx().Return(nil).AnyTimes()
+		txn.EXPECT().Commit().Return(nil).AnyTimes()
+		txn.EXPECT().Rollback().Return(nil).AnyTimes()
+		txn.EXPECT().String().Return("txn0").AnyTimes()
+		eng.EXPECT().StartTxn(nil).Return(txn, nil).AnyTimes()
+
 		db := mock_frontend.NewMockDatabase(ctrl)
 		rel := mock_frontend.NewMockRelation(ctrl)
 		//table def
@@ -355,7 +370,7 @@ func Test_load(t *testing.T) {
 					"infile 'test/loadfile5' " +
 					"INTO TABLE T.A " +
 					"FIELDS TERMINATED BY ',' ",
-				fail: false,
+				fail: true,
 			},
 			{
 				sql: "load data " +
@@ -398,6 +413,11 @@ func Test_load(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 
 		guestMmu := guest.New(pu.SV.GetGuestMmuLimitation(), pu.HostMmu)
+
+		config.StorageEngine = eng
+		defer func() {
+			config.StorageEngine = nil
+		}()
 
 		ses := NewSession(proto, guestMmu, pu.Mempool, pu, gSysVariables)
 
