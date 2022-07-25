@@ -835,10 +835,10 @@ func (mce *MysqlCmdExecutor) handleLoadData(load *tree.Load) error {
 	}
 
 	txnHandler := ses.GetTxnHandler()
-	if txnHandler.isTxnState(TxnBegan) {
+	if ses.InMultiStmtTransactionMode() {
 		return fmt.Errorf("do not support the Load in a transaction started by BEGIN/START TRANSACTION statement")
 	}
-	dbHandler, err := ses.Pu.StorageEngine.Database(loadDb, txnHandler.GetTxn().GetCtx())
+	dbHandler, err := ses.GetStorage().Database(loadDb, txnHandler.GetTxn().GetCtx())
 	if err != nil {
 		//echo client. no such database
 		return NewMysqlError(ER_BAD_DB_ERROR, loadDb)
@@ -901,11 +901,6 @@ func (mce *MysqlCmdExecutor) handleCmdFieldList(tableName string) error {
 	if ses.IsTaeEngine() {
 		if mce.tableInfos == nil || mce.db != dbName {
 			txnHandler := ses.GetTxnHandler()
-			_, err = txnHandler.StartByAutocommitIfNeeded()
-			if err != nil {
-				return err
-			}
-
 			eng := ses.GetStorage()
 			db, err := eng.Database(dbName, txnHandler.GetTxn().GetCtx())
 			if err != nil {
@@ -929,6 +924,11 @@ func (mce *MysqlCmdExecutor) handleCmdFieldList(tableName string) error {
 					}
 				}
 			}
+
+			if mce.tableInfos == nil {
+				mce.tableInfos = make(map[string][]ColumnInfo)
+			}
+			mce.tableInfos[tableName] = attrs
 		}
 	}
 
@@ -1479,7 +1479,6 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	ses := mce.GetSession()
 	ses.showStmtType = NotShowStatement
 	proto := ses.GetMysqlProtocol()
-	txnHandler := ses.GetTxnHandler()
 	ses.SetSql(sql)
 	ses.ep.Outfile = false
 
@@ -1507,7 +1506,6 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 
 	defer func() {
 		ses.Mrs = nil
-		_ = txnHandler.CleanTxn()
 	}()
 
 	var cmpBegin time.Time
@@ -1998,6 +1996,10 @@ func (mce *MysqlCmdExecutor) Close() {
 	}
 	if mce.exportDataClose != nil {
 		mce.exportDataClose.Close()
+	}
+	err := mce.ses.TxnRollback()
+	if err != nil {
+		logutil.Errorf("rollback txn in mce.Close failed.error:%v", err)
 	}
 }
 
