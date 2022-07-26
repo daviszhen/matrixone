@@ -56,7 +56,7 @@ var (
 	errorUnaryMinusForNonNumericTypeIsNotSupported = goErrors.New("unary minus for no numeric type is not supported")
 	errorOnlyCreateStatement                       = goErrors.New("Only CREATE of DDL is supported in transactions")
 	errorAdministrativeStatement                   = goErrors.New("Administrative command is unsupported in transactions")
-	errorParameterModificationInTxn                = goErrors.New("Uncommmited transaction exists. Please commit or rollback first")
+	errorParameterModificationInTxn                = goErrors.New("Uncommmited transaction exists. Please commit or rollback first.")
 	errorUnclassifiedStatement                     = goErrors.New("Unclassified statement appears in uncommitted transaction")
 )
 

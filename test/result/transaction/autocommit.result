@@ -30,7 +30,7 @@ Only CREATE of DDL is supported in transactions
 commit;
 start transaction;
 set autocommit=1;
-Uncommmited transaction exists. Please commit or rollback first
+Uncommmited transaction exists. Please commit or rollback first.
 commit;
 start transaction;
 show tables;
@@ -60,8 +60,10 @@ insert into t1 values(3);
 create table t2 (a int);
 rollback;
 select * from t2;
-a
+table "t2" does not exist
 insert into t1 values(3);
 use autocommit;
 show tables;
+tables_in_autocommit
+t1
 commit;
