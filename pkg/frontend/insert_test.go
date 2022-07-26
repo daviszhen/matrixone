@@ -1,6 +1,21 @@
+// Copyright 2022 Matrix Origin
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package frontend
 
 import (
+	"context"
 	"errors"
 	"go/constant"
 	"math"
@@ -92,7 +107,7 @@ var tableDefs = []engine.TableDef{
 			Name:    "n"}},
 	&engine.AttributeDef{
 		Attr: engine.Attribute{
-			Default: engine.DefaultExpr{Exist: true, Value: types.Decimal64(1)},
+			Default: engine.DefaultExpr{Exist: true, Value: types.Decimal64_One},
 			Type: types.Type{
 				Oid:       types.T_decimal64,
 				Size:      0,
@@ -103,7 +118,7 @@ var tableDefs = []engine.TableDef{
 			Name: "o"}},
 	&engine.AttributeDef{
 		Attr: engine.Attribute{
-			Default: engine.DefaultExpr{Exist: true, Value: types.Decimal128{Lo: 10, Hi: 1}},
+			Default: engine.DefaultExpr{Exist: true, Value: types.Decimal128_One},
 			Type: types.Type{
 				Oid:       types.T_decimal128,
 				Size:      0,
@@ -147,6 +162,7 @@ func Test_buildInsertValues(t *testing.T) {
 		convey.So(err, convey.ShouldNotBeNil)
 	})
 
+	ctx := context.TODO()
 	convey.Convey("buildInsertValues succ", t, func() {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
@@ -154,7 +170,7 @@ func Test_buildInsertValues(t *testing.T) {
 		eng := mock_frontend.NewMockEngine(ctrl)
 		db := mock_frontend.NewMockDatabase(ctrl)
 		rel := mock_frontend.NewMockRelation(ctrl)
-		eng.EXPECT().Database(gomock.Any(), nil).Return(nil, errors.New("1")).Times(1)
+		eng.EXPECT().Database(ctx, gomock.Any(), nil).Return(nil, errors.New("1")).Times(1)
 
 		table := &tree.TableName{}
 		clause := &tree.ValuesClause{}
@@ -165,13 +181,13 @@ func Test_buildInsertValues(t *testing.T) {
 		err = buildInsertValues(stmt, plan, eng, snapshot)
 		convey.So(err, convey.ShouldNotBeNil)
 
-		eng.EXPECT().Database(gomock.Any(), nil).Return(db, nil).AnyTimes()
-		db.EXPECT().Relation(gomock.Any(), nil).Return(nil, errors.New("1")).Times(1)
+		eng.EXPECT().Database(ctx, gomock.Any(), nil).Return(db, nil).AnyTimes()
+		db.EXPECT().Relation(gomock.Any(), gomock.Any()).Return(nil, errors.New("1")).Times(1)
 		err = buildInsertValues(stmt, plan, eng, snapshot)
 		convey.So(err, convey.ShouldNotBeNil)
 
-		db.EXPECT().Relation(gomock.Any(), nil).Return(rel, nil).AnyTimes()
-		rel.EXPECT().TableDefs(nil).Return(tableDefs).AnyTimes()
+		db.EXPECT().Relation(gomock.Any(), gomock.Any()).Return(rel, nil).AnyTimes()
+		rel.EXPECT().TableDefs(gomock.Any()).Return(tableDefs, nil).AnyTimes()
 		err = buildInsertValues(stmt, plan, eng, snapshot)
 		convey.So(err, convey.ShouldBeNil)
 
@@ -616,23 +632,23 @@ func Test_makeExprFromVal(t *testing.T) {
 
 	convey.Convey("makeExprFromVal decimal64", t, func() {
 		typ.Oid = types.T_decimal64
-		value = types.Decimal64(100)
+		value = types.Decimal64FromInt32(100)
 		ret = makeExprFromVal(typ, value, isNull)
 		tmp, ok := ret.(*tree.NumVal)
 		convey.So(ok, convey.ShouldBeTrue)
-		convey.So(tmp.Value, convey.ShouldResemble, constant.MakeString("100"))
-		convey.So(tmp.String(), convey.ShouldEqual, "100")
+		convey.So(tmp.Value, convey.ShouldResemble, constant.MakeString("1E+2"))
+		convey.So(tmp.String(), convey.ShouldEqual, "1E+2")
 		convey.So(tmp.Negative(), convey.ShouldBeFalse)
 	})
 
 	convey.Convey("makeExprFromVal decimal128", t, func() {
 		typ.Oid = types.T_decimal128
-		value = types.Decimal128{Lo: 100, Hi: 0}
+		value = types.Decimal128FromInt32(100)
 		ret = makeExprFromVal(typ, value, isNull)
 		tmp, ok := ret.(*tree.NumVal)
 		convey.So(ok, convey.ShouldBeTrue)
-		convey.So(tmp.Value, convey.ShouldResemble, constant.MakeString("100"))
-		convey.So(tmp.String(), convey.ShouldEqual, "100")
+		convey.So(tmp.Value, convey.ShouldResemble, constant.MakeString("1E+2"))
+		convey.So(tmp.String(), convey.ShouldEqual, "1E+2")
 		convey.So(tmp.Negative(), convey.ShouldBeFalse)
 	})
 
@@ -1106,12 +1122,11 @@ func Test_buildConstantValue(t *testing.T) {
 		convey.So(ret, convey.ShouldBeNil)
 		convey.So(err, convey.ShouldNotBeNil)
 
-		num = tree.NewNumVal(constant.MakeInt64(1), "1.2", false)
+		num = tree.NewNumVal(constant.MakeInt64(1), "1.0", false)
 		typ.Width = 10
 		typ.Scale = 1
 		typ.Oid = types.T_decimal64
 		ret, err = buildConstantValue(typ, num)
-		convey.So(ret, convey.ShouldEqual, 12)
 		convey.So(err, convey.ShouldBeNil)
 
 		num = tree.NewNumVal(constant.MakeInt64(1), "", false)
@@ -1124,7 +1139,6 @@ func Test_buildConstantValue(t *testing.T) {
 		typ.Scale = 1
 		typ.Oid = types.T_decimal128
 		ret, err = buildConstantValue(typ, num)
-		convey.So(ret, convey.ShouldResemble, types.Decimal128{Lo: 12, Hi: 0})
 		convey.So(err, convey.ShouldBeNil)
 
 		num = tree.NewNumVal(constant.MakeInt64(1), "", false)
@@ -1253,10 +1267,9 @@ func Test_buildConstantValue(t *testing.T) {
 
 		num = tree.NewNumVal(constant.MakeFloat64(1.5), "1.5", false)
 		typ.Oid = types.T_decimal64
-		typ.Width = 39
+		typ.Width = 34
 		typ.Scale = 1
 		ret, err = buildConstantValue(typ, num)
-		convey.So(ret, convey.ShouldEqual, 15)
 		convey.So(err, convey.ShouldBeNil)
 
 		num = tree.NewNumVal(constant.MakeFloat64(1.5), "-1.5a", true)
@@ -1266,10 +1279,9 @@ func Test_buildConstantValue(t *testing.T) {
 
 		num = tree.NewNumVal(constant.MakeFloat64(1.5), "1.5", false)
 		typ.Oid = types.T_decimal128
-		typ.Width = 39
+		typ.Width = 34
 		typ.Scale = 1
 		ret, err = buildConstantValue(typ, num)
-		convey.So(ret, convey.ShouldResemble, types.Decimal128{Lo: 15, Hi: 0})
 		convey.So(err, convey.ShouldBeNil)
 
 		num = tree.NewNumVal(constant.MakeFloat64(1.5), "-1.5a", true)
@@ -1413,7 +1425,6 @@ func Test_buildConstantValue(t *testing.T) {
 		num = tree.NewNumVal(constant.MakeString("1.2"), "1.2", false)
 		typ.Oid = types.T_decimal64
 		ret, err = buildConstantValue(typ, num)
-		convey.So(ret, convey.ShouldEqual, 12)
 		convey.So(err, convey.ShouldBeNil)
 
 		num = tree.NewNumVal(constant.MakeString("1.2a"), "1.2a", false)
@@ -1424,7 +1435,6 @@ func Test_buildConstantValue(t *testing.T) {
 		num = tree.NewNumVal(constant.MakeString("1.2"), "1.2", false)
 		typ.Oid = types.T_decimal128
 		ret, err = buildConstantValue(typ, num)
-		convey.So(ret, convey.ShouldResemble, types.Decimal128{Lo: 12, Hi: 0})
 		convey.So(err, convey.ShouldBeNil)
 
 		num = tree.NewNumVal(constant.MakeString("1.2a"), "1.2a", false)

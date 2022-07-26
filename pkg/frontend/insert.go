@@ -15,12 +15,14 @@
 package frontend
 
 import (
+	"context"
 	"fmt"
 	"go/constant"
 	"math"
 	"strconv"
 	"strings"
 
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -47,8 +49,8 @@ func (mce *MysqlCmdExecutor) handleInsertValues(stmt *tree.Insert, ts uint64) (u
 	if err := buildInsertValues(stmt, plan, mce.GetSession().GetStorage(), snapshot); err != nil {
 		return 0, err
 	}
-	defer plan.relation.Close(snapshot)
-	if err := plan.relation.Write(ts, plan.dataBatch, snapshot); err != nil {
+	ctx := context.TODO()
+	if err := plan.relation.Write(ctx, plan.dataBatch); err != nil {
 		return 0, err
 	}
 
@@ -60,11 +62,12 @@ func getTableRef(tbl *tree.TableName, currentDB string, eg engine.Engine, snapsh
 		tbl.SchemaName = tree.Identifier(currentDB)
 	}
 
-	db, err := eg.Database(string(tbl.SchemaName), snapshot)
+	ctx := context.TODO()
+	db, err := eg.Database(ctx, string(tbl.SchemaName), snapshot)
 	if err != nil {
 		return "", "", nil, errors.New(errno.InvalidSchemaName, err.Error())
 	}
-	r, err := db.Relation(string(tbl.ObjectName), snapshot)
+	r, err := db.Relation(ctx, string(tbl.ObjectName))
 	if err != nil {
 		return "", "", nil, errors.New(errno.UndefinedTable, err.Error())
 	}
@@ -96,7 +99,12 @@ func buildInsertValues(stmt *tree.Insert, plan *InsertValues, eg engine.Engine, 
 	orderAttr := make([]string, 0, 32)        // order relation's attribute names
 	{
 		count := 0
-		for _, def := range relation.TableDefs(snapshot) {
+		ctx := context.TODO()
+		defs, err := relation.TableDefs(ctx)
+		if err != nil {
+			return err
+		}
+		for _, def := range defs {
 			if v, ok := def.(*engine.AttributeDef); ok {
 				attrType[v.Attr.Name] = v.Attr.Type
 				orderAttr = append(orderAttr, v.Attr.Name)
@@ -654,10 +662,12 @@ func makeExprFromVal(typ types.Type, value interface{}, isNull bool) tree.Expr {
 		res := value.(types.Timestamp).String2(typ.Precision)
 		return tree.NewNumVal(constant.MakeString(res), res, false)
 	case types.T_decimal64:
-		res := string(value.(types.Decimal64).Decimal64ToString(typ.Scale))
+		val, _ := value.(types.Decimal64)
+		res := val.ToString()
 		return tree.NewNumVal(constant.MakeString(res), res, false)
 	case types.T_decimal128:
-		res := string(value.(types.Decimal128).Decimal128ToString(typ.Scale))
+		val, _ := value.(types.Decimal128)
+		res := val.ToString()
 		return tree.NewNumVal(constant.MakeString(res), res, false)
 	}
 	return tree.NewNumVal(constant.MakeUnknown(), "NULL", false)
@@ -969,13 +979,17 @@ func buildConstantValue(typ types.Type, num *tree.NumVal) (interface{}, error) {
 		case types.T_decimal64:
 			res, err := types.ParseStringToDecimal64(str, typ.Width, typ.Scale)
 			if err != nil {
-				return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+					return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				}
 			}
 			return res, nil
 		case types.T_decimal128:
 			res, err := types.ParseStringToDecimal128(str, typ.Width, typ.Scale)
 			if err != nil {
-				return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+					return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				}
 			}
 			return res, nil
 		case types.T_uint8, types.T_uint16, types.T_uint32, types.T_uint64:
@@ -1065,13 +1079,17 @@ func buildConstantValue(typ types.Type, num *tree.NumVal) (interface{}, error) {
 		case types.T_decimal64:
 			res, err := types.ParseStringToDecimal64(str, typ.Width, typ.Scale)
 			if err != nil {
-				return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+					return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				}
 			}
 			return res, nil
 		case types.T_decimal128:
 			res, err := types.ParseStringToDecimal128(str, typ.Width, typ.Scale)
 			if err != nil {
-				return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+					return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				}
 			}
 			return res, nil
 		}
@@ -1149,13 +1167,17 @@ func buildConstantValue(typ types.Type, num *tree.NumVal) (interface{}, error) {
 		case types.T_decimal64:
 			res, err := types.ParseStringToDecimal64(str, typ.Width, typ.Scale)
 			if err != nil {
-				return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+					return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				}
 			}
 			return res, nil
 		case types.T_decimal128:
 			res, err := types.ParseStringToDecimal128(str, typ.Width, typ.Scale)
 			if err != nil {
-				return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+					return nil, fmt.Errorf("incorrect %s value: '%s'", typ.Oid.String(), str)
+				}
 			}
 			return res, nil
 		}

@@ -15,6 +15,7 @@
 package frontend
 
 import (
+	"context"
 	goErrors "errors"
 	"fmt"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
+	"github.com/matrixorigin/matrixone/pkg/sql/errors"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -51,6 +53,8 @@ const (
 	TxnErr               // when the txn operation generates errors
 	TxnNil               // placeholder
 )
+
+const MaxPrepareNumberInOneSession = 64
 
 // TxnState represents for Transaction Machine
 type TxnState struct {
@@ -91,13 +95,12 @@ func (ts *TxnState) getState() int {
 	return ts.state
 }
 
-func (ts *TxnState) getFromState() int {
-	return ts.fromState
-}
-
-func (ts *TxnState) getError() error {
-	return ts.err
-}
+// func (ts *TxnState) getFromState() int {
+// 	return ts.fromState
+// }
+// func (ts *TxnState) getError() error {
+// 	return ts.err
+// }
 
 func (ts *TxnState) String() string {
 	return fmt.Sprintf("state:%d fromState:%d err:%v", ts.state, ts.fromState, ts.err)
@@ -193,6 +196,8 @@ type Session struct {
 
 	//the option bits
 	optionBits uint32
+
+	prepareStmts map[string]*PrepareStmt
 }
 
 func NewSession(proto Protocol, gm *guest.Mmu, mp *mempool.Mempool, PU *config.ParameterUnit, gSysVars *GlobalSystemVariables) *Session {
@@ -214,13 +219,37 @@ func NewSession(proto Protocol, gm *guest.Mmu, mp *mempool.Mempool, PU *config.P
 		sysVars:         gSysVars.CopySysVarsToSession(),
 		userDefinedVars: make(map[string]interface{}),
 		gSysVars:        gSysVars,
-		serverStatus:    0,
-		optionBits:      0,
+
+		serverStatus: 0,
+		optionBits:   0,
+
+		prepareStmts: make(map[string]*PrepareStmt),
 	}
 	ses.SetOptionBits(OPTION_AUTOCOMMIT)
 	ses.txnCompileCtx.SetSession(ses)
 	ses.txnHandler.SetSession(ses)
 	return ses
+}
+
+func (ses *Session) SetPrepareStmt(name string, prepareStmt *PrepareStmt) error {
+	if _, ok := ses.prepareStmts[name]; !ok {
+		if len(ses.prepareStmts) >= MaxPrepareNumberInOneSession {
+			return errors.New("", fmt.Sprintf("more than '%d' prepare statement in one session", MaxPrepareNumberInOneSession))
+		}
+	}
+	ses.prepareStmts[name] = prepareStmt
+	return nil
+}
+
+func (ses *Session) GetPrepareStmt(name string) (*PrepareStmt, error) {
+	if prepareStmt, ok := ses.prepareStmts[name]; ok {
+		return prepareStmt, nil
+	}
+	return nil, errors.New("", fmt.Sprintf("prepare statement '%s' does not exist", name))
+}
+
+func (ses *Session) RemovePrepareStmt(name string) {
+	delete(ses.prepareStmts, name)
 }
 
 // SetGlobalVar sets the value of system variable in global.
@@ -594,21 +623,23 @@ func (th *TxnHandler) isTxnState(s int) bool {
 	return th.txnState.isState(s)
 }
 
-func (th *TxnHandler) switchToTxnState(s int, err error) {
-	th.txnState.switchToState(s, err)
-}
-
-func (th *TxnHandler) getFromTxnState() int {
-	return th.txnState.getFromState()
-}
-
-func (th *TxnHandler) getTxnStateError() error {
-	return th.txnState.getError()
-}
-
-func (th *TxnHandler) getTxnStateString() string {
-	return th.txnState.String()
-}
+// The following functions are unused.
+//
+// func (th *TxnHandler) switchToTxnState(s int, err error) {
+// 	th.txnState.switchToState(s, err)
+// }
+//
+// func (th *TxnHandler) getFromTxnState() int {
+// 	return th.txnState.getFromState()
+// }
+//
+// func (th *TxnHandler) getTxnStateError() error {
+// 	return th.txnState.getError()
+// }
+//
+// func (th *TxnHandler) getTxnStateString() string {
+// 	return th.txnState.String()
+// }
 
 // IsInTaeTxn checks the session executes a txn
 func (th *TxnHandler) IsInTaeTxn() bool {
@@ -898,7 +929,8 @@ func (tcc *TxnCompilerContext) DefaultDatabase() string {
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	var err error
 	//open database
-	_, err = tcc.txnHandler.GetStorage().Database(name, tcc.txnHandler.GetTxn().GetCtx())
+	ctx := context.TODO()
+	_, err = tcc.txnHandler.GetStorage().Database(ctx, name, engine.Snapshot(tcc.txnHandler.GetTxn().GetCtx()))
 	if err != nil {
 		logutil.Errorf("get database %v failed. error %v", name, err)
 		return false
@@ -913,18 +945,22 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (eng
 		return nil, err
 	}
 
+	ctx := context.TODO()
 	//open database
-	db, err := tcc.txnHandler.GetStorage().Database(dbName, tcc.txnHandler.GetTxn().GetCtx())
+	db, err := tcc.txnHandler.GetStorage().Database(ctx, dbName, engine.Snapshot(tcc.txnHandler.GetTxn().GetCtx()))
 	if err != nil {
 		logutil.Errorf("get database %v error %v", dbName, err)
 		return nil, err
 	}
 
-	tableNames := db.Relations(tcc.txnHandler.GetTxn().GetCtx())
+	tableNames, err := db.Relations(ctx)
+	if err != nil {
+		return nil, err
+	}
 	logutil.Infof("dbName %v tableNames %v", dbName, tableNames)
 
 	//open table
-	table, err := db.Relation(tableName, tcc.txnHandler.GetTxn().GetCtx())
+	table, err := db.Relation(ctx, tableName)
 	if err != nil {
 		logutil.Errorf("get table %v error %v", tableName, err)
 		return nil, err
@@ -951,7 +987,11 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	if err != nil {
 		return nil, nil
 	}
-	engineDefs := table.TableDefs(tcc.txnHandler.GetTxn().GetCtx())
+	ctx := context.TODO()
+	engineDefs, err := table.TableDefs(ctx)
+	if err != nil {
+		return nil, nil
+	}
 
 	var defs []*plan2.ColDef
 	for _, def := range engineDefs {
@@ -970,7 +1010,11 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 		}
 	}
 	if tcc.QryTyp != TXN_DEFAULT {
-		hideKey := table.GetHideKey(tcc.txnHandler.GetTxn().GetCtx())
+		hideKeys, err := table.GetHideKeys(ctx)
+		if err != nil {
+			return nil, nil
+		}
+		hideKey := hideKeys[0]
 		defs = append(defs, &plan2.ColDef{
 			Name: hideKey.Name,
 			Typ: &plan2.Type{
@@ -1010,6 +1054,7 @@ func (tcc *TxnCompilerContext) ResolveVariable(varName string, isSystemVar, isGl
 }
 
 func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string) []*plan2.ColDef {
+	ctx := context.TODO()
 	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
 	if err != nil {
 		return nil
@@ -1019,7 +1064,10 @@ func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string)
 		return nil
 	}
 
-	priKeys := relation.GetPrimaryKeys(tcc.txnHandler.GetTxn().GetCtx())
+	priKeys, err := relation.GetPrimaryKeys(ctx)
+	if err != nil {
+		return nil
+	}
 	if len(priKeys) == 0 {
 		return nil
 	}
@@ -1042,6 +1090,7 @@ func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string)
 }
 
 func (tcc *TxnCompilerContext) GetHideKeyDef(dbName string, tableName string) *plan2.ColDef {
+	ctx := context.TODO()
 	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
 	if err != nil {
 		return nil
@@ -1051,10 +1100,14 @@ func (tcc *TxnCompilerContext) GetHideKeyDef(dbName string, tableName string) *p
 		return nil
 	}
 
-	hideKey := relation.GetHideKey(tcc.txnHandler.GetTxn().GetCtx())
-	if hideKey == nil {
+	hideKeys, err := relation.GetHideKeys(ctx)
+	if err != nil {
 		return nil
 	}
+	if len(hideKeys) == 0 {
+		return nil
+	}
+	hideKey := hideKeys[0]
 
 	hideDef := &plan2.ColDef{
 		Name: hideKey.Name,

@@ -152,10 +152,11 @@ func Test_load(t *testing.T) {
 					},
 					Name: "r"}},
 		}
-		rel.EXPECT().TableDefs(nil).Return(tableDefs).AnyTimes()
+		ctx := context.TODO()
+		rel.EXPECT().TableDefs(gomock.Any()).Return(tableDefs, nil).AnyTimes()
 		cnt := 0
-		rel.EXPECT().Write(gomock.Any(), gomock.Any(), nil).DoAndReturn(
-			func(a, b, c interface{}) error {
+		rel.EXPECT().Write(ctx, gomock.Any()).DoAndReturn(
+			func(a, b interface{}) error {
 				cnt++
 				if cnt == 1 {
 					return nil
@@ -166,8 +167,8 @@ func Test_load(t *testing.T) {
 				return nil
 			},
 		).AnyTimes()
-		db.EXPECT().Relation(gomock.Any(), nil).Return(rel, nil).AnyTimes()
-		eng.EXPECT().Database(gomock.Any(), nil).Return(db, nil).AnyTimes()
+		db.EXPECT().Relation(ctx, gomock.Any()).Return(rel, nil).AnyTimes()
+		eng.EXPECT().Database(ctx, gomock.Any(), nil).Return(db, nil).AnyTimes()
 
 		ioses := mock_frontend.NewMockIOSession(ctrl)
 		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
@@ -336,10 +337,11 @@ func Test_load(t *testing.T) {
 					},
 					Name: "r"}},
 		}
-		rel.EXPECT().TableDefs(nil).Return(tableDefs).AnyTimes()
+		ctx := context.TODO()
+		rel.EXPECT().TableDefs(ctx).Return(tableDefs, nil).AnyTimes()
 		cnt := 0
-		rel.EXPECT().Write(gomock.Any(), gomock.Any(), nil).DoAndReturn(
-			func(a, b, c interface{}) error {
+		rel.EXPECT().Write(ctx, gomock.Any()).DoAndReturn(
+			func(a, b interface{}) error {
 				cnt++
 				if cnt == 1 {
 					return fmt.Errorf("fake error")
@@ -350,8 +352,8 @@ func Test_load(t *testing.T) {
 				return nil
 			},
 		).AnyTimes()
-		db.EXPECT().Relation(gomock.Any(), nil).Return(rel, nil).AnyTimes()
-		eng.EXPECT().Database(gomock.Any(), nil).Return(db, nil).AnyTimes()
+		db.EXPECT().Relation(gomock.Any(), gomock.Any()).Return(rel, nil).AnyTimes()
+		eng.EXPECT().Database(ctx, gomock.Any(), nil).Return(db, nil).AnyTimes()
 
 		ioses := mock_frontend.NewMockIOSession(ctrl)
 		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
@@ -487,11 +489,12 @@ func Test_getLineOutFromSimdCsvRoutine(t *testing.T) {
 }
 
 func Test_rowToColumnAndSaveToStorage(t *testing.T) {
+	ctx := context.TODO()
 	convey.Convey("rowToColumnAndSaveToStorage succ", t, func() {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 		rel := mock_frontend.NewMockRelation(ctrl)
-		rel.EXPECT().Write(gomock.Any(), gomock.Any(), nil).Return(nil).AnyTimes()
+		rel.EXPECT().Write(ctx, gomock.Any()).Return(nil).AnyTimes()
 
 		var curBatchSize = 13
 		handler := &WriteBatchHandler{

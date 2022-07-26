@@ -19,6 +19,11 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+	"github.com/matrixorigin/simdcsv"
 	"math"
 	"os"
 	"runtime"
@@ -28,17 +33,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-
 	"unicode/utf8"
-
-	"github.com/matrixorigin/simdcsv"
 )
 
 type LoadResult struct {
@@ -420,7 +419,11 @@ func initParseLineHandler(handler *ParseLineHandler) error {
 	load := handler.load
 
 	var cols []*engine.AttributeDef = nil
-	defs := relation.TableDefs(handler.txnHandler.GetTxn().GetCtx())
+	ctx := context.TODO()
+	defs, err := relation.TableDefs(ctx)
+	if err != nil {
+		return err
+	}
 	for _, def := range defs {
 		attr, ok := def.(*engine.AttributeDef)
 		if ok {
@@ -1035,15 +1038,17 @@ func rowToColumnAndSaveToStorage(handler *WriteBatchHandler, forceConvert bool, 
 					if isNullOrEmpty {
 						nulls.Add(vec.Nsp, uint64(rowIdx))
 					} else {
-						fs := field
-						d, err := types.ParseStringToDecimal64(fs, vec.Typ.Width, vec.Typ.Scale)
+						d, err := types.Decimal64_FromString(field)
 						if err != nil {
-							logutil.Errorf("parse field[%v] err:%v", field, err)
-							if !ignoreFieldError {
-								return makeParsedFailedError(vec.Typ.String(), field, vecAttr, base, offset)
+							// we tolerate loss of digits.
+							if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+								logutil.Errorf("parse field[%v] err:%v", field, err)
+								if !ignoreFieldError {
+									return makeParsedFailedError(vec.Typ.String(), field, vecAttr, base, offset)
+								}
+								result.Warnings++
+								d = types.Decimal64_Zero
 							}
-							result.Warnings++
-							d = types.Decimal64(0)
 						}
 						cols[rowIdx] = d
 					}
@@ -1052,15 +1057,17 @@ func rowToColumnAndSaveToStorage(handler *WriteBatchHandler, forceConvert bool, 
 					if isNullOrEmpty {
 						nulls.Add(vec.Nsp, uint64(rowIdx))
 					} else {
-						fs := field
-						d, err := types.ParseStringToDecimal128(fs, vec.Typ.Width, vec.Typ.Scale)
+						d, err := types.Decimal128_FromString(field)
 						if err != nil {
-							logutil.Errorf("parse field[%v] err:%v", field, err)
-							if !ignoreFieldError {
-								return makeParsedFailedError(vec.Typ.String(), field, vecAttr, base, offset)
+							// we tolerate loss of digits.
+							if !moerr.IsMoErrCode(err, moerr.DATA_TRUNCATED) {
+								logutil.Errorf("parse field[%v] err:%v", field, err)
+								if !ignoreFieldError {
+									return makeParsedFailedError(vec.Typ.String(), field, vecAttr, base, offset)
+								}
+								result.Warnings++
+								d = types.Decimal128_Zero
 							}
-							result.Warnings++
-							d = types.InitDecimal128(0)
 						}
 						cols[rowIdx] = d
 					}
@@ -1546,7 +1553,7 @@ func rowToColumnAndSaveToStorage(handler *WriteBatchHandler, forceConvert bool, 
 								return err
 							}
 							result.Warnings++
-							d = types.Decimal64(0)
+							d = types.Decimal64_Zero
 							//break
 						}
 						cols[i] = d
@@ -1568,7 +1575,7 @@ func rowToColumnAndSaveToStorage(handler *WriteBatchHandler, forceConvert bool, 
 								return err
 							}
 							result.Warnings++
-							d = types.InitDecimal128(0)
+							d = types.Decimal128_Zero
 							//break
 						}
 						cols[i] = d
@@ -1680,6 +1687,8 @@ when force is true, batchsize will be changed.
 */
 func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 	var err error = nil
+
+	ctx := context.TODO()
 	if handler.batchFilled == handler.batchSize {
 		//batchBytes := 0
 		//for _, vec := range handler.batchData.Vecs {
@@ -1707,16 +1716,16 @@ func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 		if !handler.skipWriteBatch {
 			if handler.oneTxnPerBatch {
 				txnHandler = tmpSes.GetTxnHandler()
-				dbHandler, err = tmpSes.GetStorage().Database(handler.dbName, txnHandler.GetTxn().GetCtx())
+				dbHandler, err = tmpSes.GetStorage().Database(ctx, handler.dbName, engine.Snapshot(txnHandler.GetTxn().GetCtx()))
 				if err != nil {
 					goto handleError
 				}
-				tableHandler, err = dbHandler.Relation(handler.tableName, txnHandler.GetTxn().GetCtx())
+				tableHandler, err = dbHandler.Relation(ctx, handler.tableName)
 				if err != nil {
 					goto handleError
 				}
 			}
-			err = tableHandler.Write(handler.timestamp, handler.batchData, txnHandler.GetTxn().GetCtx())
+			err = tableHandler.Write(ctx, handler.batchData)
 			if handler.oneTxnPerBatch {
 				if err != nil {
 					goto handleError
@@ -1854,17 +1863,17 @@ func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 				if !handler.skipWriteBatch {
 					if handler.oneTxnPerBatch {
 						txnHandler = tmpSes.GetTxnHandler()
-						dbHandler, err = tmpSes.GetStorage().Database(handler.dbName, txnHandler.GetTxn().GetCtx())
+						dbHandler, err = tmpSes.GetStorage().Database(ctx, handler.dbName, engine.Snapshot(txnHandler.GetTxn().GetCtx()))
 						if err != nil {
 							goto handleError2
 						}
 						//new relation
-						tableHandler, err = dbHandler.Relation(handler.tableName, txnHandler.GetTxn().GetCtx())
+						tableHandler, err = dbHandler.Relation(ctx, handler.tableName)
 						if err != nil {
 							goto handleError2
 						}
 					}
-					err = tableHandler.Write(handler.timestamp, handler.batchData, txnHandler.GetTxn().GetCtx())
+					err = tableHandler.Write(ctx, handler.batchData)
 					if handler.oneTxnPerBatch {
 						if err != nil {
 							goto handleError2
