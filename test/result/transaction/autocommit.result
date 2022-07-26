@@ -62,7 +62,6 @@ rollback;
 select * from t2;
 a
 insert into t1 values(3);
-explain select * from t1;
 use autocommit;
 show tables;
 commit;
