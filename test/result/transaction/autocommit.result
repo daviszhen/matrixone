@@ -42,6 +42,7 @@ drop table if exists t1;
 create table t1(a int);
 insert into t1 values(1);
 rollback;
+create table t1(a int);
 select * from t1;
 a
 insert into t1 values(1);
