@@ -361,6 +361,102 @@ func TestTxnHandler_StartByAutocommit(t *testing.T) {
 	})
 }
 
+func TestTxnHandler_NewTxn(t *testing.T) {
+	convey.Convey("new txn", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		taeTxn.EXPECT().Commit().Return(nil).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		cnt := 0
+		storage.EXPECT().StartTxn(gomock.Any()).DoAndReturn(
+			func(x interface{}) (moengine.Txn, error) {
+				cnt++
+				if cnt%2 != 0 {
+					return taeTxn, nil
+				} else {
+					return nil, errors.New("startTxn failed")
+				}
+			}).AnyTimes()
+
+		txn := InitTxnHandler(storage)
+		err := txn.NewTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.NewTxn()
+		convey.So(err, convey.ShouldNotBeNil)
+		err = txn.NewTxn()
+		convey.So(err, convey.ShouldBeNil)
+	})
+}
+
+func TestTxnHandler_CommitTxn(t *testing.T) {
+	convey.Convey("commit txn", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		cnt := 0
+		taeTxn.EXPECT().Commit().DoAndReturn(
+			func() error {
+				cnt++
+				if cnt%2 != 0 {
+					return nil
+				} else {
+					return errors.New("commit failed")
+				}
+			}).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+
+		storage.EXPECT().StartTxn(gomock.Any()).Return(taeTxn, nil).AnyTimes()
+
+		txn := InitTxnHandler(storage)
+		err := txn.NewTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.CommitTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.NewTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.CommitTxn()
+		convey.So(err, convey.ShouldNotBeNil)
+	})
+}
+
+func TestTxnHandler_RollbackTxn(t *testing.T) {
+	convey.Convey("rollback txn", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		cnt := 0
+		taeTxn.EXPECT().Rollback().DoAndReturn(
+			func() error {
+				cnt++
+				if cnt%2 != 0 {
+					return nil
+				} else {
+					return errors.New("rollback failed")
+				}
+			}).AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+
+		storage.EXPECT().StartTxn(gomock.Any()).Return(taeTxn, nil).AnyTimes()
+
+		txn := InitTxnHandler(storage)
+		err := txn.NewTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.RollbackTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.NewTxn()
+		convey.So(err, convey.ShouldBeNil)
+		err = txn.RollbackTxn()
+		convey.So(err, convey.ShouldNotBeNil)
+	})
+}
+
 func TestVariables(t *testing.T) {
 	genSession := func(ctrl *gomock.Controller, gSysVars *GlobalSystemVariables) *Session {
 		ioses := mock_frontend.NewMockIOSession(ctrl)
