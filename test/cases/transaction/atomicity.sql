@@ -70,6 +70,7 @@ begin;
 Insert into test_11 values(3,1);
 Insert into test_11 values(4,2);
 commit;
+drop table if exists test_11;
 select * from test_11 ;
 
 

@@ -1730,7 +1730,7 @@ func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 				if err != nil {
 					goto handleError
 				}
-				err = tmpSes.TxnCommitSingleStatement()
+				err = tmpSes.TxnCommitSingleStatement(nil)
 				if err != nil {
 					goto handleError
 				}
@@ -1752,7 +1752,7 @@ func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 		}
 
 		if handler.oneTxnPerBatch && err != nil {
-			err2 := tmpSes.TxnRollbackSingleStatement()
+			err2 := tmpSes.TxnRollbackSingleStatement(nil)
 			if err2 != nil {
 				logutil.Errorf("rollback failed.error:%v", err2)
 			}
@@ -1878,7 +1878,7 @@ func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 						if err != nil {
 							goto handleError2
 						}
-						err = tmpSes.TxnCommitSingleStatement()
+						err = tmpSes.TxnCommitSingleStatement(nil)
 						if err != nil {
 							goto handleError2
 						}
@@ -1899,7 +1899,7 @@ func writeBatchToStorage(handler *WriteBatchHandler, force bool) error {
 				}
 
 				if handler.oneTxnPerBatch && err != nil {
-					err2 := tmpSes.TxnRollbackSingleStatement()
+					err2 := tmpSes.TxnRollbackSingleStatement(nil)
 					if err2 != nil {
 						logutil.Errorf("rollback failed.error:%v", err2)
 					}
@@ -2082,7 +2082,7 @@ func (mce *MysqlCmdExecutor) LoadLoop(load *tree.Load, dbHandler engine.Database
 
 	//TODO: remove it after tae is ready
 	if handler.oneTxnPerBatch {
-		err = ses.TxnCommitSingleStatement()
+		err = ses.TxnCommitSingleStatement(nil)
 		if err != nil {
 			return nil, err
 		}

@@ -1644,11 +1644,8 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 			                     <- has active transaction
 			drop table test1;    <- has active transaction, error
 			                     <- has active transaction
-
-			So, we check both the active transaction and the multi-statement transaction.
-			To be clear, when it is in the multi-statement transaction, it may not have the active transaction.
 		*/
-		if ses.InMultiStmtTransactionMode() || ses.InActiveTransaction() {
+		if ses.InActiveTransaction() {
 			can := StatementCanBeExecutedInUncommittedTransaction(stmt)
 			if !can {
 				//is ddl statement
@@ -1946,7 +1943,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 	handleSucceeded:
 		//load data handle txn failure internally
 		if !fromLoadData {
-			txnErr = ses.TxnCommitSingleStatement()
+			txnErr = ses.TxnCommitSingleStatement(stmt)
 			if txnErr != nil {
 				return txnErr
 			}
@@ -1966,7 +1963,7 @@ func (mce *MysqlCmdExecutor) doComQuery(sql string) (retErr error) {
 		goto handleNext
 	handleFailed:
 		if !fromLoadData {
-			txnErr = ses.TxnRollbackSingleStatement()
+			txnErr = ses.TxnRollbackSingleStatement(stmt)
 			if txnErr != nil {
 				return txnErr
 			}
@@ -2174,6 +2171,15 @@ func IsDDL(stmt tree.Statement) bool {
 	return false
 }
 
+// IsDropStatement checks the statement is the drop statement.
+func IsDropStatement(stmt tree.Statement) bool {
+	switch stmt.(type) {
+	case *tree.DropDatabase, *tree.DropTable, *tree.DropIndex:
+		return true
+	}
+	return false
+}
+
 //IsAdministrativeStatement checks the statement is the administrative statement.
 func IsAdministrativeStatement(stmt tree.Statement) bool {
 	switch stmt.(type) {
@@ -2193,6 +2199,17 @@ func IsParameterModificationStatement(stmt tree.Statement) bool {
 		return true
 	}
 	return false
+}
+
+/*
+IsStatementToBeCommittedInActiveTransaction checks the statement that need to be committed
+in an active transaction.
+
+Currently, it includes the drop statement, the administration statement ,
+	the parameter modification statement.
+*/
+func IsStatementToBeCommittedInActiveTransaction(stmt tree.Statement) bool {
+	return IsDropStatement(stmt) || IsAdministrativeStatement(stmt) || IsParameterModificationStatement(stmt)
 }
 
 func NewMysqlCmdExecutor() *MysqlCmdExecutor {

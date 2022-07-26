@@ -465,9 +465,10 @@ func (ses *Session) TxnStart() error {
 /*
 TxnCommitSingleStatement commits the single statement transaction.
 */
-func (ses *Session) TxnCommitSingleStatement() error {
+func (ses *Session) TxnCommitSingleStatement(stmt tree.Statement) error {
 	var err error
-	if !ses.InMultiStmtTransactionMode() {
+	if !ses.InMultiStmtTransactionMode() ||
+		stmt != nil && ses.InActiveTransaction() && IsStatementToBeCommittedInActiveTransaction(stmt) {
 		err = ses.txnHandler.CommitTxn()
 		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
 		ses.ClearOptionBits(OPTION_BEGIN)
@@ -478,9 +479,10 @@ func (ses *Session) TxnCommitSingleStatement() error {
 /*
 TxnRollbackSingleStatement rollbacks the single statement transaction.
 */
-func (ses *Session) TxnRollbackSingleStatement() error {
+func (ses *Session) TxnRollbackSingleStatement(stmt tree.Statement) error {
 	var err error
-	if !ses.InMultiStmtTransactionMode() {
+	if !ses.InMultiStmtTransactionMode() ||
+		stmt != nil && ses.InActiveTransaction() && IsStatementToBeCommittedInActiveTransaction(stmt) {
 		err = ses.txnHandler.RollbackTxn()
 		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
 		ses.ClearOptionBits(OPTION_BEGIN)
