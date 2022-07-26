@@ -18,7 +18,9 @@ import (
 	"errors"
 	"github.com/fagongzi/goetty/buf"
 	"github.com/golang/mock/gomock"
+	"github.com/matrixorigin/matrixone/pkg/config"
 	mock_frontend "github.com/matrixorigin/matrixone/pkg/frontend/test"
+	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/moengine"
 	"github.com/smartystreets/goconvey/convey"
 	"testing"
@@ -471,6 +473,42 @@ func TestTxnHandler_RollbackTxn(t *testing.T) {
 	})
 }
 
+func TestSession_TxnBegin(t *testing.T) {
+	genSession := func(ctrl *gomock.Controller, gSysVars *GlobalSystemVariables) *Session {
+		ioses := mock_frontend.NewMockIOSession(ctrl)
+		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
+		ioses.EXPECT().WriteAndFlush(gomock.Any()).Return(nil).AnyTimes()
+		proto := NewMysqlClientProtocol(0, ioses, 1024, nil)
+		return NewSession(proto, nil, nil, nil, gSysVars)
+	}
+	convey.Convey("new session", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		gSysVars := &GlobalSystemVariables{}
+		InitGlobalSystemVariables(gSysVars)
+
+		ses := genSession(ctrl, gSysVars)
+		err := ses.TxnBegin()
+		convey.So(err, convey.ShouldBeNil)
+		err = ses.TxnCommit()
+		convey.So(err, convey.ShouldBeNil)
+		err = ses.TxnBegin()
+		convey.So(err, convey.ShouldBeNil)
+		err = ses.SetAutocommit(false)
+		convey.So(err, convey.ShouldNotBeNil)
+		err = ses.TxnCommit()
+		convey.So(err, convey.ShouldBeNil)
+		_ = ses.txnHandler.GetTxn()
+
+		err = ses.SetAutocommit(true)
+		convey.So(err, convey.ShouldBeNil)
+
+		err = ses.SetAutocommit(false)
+		convey.So(err, convey.ShouldBeNil)
+	})
+}
+
 func TestVariables(t *testing.T) {
 	genSession := func(ctrl *gomock.Controller, gSysVars *GlobalSystemVariables) *Session {
 		ioses := mock_frontend.NewMockIOSession(ctrl)
@@ -716,5 +754,92 @@ func TestVariables(t *testing.T) {
 
 		newSes2 := genSession(ctrl, gSysVars)
 		checkWant(ses, existSes, newSes2, v1, v1_default, v1_default, v1_want, v1_want, v1_want, v1_want)
+	})
+
+	convey.Convey("user variables", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		gSysVars := &GlobalSystemVariables{}
+		InitGlobalSystemVariables(gSysVars)
+
+		ses := genSession(ctrl, gSysVars)
+
+		vars := ses.CopyAllSessionVars()
+		convey.So(len(vars), convey.ShouldNotBeZeroValue)
+
+		err := ses.SetUserDefinedVar("abc", 1)
+		convey.So(err, convey.ShouldBeNil)
+
+		_, _, err = ses.GetUserDefinedVar("abc")
+		convey.So(err, convey.ShouldBeNil)
+	})
+}
+
+func TestSession_TxnCompilerContext(t *testing.T) {
+	genSession := func(ctrl *gomock.Controller, gSysVars *GlobalSystemVariables) *Session {
+		ioses := mock_frontend.NewMockIOSession(ctrl)
+		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
+		ioses.EXPECT().WriteAndFlush(gomock.Any()).Return(nil).AnyTimes()
+		proto := NewMysqlClientProtocol(0, ioses, 1024, nil)
+		return NewSession(proto, nil, nil, nil, gSysVars)
+	}
+
+	convey.Convey("test", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		taeTxn := mock_frontend.NewMockTxn(ctrl)
+		taeTxn.EXPECT().String().Return("").AnyTimes()
+		taeTxn.EXPECT().Commit().Return(nil).AnyTimes()
+		txn := mock_frontend.NewMockTxn(ctrl)
+		txn.EXPECT().GetCtx().Return(nil).AnyTimes()
+		txn.EXPECT().Commit().Return(nil).AnyTimes()
+		txn.EXPECT().Rollback().Return(nil).AnyTimes()
+		txn.EXPECT().String().Return("txn0").AnyTimes()
+		storage := mock_frontend.NewMockTxnEngine(ctrl)
+		storage.EXPECT().StartTxn(gomock.Any()).Return(txn, nil).AnyTimes()
+
+		db := mock_frontend.NewMockDatabase(ctrl)
+		db.EXPECT().Relations(gomock.Any()).Return(nil, nil).AnyTimes()
+
+		table := mock_frontend.NewMockRelation(ctrl)
+		table.EXPECT().TableDefs(gomock.Any()).Return(nil, nil).AnyTimes()
+		table.EXPECT().GetPrimaryKeys(gomock.Any()).Return(nil, nil).AnyTimes()
+		table.EXPECT().GetHideKeys(gomock.Any()).Return(nil, nil).AnyTimes()
+		table.EXPECT().Rows().Return(int64(1000000)).AnyTimes()
+		db.EXPECT().Relation(gomock.Any(), gomock.Any()).Return(table, nil).AnyTimes()
+		storage.EXPECT().Database(gomock.Any(), gomock.Any(), gomock.Any()).Return(db, nil).AnyTimes()
+
+		config.StorageEngine = storage
+		defer func() {
+			config.StorageEngine = nil
+		}()
+
+		gSysVars := &GlobalSystemVariables{}
+		InitGlobalSystemVariables(gSysVars)
+
+		ses := genSession(ctrl, gSysVars)
+
+		tcc := ses.GetTxnCompilerContext()
+		defDBName := tcc.DefaultDatabase()
+		convey.So(defDBName, convey.ShouldEqual, "")
+		convey.So(tcc.DatabaseExists("abc"), convey.ShouldBeTrue)
+
+		_, err := tcc.getRelation("abc", "t1")
+		convey.So(err, convey.ShouldBeNil)
+
+		object, tableRef := tcc.Resolve("abc", "t1")
+		convey.So(object, convey.ShouldNotBeNil)
+		convey.So(tableRef, convey.ShouldNotBeNil)
+
+		pkd := tcc.GetPrimaryKeyDef("abc", "t1")
+		convey.So(len(pkd), convey.ShouldBeZeroValue)
+
+		hkd := tcc.GetHideKeyDef("abc", "t1")
+		convey.So(hkd, convey.ShouldBeNil)
+
+		cost := tcc.Cost(&plan2.ObjectRef{SchemaName: "abc", ObjName: "t1"}, &plan2.Expr{})
+		convey.So(cost, convey.ShouldNotBeNil)
 	})
 }
