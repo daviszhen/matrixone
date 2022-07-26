@@ -67,3 +67,4 @@ show tables;
 tables_in_autocommit
 t1
 commit;
+set autocommit = 1;

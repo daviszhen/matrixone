@@ -47,3 +47,4 @@ insert into t1 values(3);
 use autocommit;
 show tables;
 commit;
+set autocommit = 1;
