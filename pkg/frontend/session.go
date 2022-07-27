@@ -467,8 +467,16 @@ TxnCommitSingleStatement commits the single statement transaction.
 */
 func (ses *Session) TxnCommitSingleStatement(stmt tree.Statement) error {
 	var err error
+	/*
+		Commit Rules:
+		1, if it is in single-statement mode:
+			it commits.
+		2, if it is in multi-statement mode:
+			if the statement is the one can be executed in the active transaction,
+				the transaction need to be committed at the end of the statement.
+	*/
 	if !ses.InMultiStmtTransactionMode() ||
-		stmt != nil && ses.InActiveTransaction() && IsStatementToBeCommittedInActiveTransaction(stmt) {
+		ses.InActiveTransaction() && IsStatementToBeCommittedInActiveTransaction(stmt) {
 		err = ses.txnHandler.CommitTxn()
 		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
 		ses.ClearOptionBits(OPTION_BEGIN)
@@ -481,8 +489,16 @@ TxnRollbackSingleStatement rollbacks the single statement transaction.
 */
 func (ses *Session) TxnRollbackSingleStatement(stmt tree.Statement) error {
 	var err error
+	/*
+		Rollback Rules:
+		1, if it is in single-statement mode:
+			it rollbacks.
+		2, if it is in multi-statement mode:
+			if the statement is the one can be executed in the active transaction,
+				the transaction need to be rollback at the end of the statement.
+	*/
 	if !ses.InMultiStmtTransactionMode() ||
-		stmt != nil && ses.InActiveTransaction() && IsStatementToBeCommittedInActiveTransaction(stmt) {
+		ses.InActiveTransaction() && IsStatementToBeCommittedInActiveTransaction(stmt) {
 		err = ses.txnHandler.RollbackTxn()
 		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
 		ses.ClearOptionBits(OPTION_BEGIN)
