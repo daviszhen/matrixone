@@ -21,6 +21,9 @@ type Binder interface {
 
 var _ Binder = &DefaultBinder{}
 var _ Binder = &TableBinder{}
+var _ Binder = &WhereBinder{}
+var _ Binder = &GroupBinder{}
+var _ Binder = &HavingBinder{}
 
 type baseBinder struct {
 	builder   *QueryBuilder
@@ -38,6 +41,19 @@ type TableBinder struct {
 	baseBinder
 }
 
+type WhereBinder struct {
+	baseBinder
+}
+
+type GroupBinder struct {
+	baseBinder
+}
+
+type HavingBinder struct {
+	baseBinder
+	insideAgg bool
+}
+
 type BindContext struct {
 	binder          Binder
 	parent          *BindContext
@@ -50,6 +66,16 @@ type BindContext struct {
 	bindingByCol   map[string]*Binding
 
 	bindingTree *BindingTreeNode
+
+	headings []string
+	aliasMap map[string]int32
+
+	groupTag     int32
+	aggregateTag int32
+	projectTag   int32
+
+	groupByAst map[string]int32
+	groups     []*plan.Expr
 }
 
 type NameTuple struct {

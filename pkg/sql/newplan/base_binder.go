@@ -50,77 +50,91 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 }
 
 func (b *baseBinder) baseBindParam(astExpr *tree.ParamExpr, depth int32, isRoot bool) (expr *plan.Expr, err error) {
+	return nil, nil
 }
 
 func (b *baseBinder) baseBindVar(astExpr *tree.VarExpr, depth int32, isRoot bool) (expr *plan.Expr, err error) {
+	return nil, nil
 }
 
 func (b *baseBinder) baseBindColRef(astExpr *tree.UnresolvedName, depth int32, isRoot bool) (expr *plan.Expr, err error) {
+	return nil, nil
 }
 
-func (b *baseBinder) baseBindSubquery(astExpr *tree.Subquery, isRoot bool) (*plan.Expr, error) {}
+func (b *baseBinder) baseBindSubquery(astExpr *tree.Subquery, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
+}
 
 func (b *baseBinder) bindCaseExpr(astExpr *tree.CaseExpr, depth int32, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
 }
 
 func (b *baseBinder) bindRangeCond(astExpr *tree.RangeCond, depth int32, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
 }
 
 func (b *baseBinder) bindUnaryExpr(astExpr *tree.UnaryExpr, depth int32, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
 }
 
 func (b *baseBinder) bindBinaryExpr(astExpr *tree.BinaryExpr, depth int32, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
 }
 
 func (b *baseBinder) bindComparisonExpr(astExpr *tree.ComparisonExpr, depth int32, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
 }
 
 func (b *baseBinder) bindFuncExpr(astExpr *tree.FuncExpr, depth int32, isRoot bool) (*plan.Expr, error) {
+	return nil, nil
 }
 
 func (b *baseBinder) bindFuncExprImplByAstExpr(name string, astArgs []tree.Expr, depth int32) (*plan.Expr, error) {
+	return nil, nil
 }
 
-func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, error) {}
+func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, error) {
+	return nil, nil
+}
 
 func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Expr, error) {
-	getStringExpr := func(val string) *plan.Expr {
-		return &plan.Expr{
-			Expr: &plan.Expr_C{
-				C: &plan.Const{
-					Isnull: false,
-					Value: &plan.Const_Sval{
-						Sval: val,
-					},
-				},
-			},
-			Typ: &plan.Type{
-				Id:       int32(types.T_varchar),
-				Nullable: false,
-				Size:     4,
-				Width:    int32(len(val)),
-			},
-		}
-	}
+	//getStringExpr := func(val string) *plan.Expr {
+	//	return &plan.Expr{
+	//		Expr: &plan.Expr_C{
+	//			C: &plan.Const{
+	//				Isnull: false,
+	//				Value: &plan.Const_Sval{
+	//					Sval: val,
+	//				},
+	//			},
+	//		},
+	//		Typ: &plan.Type{
+	//			Id:       int32(types.T_varchar),
+	//			Nullable: false,
+	//			Size:     4,
+	//			Width:    int32(len(val)),
+	//		},
+	//	}
+	//}
 
-	returnDecimalExpr := func(val string) (*plan.Expr, error) {
-		if typ != nil {
-			return appendCastBeforeExpr(getStringExpr(val), typ)
-		}
-
-		_, scale, err := types.ParseStringToDecimal128WithoutTable(val)
-		if err != nil {
-			return nil, err
-		}
-		typ := &plan.Type{
-			Id:        int32(types.T_decimal128),
-			Width:     34,
-			Scale:     scale,
-			Precision: 34,
-			Nullable:  false,
-		}
-		return appendCastBeforeExpr(getStringExpr(val), typ)
-	}
+	//returnDecimalExpr := func(val string) (*plan.Expr, error) {
+	//	if typ != nil {
+	//		return appendCastBeforeExpr(getStringExpr(val), typ)
+	//	}
+	//
+	//	_, scale, err := types.ParseStringToDecimal128WithoutTable(val)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	typ := &plan.Type{
+	//		Id:        int32(types.T_decimal128),
+	//		Width:     34,
+	//		Scale:     scale,
+	//		Precision: 34,
+	//		Nullable:  false,
+	//	}
+	//	return appendCastBeforeExpr(getStringExpr(val), typ)
+	//}
 
 	switch astExpr.ValType {
 	case tree.P_null:
@@ -152,11 +166,19 @@ func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Exp
 				Size:     1,
 			},
 		}, nil
+	default:
+		return nil, errors.New("", fmt.Sprintf("unsupport value: %v", astExpr.Value))
 	}
 }
 
-func appendCastBeforeExpr(expr *plan.Expr, toType *plan.Type) (*plan.Expr, error) {}
+func appendCastBeforeExpr(expr *plan.Expr, toType *plan.Type) (*plan.Expr, error) {
+	return nil, nil
+}
 
-func resetDateFunctionArgs(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {}
+func resetDateFunctionArgs(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {
+	return nil, nil
+}
 
-func resetDateFunctionArgs2(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {}
+func resetDateFunctionArgs2(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {
+	return nil, nil
+}
