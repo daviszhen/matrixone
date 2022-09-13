@@ -302,6 +302,7 @@ func genStatementBatchSql(in []IBuffer2SqlItem, buf *bytes.Buffer) any {
 	buf.WriteString(", `node_uuid`")
 	buf.WriteString(", `node_type`")
 	buf.WriteString(", `request_at`")
+	buf.WriteString(", `status`")
 	buf.WriteString(", `exec_plan`")
 	buf.WriteString(") values ")
 
@@ -328,6 +329,7 @@ func genStatementBatchSql(in []IBuffer2SqlItem, buf *bytes.Buffer) any {
 		buf.WriteString(fmt.Sprintf(`, "%s"`, moNode.NodeUuid))
 		buf.WriteString(fmt.Sprintf(`, "%s"`, moNode.NodeType))
 		buf.WriteString(fmt.Sprintf(`, "%s"`, nanoSec2DatetimeString(s.RequestAt)))
+		buf.WriteString(fmt.Sprintf(`, "%s"`, s.Status))
 		buf.WriteString(fmt.Sprintf(`, "%s"`, quote(s.ExecPlan)))
 		buf.WriteString("),")
 	}

@@ -27,20 +27,21 @@ var _ IBuffer2SqlItem = (*StatementInfo)(nil)
 var _ CsvFields = (*StatementInfo)(nil)
 
 type StatementInfo struct {
-	StatementID          [16]byte      `json:"statement_id"`
-	TransactionID        [16]byte      `json:"transaction_id"`
-	SessionID            [16]byte      `jons:"session_id"`
-	TenantID             uint32        `json:"tenant_id"`
-	UserID               uint32        `json:"user_id"`
-	Account              string        `json:"account"`
-	User                 string        `json:"user"`
-	Host                 string        `json:"host"`
-	Database             string        `json:"database"`
-	Statement            string        `json:"statement"`
-	StatementFingerprint string        `json:"statement_fingerprint"`
-	StatementTag         string        `json:"statement_tag"`
-	RequestAt            util.TimeNano `json:"request_at"` // see WithRequestAt
-	ExecPlan             string        `json:"exec_plan"`
+	StatementID          [16]byte            `json:"statement_id"`
+	TransactionID        [16]byte            `json:"transaction_id"`
+	SessionID            [16]byte            `jons:"session_id"`
+	TenantID             uint32              `json:"tenant_id"`
+	UserID               uint32              `json:"user_id"`
+	Account              string              `json:"account"`
+	User                 string              `json:"user"`
+	Host                 string              `json:"host"`
+	Database             string              `json:"database"`
+	Statement            string              `json:"statement"`
+	StatementFingerprint string              `json:"statement_fingerprint"`
+	StatementTag         string              `json:"statement_tag"`
+	RequestAt            util.TimeNano       `json:"request_at"` // see WithRequestAt
+	Status               StatementInfoStatus `json:"status"`
+	ExecPlan             string              `json:"exec_plan"`
 }
 
 func (s StatementInfo) GetName() string {
@@ -81,6 +82,7 @@ func (s StatementInfo) CsvFields() []string {
 	result = append(result, GetNodeResource().NodeUuid)
 	result = append(result, GetNodeResource().NodeType)
 	result = append(result, nanoSec2DatetimeString(s.RequestAt))
+	result = append(result, s.Status.String())
 	result = append(result, s.ExecPlan)
 	return result
 }

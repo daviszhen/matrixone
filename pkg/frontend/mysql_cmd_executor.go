@@ -147,7 +147,7 @@ func (mce *MysqlCmdExecutor) GetRoutineManager() *RoutineManager {
 	return mce.routineMgr
 }
 
-func (mce *MysqlCmdExecutor) RecordStatement(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, beginIns time.Time) context.Context {
+func (mce *MysqlCmdExecutor) RecordStatement(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, beginIns time.Time, status trace.StatementInfoStatus) context.Context {
 	sessInfo := proc.SessionInfo
 	var stmID uuid.UUID
 	copy(stmID[:], cw.GetUUID())
@@ -173,6 +173,7 @@ func (mce *MysqlCmdExecutor) RecordStatement(ctx context.Context, ses *Session, 
 			StatementFingerprint: "", // fixme
 			StatementTag:         "", // fixme
 			RequestAt:            util.NowNS(),
+			Status:               status,
 		},
 	)
 	return trace.ContextWithSpanContext(ctx, trace.SpanContextWithID(trace.TraceID(stmID)))
@@ -1718,7 +1719,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 	for _, cw := range cws {
 		ses.SetMysqlResultSet(&MysqlResultSet{})
 		stmt := cw.GetAst()
-		ctx := mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant)
+		ctx := mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusRunning)
 
 		/*
 				if it is in an active or multi-statement transaction, we check the type of the statement.
@@ -1738,15 +1739,20 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			if !can {
 				//is ddl statement
 				if IsDDL(stmt) {
-					return errorOnlyCreateStatement
+					retErr = errorOnlyCreateStatement
 				} else if IsAdministrativeStatement(stmt) {
-					return errorAdministrativeStatement
+					retErr = errorAdministrativeStatement
 				} else if IsParameterModificationStatement(stmt) {
-					return errorParameterModificationInTxn
+					retErr = errorParameterModificationInTxn
 				} else {
-					return errorUnclassifiedStatement
+					retErr = errorUnclassifiedStatement
 				}
 			}
+		}
+
+		if retErr != nil {
+			mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
+			return retErr
 		}
 
 		//check transaction states
@@ -2028,6 +2034,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		if !fromLoadData {
 			txnErr = ses.TxnCommitSingleStatement(stmt)
 			if txnErr != nil {
+				mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
 				return txnErr
 			}
 			switch stmt.(type) {
@@ -2041,31 +2048,37 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 				*tree.Deallocate:
 				resp := NewOkResponse(rspLen, 0, 0, 0, int(COM_QUERY), "")
 				if err := mce.GetSession().protocol.SendResponse(resp); err != nil {
+					mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
 					return fmt.Errorf("routine send response failed. error:%v ", err)
 				}
 
 			case *tree.PrepareStmt, *tree.PrepareString:
 				if mce.ses.Cmd == int(COM_STMT_PREPARE) {
 					if err := mce.ses.protocol.SendPrepareResponse(prepareStmt); err != nil {
+						mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
 						return fmt.Errorf("routine send response failed. error:%v ", err)
 					}
 				} else {
 					resp := NewOkResponse(rspLen, 0, 0, 0, int(COM_QUERY), "")
 					if err := mce.GetSession().protocol.SendResponse(resp); err != nil {
+						mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
 						return fmt.Errorf("routine send response failed. error:%v ", err)
 					}
 				}
 			}
 		}
+		mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusSuccess)
 		goto handleNext
 	handleFailed:
 		logutil.Error(err.Error())
 		if !fromLoadData {
 			txnErr = ses.TxnRollbackSingleStatement(stmt)
 			if txnErr != nil {
+				mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
 				return txnErr
 			}
 		}
+		mce.RecordStatement(requestCtx, ses, proc, cw, beginInstant, trace.StatementStatusFailed)
 		return err
 	handleNext:
 	} // end of for
