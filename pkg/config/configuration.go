@@ -246,6 +246,9 @@ type FrontendParameters struct {
 
 	//timeout of the session. the default is 10minutes
 	SessionTimeout toml.Duration `toml:"sessionTimeout"`
+
+	//do not check the privilege
+	DisablePrivilege bool `toml:"disablePrivilege"`
 }
 
 func (fp *FrontendParameters) SetDefaultValues() {

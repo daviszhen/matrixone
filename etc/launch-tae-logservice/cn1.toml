@@ -34,5 +34,8 @@ role = "TP"
 type = "tae"
 logstore = "logservice"
 
+[cn.Frontend]
+disablePrivilege = true
+
 [observability]
 statusPort = 9001
