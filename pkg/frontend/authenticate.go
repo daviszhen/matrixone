@@ -4689,12 +4689,12 @@ func createTablesInInformationSchemaOfGeneralTenant(ctx context.Context, bh Back
 	var err error
 	sqls := make([]string, 0, len(sysview.InitInformationSchemaSysTables)+len(sysview.InitMysqlSysTables)+4)
 
-	sqls = append(sqls, "create database information_schema;")
-	sqls = append(sqls, "use information_schema;")
-	sqls = append(sqls, sysview.InitInformationSchemaSysTables...)
 	sqls = append(sqls, "create database mysql;")
 	sqls = append(sqls, "use mysql;")
 	sqls = append(sqls, sysview.InitMysqlSysTables...)
+	sqls = append(sqls, "create database information_schema;")
+	sqls = append(sqls, "use information_schema;")
+	sqls = append(sqls, sysview.InitInformationSchemaSysTables...)
 
 	for _, sql := range sqls {
 		bh.ClearExecResultSet()
