@@ -4701,23 +4701,13 @@ func createTablesInSystemOfGeneralTenant(ctx context.Context, bh BackgroundExec,
 
 	var err error
 	sqls := make([]string, 0)
-
-	//TODO: fix tables or views to the designated account
 	sqls = append(sqls, "create database "+trace.SystemDBConst+";")
 	sqls = append(sqls, "use system;")
-	traceTables := []string{
-		trace.SingleStatementTable.ToCreateSql(true),
-	}
-
+	traceTables := trace.GetSchemaForAccount(newTenant.GetTenant())
 	sqls = append(sqls, traceTables...)
 	sqls = append(sqls, "create database "+metric.MetricDBConst+";")
 	sqls = append(sqls, "use system_metrics;")
-	metricTables := []string{
-		metric.SingleMetricTable.ToCreateSql(true),
-	}
-
-	//TODO: add views sql_xxx,server_xxx
-
+	metricTables := metric.GetSchemaForAccount(newTenant.GetTenant())
 	sqls = append(sqls, metricTables...)
 
 	for _, sql := range sqls {
