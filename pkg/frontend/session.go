@@ -1193,12 +1193,12 @@ func (th *TxnHandler) GetStorage() engine.Engine {
 	return th.storage
 }
 
-func (th *TxnHandler) GetTxn() TxnOperator {
+func (th *TxnHandler) GetTxn() (TxnOperator, error) {
 	err := th.GetSession().TxnStart()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return th.GetTxnOperator()
+	return th.GetTxnOperator(), nil
 }
 
 func (th *TxnHandler) GetTxnOnly() TxnOperator {
@@ -1277,27 +1277,38 @@ func (tcc *TxnCompilerContext) GetAccountId() uint32 {
 	return tcc.ses.accountId
 }
 
-func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
+func (tcc *TxnCompilerContext) DatabaseExists(name string) (bool, error) {
 	var err error
+	var txn TxnOperator
+	txn, err = tcc.GetTxnHandler().GetTxn()
+	if err != nil {
+		return false, err
+	}
 	//open database
-	_, err = tcc.GetTxnHandler().GetStorage().Database(tcc.GetSession().GetRequestContext(), name, tcc.GetTxnHandler().GetTxn())
+	_, err = tcc.GetTxnHandler().GetStorage().Database(tcc.GetSession().GetRequestContext(), name, txn)
 	if err != nil {
 		logutil.Errorf("get database %v failed. error %v", name, err)
-		return false
+		return false, err
 	}
 
-	return true
+	return true, err
 }
 
 func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (engine.Relation, error) {
-	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
+	var err error
+	var txn TxnOperator
+	dbName, err = tcc.ensureDatabaseIsNotEmpty(dbName)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx := tcc.GetSession().GetRequestContext()
 	//open database
-	db, err := tcc.GetTxnHandler().GetStorage().Database(ctx, dbName, tcc.GetTxnHandler().GetTxn())
+	txn, err = tcc.GetTxnHandler().GetTxn()
+	if err != nil {
+		return nil, err
+	}
+	db, err := tcc.GetTxnHandler().GetStorage().Database(ctx, dbName, txn)
 	if err != nil {
 		logutil.Errorf("get database %v error %v", dbName, err)
 		return nil, err

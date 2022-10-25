@@ -165,7 +165,7 @@ func (mce *MysqlCmdExecutor) GetRoutineManager() *RoutineManager {
 	return mce.routineMgr
 }
 
-var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, beginIns time.Time) context.Context {
+var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, beginIns time.Time) (context.Context, error) {
 	if !trace.GetTracerProvider().IsEnable() {
 		return ctx
 	}
@@ -177,8 +177,14 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	var stmID uuid.UUID
 	copy(stmID[:], cw.GetUUID())
 	var txnID uuid.UUID
+	var txn TxnOperator
+	var err error
 	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-		copy(txnID[:], handler.GetTxn().Txn().ID)
+		txn, err = handler.GetTxn()
+		if err != nil {
+			return nil, err
+		}
+		copy(txnID[:], txn.Txn().ID)
 	}
 	var sesID uuid.UUID
 	copy(sesID[:], ses.GetUUID())
@@ -198,16 +204,23 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 		RequestAt:            util.NowNS(),
 	}
 	sc := trace.SpanContextWithID(trace.TraceID(stmID))
-	return trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
+	return trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm), nil
 }
 
 // RecordStatementTxnID record txnID after TxnBegin or Compile(autocommit=1)
-var RecordStatementTxnID = func(ctx context.Context, ses *Session) {
+var RecordStatementTxnID = func(ctx context.Context, ses *Session) error {
 	if stm := trace.StatementFromContext(ctx); ses != nil && stm != nil && stm.IsZeroTxnID() {
+		var err error
+		var txn TxnOperator
 		if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-			stm.SetTxnID(handler.GetTxn().Txn().ID)
+			txn, err = handler.GetTxn()
+			if err != nil {
+				return err
+			}
+			stm.SetTxnID(txn.Txn().ID)
 		}
 	}
+	return nil
 }
 
 // outputPool outputs the data
@@ -859,10 +872,15 @@ func extractRowFromVector(ses *Session, vec *vector.Vector, i int, row []interfa
 }
 
 func (mce *MysqlCmdExecutor) handleChangeDB(requestCtx context.Context, db string) error {
+	var txn TxnOperator
+	var err error
 	ses := mce.GetSession()
 	txnHandler := ses.GetTxnHandler()
-	//TODO: check meta data
-	if _, err := ses.GetParameterUnit().StorageEngine.Database(requestCtx, db, txnHandler.GetTxn()); err != nil {
+	txn, err = txnHandler.GetTxn()
+	if err != nil {
+		return err
+	}
+	if _, err = ses.GetParameterUnit().StorageEngine.Database(requestCtx, db, txn); err != nil {
 		//echo client. no such database
 		return moerr.NewBadDB(db)
 	}
@@ -1822,7 +1840,10 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	if cwft.plan.GetQuery().GetLoadTag() {
 		cwft.proc.TxnOperator = txnHandler.GetTxnOnly()
 	} else {
-		cwft.proc.TxnOperator = txnHandler.GetTxn()
+		cwft.proc.TxnOperator, err = txnHandler.GetTxn()
+		if err != nil {
+			return nil, err
+		}
 	}
 	cwft.proc.FileService = cwft.ses.GetParameterUnit().FileService
 	cwft.compile = compile.New(cwft.ses.GetDatabaseName(), cwft.ses.GetSql(), cwft.ses.GetUserName(), requestCtx, cwft.ses.GetStorage(), cwft.proc, cwft.stmt)

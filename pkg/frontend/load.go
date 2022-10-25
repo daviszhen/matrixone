@@ -1660,6 +1660,7 @@ func writeBatchToStorage(handler *WriteBatchHandler, proc *process.Process, forc
 		//dbHandler := handler.dbHandler
 		var dbHandler engine.Database
 		var txnHandler *TxnHandler
+		var txn TxnOperator
 		tableHandler := handler.tableHandler
 		initSes := handler.ses
 		// XXX run backgroup session using initSes.Mp, is this correct thing?
@@ -1668,7 +1669,11 @@ func writeBatchToStorage(handler *WriteBatchHandler, proc *process.Process, forc
 		if !handler.skipWriteBatch {
 			if handler.oneTxnPerBatch {
 				txnHandler = tmpSes.GetTxnHandler()
-				dbHandler, err = tmpSes.GetStorage().Database(ctx, handler.dbName, txnHandler.GetTxn())
+				txn, err = txnHandler.GetTxn()
+				if err != nil {
+					goto handleError
+				}
+				dbHandler, err = tmpSes.GetStorage().Database(ctx, handler.dbName, txn)
 				if err != nil {
 					goto handleError
 				}
@@ -1804,6 +1809,7 @@ func writeBatchToStorage(handler *WriteBatchHandler, proc *process.Process, forc
 				handler.ThreadInfo.SetTime(wait_a)
 				handler.ThreadInfo.SetCnt(1)
 				var txnHandler *TxnHandler
+				var txn TxnOperator
 				tableHandler := handler.tableHandler
 				// dbHandler := handler.dbHandler
 				initSes := handler.ses
@@ -1814,7 +1820,11 @@ func writeBatchToStorage(handler *WriteBatchHandler, proc *process.Process, forc
 				if !handler.skipWriteBatch {
 					if handler.oneTxnPerBatch {
 						txnHandler = tmpSes.GetTxnHandler()
-						dbHandler, err = tmpSes.GetStorage().Database(ctx, handler.dbName, txnHandler.GetTxn())
+						txn, err = txnHandler.GetTxn()
+						if err != nil {
+							goto handleError2
+						}
+						dbHandler, err = tmpSes.GetStorage().Database(ctx, handler.dbName, txn)
 						if err != nil {
 							goto handleError2
 						}
