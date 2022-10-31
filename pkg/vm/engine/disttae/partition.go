@@ -17,6 +17,7 @@ package disttae
 import (
 	"bytes"
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -466,6 +467,7 @@ func (p *Partition) NewReader(
 		data:       p.data,
 		iter:       p.data.NewIter(tx),
 	}
+	fmt.Println("-->partition.NewReader readerNumber", readerNumber, "blocks count", len(blks))
 	if readerNumber == 1 {
 		for i := range blks {
 			readers = append(readers, &blockMergeReader{
@@ -492,6 +494,9 @@ func (p *Partition) NewReader(
 		}
 		for j := len(blks) + 1; j < readerNumber; j++ {
 			readers[j] = &emptyReader{}
+		}
+		for _, reader := range readers {
+			fmt.Printf("-->partition.NewReader %p\n", reader)
 		}
 		return readers, nil
 	}

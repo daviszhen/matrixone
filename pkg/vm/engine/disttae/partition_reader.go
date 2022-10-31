@@ -50,12 +50,16 @@ func (p *PartitionReader) Close() error {
 }
 
 func (p *PartitionReader) Read(colNames []string, expr *plan.Expr, mp *mpool.MPool) (*batch.Batch, error) {
+	fmt.Println("-->", "PartitionReader.Read", colNames)
 	if p == nil {
+		fmt.Println("-->", "PartitionReader.Read", 1)
 		return nil, nil
 	}
 	if p.end {
+		fmt.Println("-->", "PartitionReader.Read", 2)
 		return nil, nil
 	}
+	fmt.Println("-->", "PartitionReader.Read", 8)
 	if len(p.inserts) > 0 {
 		bat := p.inserts[0].GetSubBatch(colNames)
 		p.inserts = p.inserts[1:]
@@ -64,15 +68,19 @@ func (p *PartitionReader) Read(colNames []string, expr *plan.Expr, mp *mpool.MPo
 			b.Vecs[i] = vector.New(p.typsMap[name])
 		}
 		if _, err := b.Append(mp, bat); err != nil {
+			fmt.Println("-->", "PartitionReader.Read", 3)
 			return nil, err
 		}
+		fmt.Println("-->", "PartitionReader.Read", 4)
 		return b, nil
 	}
 	b := batch.New(false, colNames)
+	fmt.Println("-->", "PartitionReader.Read", 9)
 	for i, name := range colNames {
 		b.Vecs[i] = vector.New(p.typsMap[name])
 	}
 	rows := 0
+	fmt.Println("-->", "PartitionReader.Read", 10)
 	if len(p.index) > 0 {
 		p.iter.Close()
 		itr := p.data.NewIndexIter(p.tx, p.index, p.index)
@@ -117,11 +125,12 @@ func (p *PartitionReader) Read(colNames []string, expr *plan.Expr, mp *mpool.MPo
 		itr.Close()
 		p.end = true
 		if rows == 0 {
+			fmt.Println("-->", "PartitionReader.Read", 5)
 			return nil, nil
 		}
 		return b, nil
 	}
-
+	fmt.Println("-->", "PartitionReader.Read", 11)
 	fn := p.iter.Next
 	if !p.firstCalled {
 		fn = p.iter.First
@@ -129,6 +138,7 @@ func (p *PartitionReader) Read(colNames []string, expr *plan.Expr, mp *mpool.MPo
 	}
 
 	maxRows := 8192 // i think 8192 is better than 4096
+	fmt.Println("-->", "PartitionReader.Read", 11)
 	for ok := fn(); ok; ok = p.iter.Next() {
 		dataKey, dataValue, err := p.iter.Read()
 		if err != nil {
@@ -161,6 +171,7 @@ func (p *PartitionReader) Read(colNames []string, expr *plan.Expr, mp *mpool.MPo
 		}
 	}
 
+	fmt.Println("-->", "PartitionReader.Read", 12)
 	if rows > 0 {
 		b.InitZsOne(rows)
 		for _, vec := range b.Vecs {
@@ -168,8 +179,9 @@ func (p *PartitionReader) Read(colNames []string, expr *plan.Expr, mp *mpool.MPo
 		}
 	}
 	if rows == 0 {
+		fmt.Println("-->", "PartitionReader.Read", 6)
 		return nil, nil
 	}
-
+	fmt.Println("-->", "PartitionReader.Read", 7)
 	return b, nil
 }

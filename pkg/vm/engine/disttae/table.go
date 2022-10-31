@@ -404,6 +404,7 @@ func (tbl *table) newMergeReader(ctx context.Context, num int,
 		if tbl.meta != nil {
 			blks = tbl.meta.modifedBlocks[i]
 		}
+		//fmt.Println("-->table.newMergeReader", "block cnt", len(blks))
 		rds0, err := tbl.parts[i].NewReader(ctx, num, index, tbl.defs, tbl.tableDef,
 			tbl.skipBlocks, blks, tbl.db.txn.meta.SnapshotTS, tbl.db.fs, writes)
 		if err != nil {

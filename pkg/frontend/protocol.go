@@ -226,7 +226,6 @@ func (cpi *ProtocolImpl) Quit() {
 	defer cpi.lock.Unlock()
 	if cpi.tcpConn != nil {
 		if !cpi.tcpConn.Connected() {
-			logutil.Warn("close tcp meet conn not Connected")
 			return
 		}
 		err := cpi.tcpConn.Close()

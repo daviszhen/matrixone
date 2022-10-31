@@ -16,6 +16,7 @@ package disttae
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -181,6 +182,7 @@ func (txn *Transaction) getTableMeta(ctx context.Context, databaseId uint64,
 			rows, err := txn.getRows(ctx, name, databaseId, 0,
 				[]DNStore{dnStore}, catalog.MoTableMetaDefs, catalog.MoTableMetaSchema, nil)
 			if moerr.IsMoErrCode(err, moerr.OkExpectedEOB) {
+				fmt.Println("--> get table meta")
 				continue
 			}
 			if err != nil {
@@ -269,6 +271,7 @@ func (txn *Transaction) getRow(ctx context.Context, databaseId uint64, tableId u
 		return nil, err
 	}
 	if len(bats) == 0 {
+		fmt.Println("--> get row 1")
 		return nil, moerr.GetOkExpectedEOB()
 	}
 	rows := make([][]any, 0, len(bats))
@@ -279,6 +282,7 @@ func (txn *Transaction) getRow(ctx context.Context, databaseId uint64, tableId u
 		bat.Clean(txn.proc.Mp())
 	}
 	if len(rows) == 0 {
+		fmt.Println("--> get row 2")
 		return nil, moerr.GetOkExpectedEOB()
 	}
 	if len(rows) != 1 {
@@ -295,6 +299,7 @@ func (txn *Transaction) getRows(ctx context.Context, name string, databaseId uin
 		return nil, err
 	}
 	if len(bats) == 0 {
+		fmt.Println("--> get rows")
 		return nil, moerr.GetOkExpectedEOB()
 	}
 	rows := make([][]any, 0, len(bats))
@@ -385,18 +390,27 @@ func (txn *Transaction) getRowsByIndex(databaseId, tableId uint64, name string,
 		accessed[dn.GetUUID()] = 0
 	}
 	parts := txn.db.getPartitions(databaseId, tableId)
+	fmt.Println("-->y", databaseId, tableId, len(txn.dnStores), len(parts))
 	for i, dn := range txn.dnStores {
 		if _, ok := accessed[dn.GetUUID()]; !ok {
+			fmt.Println("-->s")
 			continue
 		}
+		fmt.Println("-->z")
 		tuples, err := parts[i].GetRowsByIndex(txn.meta.SnapshotTS, index, columns, deletes)
+		if err != nil {
+			fmt.Println("-->x", err)
+		}
 		if err == nil {
+			fmt.Println("-->t tuples", len(tuples))
 			rows = append(rows, tuples...)
 		}
 	}
 	if len(rows) == 0 {
+		fmt.Println("--> get rows by index 0 rows")
 		return nil, moerr.GetOkExpectedEOB()
 	}
+	fmt.Println("--> get rows by index ", len(rows), " rows")
 	return rows, nil
 }
 
@@ -437,6 +451,7 @@ func (txn *Transaction) readTable(ctx context.Context, name string, databaseId u
 		if _, ok := accessed[dn.GetUUID()]; !ok {
 			continue
 		}
+		///fmt.Println("-->Transaction.readTable")
 		rds, err := parts[i].NewReader(ctx, 1, nil, defs, nil, nil, nil,
 			txn.meta.SnapshotTS, nil, writes)
 		if err != nil {

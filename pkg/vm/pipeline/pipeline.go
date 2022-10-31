@@ -16,8 +16,7 @@ package pipeline
 
 import (
 	"bytes"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-
+	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/dispatch"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -53,7 +52,7 @@ func (p *Pipeline) Run(r engine.Reader, proc *process.Process) (bool, error) {
 	var end bool // exist flag
 	var err error
 	var bat *batch.Batch
-	logutil.Debugf("-->pipeline run")
+	fmt.Println("-->pipeline run")
 	defer cleanup(p, proc)
 	if p.reg != nil { // used to handle some push-down request
 		select {
@@ -61,19 +60,22 @@ func (p *Pipeline) Run(r engine.Reader, proc *process.Process) (bool, error) {
 		case <-p.reg.Ch:
 		}
 	}
-	logutil.Debugf("-->prepare")
+	fmt.Println("-->prepare")
 	if err = vm.Prepare(p.instructions, proc); err != nil {
-		logutil.Debugf("-->prepare error. error:%v", err)
+		fmt.Println("-->prepare error. error:%v", err)
 		return false, err
 	}
 	for {
 		// read data from storage engine
-		logutil.Debugf("-->read 1")
+		fmt.Println("-->read 1")
 		if bat, err = r.Read(p.attrs, nil, proc.Mp()); err != nil {
-			logutil.Debugf("-->read error:%v", err)
+			fmt.Println("-->read error:%v", err)
 			return false, err
 		}
-		logutil.Debugf("-->read 2")
+		fmt.Printf("-->read 2 batch %v\n", bat)
+		if bat != nil {
+			fmt.Println("-->read 3 batch has data %v", len(bat.Zs) != 0)
+		}
 		if bat != nil {
 			bat.Cnt = 1
 		}

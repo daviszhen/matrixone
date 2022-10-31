@@ -15,6 +15,7 @@
 package disttae
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
@@ -28,6 +29,7 @@ func (r *emptyReader) Close() error {
 }
 
 func (r *emptyReader) Read(cols []string, expr *plan.Expr, m *mpool.MPool) (*batch.Batch, error) {
+	fmt.Println("-->", "emptyReader.Read", cols)
 	return nil, nil
 }
 
@@ -36,6 +38,7 @@ func (r *blockReader) Close() error {
 }
 
 func (r *blockReader) Read(cols []string, expr *plan.Expr, m *mpool.MPool) (*batch.Batch, error) {
+	fmt.Println("-->", "blockReader.Read", cols)
 	if len(r.blks) == 0 {
 		return nil, nil
 	}
@@ -49,6 +52,7 @@ func (r *blockMergeReader) Close() error {
 }
 
 func (r *blockMergeReader) Read(cols []string, expr *plan.Expr, m *mpool.MPool) (*batch.Batch, error) {
+	fmt.Println("-->", "blockMergeReader.Read", cols)
 	if len(r.blks) == 0 {
 		return nil, nil
 	}
@@ -76,7 +80,9 @@ func (r *mergeReader) Close() error {
 }
 
 func (r *mergeReader) Read(cols []string, expr *plan.Expr, m *mpool.MPool) (*batch.Batch, error) {
+	fmt.Println("-->", "mergeReader.Read", cols)
 	if len(r.rds) == 0 {
+		fmt.Println("-->", "mergeReader.Read", 1)
 		return nil, nil
 	}
 	for len(r.rds) > 0 {
@@ -85,14 +91,17 @@ func (r *mergeReader) Read(cols []string, expr *plan.Expr, m *mpool.MPool) (*bat
 			for _, rd := range r.rds {
 				rd.Close()
 			}
+			fmt.Println("-->", "mergeReader.Read", 2)
 			return nil, err
 		}
 		if bat == nil {
 			r.rds = r.rds[1:]
 		}
 		if bat != nil {
+			fmt.Println("-->", "mergeReader.Read", 3)
 			return bat, nil
 		}
 	}
+	fmt.Println("-->", "mergeReader.Read", 4)
 	return nil, nil
 }

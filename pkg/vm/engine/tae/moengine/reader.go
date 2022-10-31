@@ -16,6 +16,7 @@ package moengine
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -37,6 +38,7 @@ func newReader(rel handle.Relation, it handle.BlockIt) *txnReader {
 }
 
 func (r *txnReader) Read(attrs []string, _ *plan.Expr, m *mpool.MPool) (*batch.Batch, error) {
+	fmt.Println("-->", "txnReader.Read", attrs)
 	r.it.Lock()
 	if !r.it.Valid() {
 		r.it.Unlock()
