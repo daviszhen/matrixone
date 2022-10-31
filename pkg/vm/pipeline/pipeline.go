@@ -16,6 +16,7 @@ package pipeline
 
 import (
 	"bytes"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/dispatch"
 
@@ -52,7 +53,7 @@ func (p *Pipeline) Run(r engine.Reader, proc *process.Process) (bool, error) {
 	var end bool // exist flag
 	var err error
 	var bat *batch.Batch
-
+	logutil.Debugf("-->pipeline run")
 	defer cleanup(p, proc)
 	if p.reg != nil { // used to handle some push-down request
 		select {
@@ -60,14 +61,19 @@ func (p *Pipeline) Run(r engine.Reader, proc *process.Process) (bool, error) {
 		case <-p.reg.Ch:
 		}
 	}
+	logutil.Debugf("-->prepare")
 	if err = vm.Prepare(p.instructions, proc); err != nil {
+		logutil.Debugf("-->prepare error. error:%v", err)
 		return false, err
 	}
 	for {
 		// read data from storage engine
+		logutil.Debugf("-->read 1")
 		if bat, err = r.Read(p.attrs, nil, proc.Mp()); err != nil {
+			logutil.Debugf("-->read error:%v", err)
 			return false, err
 		}
+		logutil.Debugf("-->read 2")
 		if bat != nil {
 			bat.Cnt = 1
 		}
