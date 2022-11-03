@@ -36,9 +36,9 @@ import (
 )
 
 func HandleSyncLogTailReq(mgr *LogtailMgr, c *catalog.Catalog, req api.SyncLogTailReq) (resp api.SyncLogTailResp, err error) {
-	logutil.Infof("[Logtail] begin handle %v", req)
+	logutil.Debugf("[Logtail] begin handle %v", req)
 	defer func() {
-		logutil.Infof("[Logtail] end handle err %v", err)
+		logutil.Debugf("[Logtail] end handle err %v", err)
 	}()
 	start := types.BuildTS(req.CnHave.PhysicalTime, req.CnHave.LogicalTime)
 	end := types.BuildTS(req.CnWant.PhysicalTime, req.CnWant.LogicalTime)
@@ -391,13 +391,18 @@ func (b *TableLogtailRespBuilder) appendBlkMeta(e *catalog.BlockEntry, metaNode 
 	logutil.Infof("[Logtail] record block meta row %s, %v, %s, %s, %s, %s",
 		e.AsCommonID().String(), e.IsAppendable(),
 		metaNode.CreatedAt.ToString(), metaNode.DeletedAt.ToString(), metaNode.MetaLoc, metaNode.DeltaLoc)
-
+	is_sorted := false
+	if !e.IsAppendable() && e.GetSchema().HasPK() {
+		is_sorted = true
+	}
 	insBatch := b.blkMetaInsBatch
 	insBatch.GetVectorByName(pkgcatalog.BlockMeta_ID).Append(e.ID)
 	insBatch.GetVectorByName(pkgcatalog.BlockMeta_EntryState).Append(e.IsAppendable())
+	insBatch.GetVectorByName(pkgcatalog.BlockMeta_Sorted).Append(is_sorted)
 	insBatch.GetVectorByName(pkgcatalog.BlockMeta_MetaLoc).Append([]byte(metaNode.MetaLoc))
 	insBatch.GetVectorByName(pkgcatalog.BlockMeta_DeltaLoc).Append([]byte(metaNode.DeltaLoc))
 	insBatch.GetVectorByName(pkgcatalog.BlockMeta_CommitTs).Append(metaNode.GetEnd())
+	insBatch.GetVectorByName(pkgcatalog.BlockMeta_SegmentID).Append(e.GetSegment().ID)
 	insBatch.GetVectorByName(catalog.AttrCommitTs).Append(metaNode.CreatedAt)
 	insBatch.GetVectorByName(catalog.AttrRowID).Append(u64ToRowID(e.ID))
 
@@ -413,7 +418,7 @@ func (b *TableLogtailRespBuilder) appendBlkMeta(e *catalog.BlockEntry, metaNode 
 
 func (b *TableLogtailRespBuilder) visitBlkData(e *catalog.BlockEntry) (err error) {
 	block := e.GetBlockData()
-	insBatch, err := block.CollectAppendInRange(b.start, b.end)
+	insBatch, err := block.CollectAppendInRange(b.start, b.end, false)
 	if err != nil {
 		return
 	}
@@ -421,7 +426,7 @@ func (b *TableLogtailRespBuilder) visitBlkData(e *catalog.BlockEntry) (err error
 		b.dataInsBatch.Extend(insBatch)
 		// insBatch is freed, don't use anymore
 	}
-	delBatch, err := block.CollectDeleteInRange(b.start, b.end)
+	delBatch, err := block.CollectDeleteInRange(b.start, b.end, false)
 	if err != nil {
 		return
 	}

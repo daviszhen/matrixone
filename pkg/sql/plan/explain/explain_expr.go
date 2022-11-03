@@ -44,8 +44,22 @@ func describeExpr(expr *plan.Expr, options *ExplainOptions) (string, error) {
 		}
 
 		switch val := exprImpl.C.Value.(type) {
-		case *plan.Const_Ival:
-			result += strconv.FormatInt(val.Ival, 10)
+		case *plan.Const_I8Val:
+			result += strconv.FormatInt(int64(val.I8Val), 10)
+		case *plan.Const_I16Val:
+			result += strconv.FormatInt(int64(val.I16Val), 10)
+		case *plan.Const_I32Val:
+			result += strconv.FormatInt(int64(val.I32Val), 10)
+		case *plan.Const_I64Val:
+			result += strconv.FormatInt(val.I64Val, 10)
+		case *plan.Const_U8Val:
+			result += strconv.FormatUint(uint64(val.U8Val), 10)
+		case *plan.Const_U16Val:
+			result += strconv.FormatUint(uint64(val.U16Val), 10)
+		case *plan.Const_U32Val:
+			result += strconv.FormatUint(uint64(val.U32Val), 10)
+		case *plan.Const_U64Val:
+			result += strconv.FormatUint(val.U64Val, 10)
 
 		case *plan.Const_Dval:
 			result += strconv.FormatFloat(val.Dval, 'f', -1, 64)
@@ -108,7 +122,7 @@ func funcExprExplain(funcExpr *plan.Expr_F, Typ *plan.Type, options *ExplainOpti
 		return result, moerr.NewInvalidInput("invalid function or opreator '%s'", funcName)
 	}
 
-	switch funcProtoType.Layout {
+	switch funcProtoType.GetLayout() {
 	case function.STANDARD_FUNCTION:
 		result += funcExpr.F.Func.GetObjName() + "("
 		if len(funcExpr.F.Args) > 0 {

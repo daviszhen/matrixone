@@ -50,6 +50,9 @@ var (
 	//listening ip
 	defaultHost = "0.0.0.0"
 
+	//listening unix domain socket
+	defaultUnixAddr = "/var/lib/mysql/mysql.sock"
+
 	//host mmu limitation. 1 << 40 = 1099511627776
 	defaultHostMmuLimitation = 1099511627776
 
@@ -115,8 +118,8 @@ var (
 	// defaultMetricGatherInterval default: 15 sec.
 	defaultMetricGatherInterval = 15
 
-	// defaultMergeCycle default: 0 sec, means disable merge as service
-	defaultMergeCycle = 0
+	// defaultMergeCycle default: 4 hours
+	defaultMergeCycle = 4 * time.Hour
 
 	// defaultPathBuilder, val in [DBTable, AccountDate]
 	defaultPathBuilder = "AccountDate"
@@ -147,6 +150,9 @@ type FrontendParameters struct {
 
 	//listening ip
 	Host string `toml:"host"`
+
+	//listening unix domain socket
+	UAddr string `toml:"UAddr"`
 
 	//host mmu limitation. default: 1 << 40 = 1099511627776
 	HostMmuLimitation int64 `toml:"hostMmuLimitation"`
@@ -276,6 +282,10 @@ func (fp *FrontendParameters) SetDefaultValues() {
 		fp.Host = defaultHost
 	}
 
+	if fp.UAddr == "" {
+		fp.UAddr = defaultUnixAddr
+	}
+
 	if fp.HostMmuLimitation == 0 {
 		fp.HostMmuLimitation = int64(defaultHostMmuLimitation)
 	}
@@ -401,7 +411,9 @@ type ObservabilityParameters struct {
 	// MetricGatherInterval default is 15 sec.
 	MetricGatherInterval int `toml:"metricGatherInterval"`
 
-	MergeCycle int `toml:"mergeCycle"`
+	// MergeCycle default: 14400 sec (4 hours).
+	// PS: only used while MO init.
+	MergeCycle toml.Duration `toml:"mergeCycle"`
 
 	// PathBuilder default: DBTable. Support val in [DBTable, AccountDate]
 	PathBuilder string `toml:"PathBuilder"`
@@ -434,8 +446,8 @@ func (op *ObservabilityParameters) SetDefaultValues(version string) {
 		op.MetricGatherInterval = defaultMetricGatherInterval
 	}
 
-	if op.MergeCycle <= 0 {
-		op.MergeCycle = defaultMergeCycle
+	if op.MergeCycle.Duration <= 0 {
+		op.MergeCycle.Duration = defaultMergeCycle
 	}
 
 	if op.PathBuilder == "" {
@@ -457,6 +469,9 @@ type ParameterUnit struct {
 
 	// FileService
 	FileService fileservice.FileService
+
+	// GetClusterDetails
+	GetClusterDetails engine.GetClusterDetailsFunc
 }
 
 func NewParameterUnit(
@@ -464,12 +479,14 @@ func NewParameterUnit(
 	storageEngine engine.Engine,
 	txnClient client.TxnClient,
 	clusterNodes engine.Nodes,
+	getClusterDetails engine.GetClusterDetailsFunc,
 ) *ParameterUnit {
 	return &ParameterUnit{
-		SV:            sv,
-		StorageEngine: storageEngine,
-		TxnClient:     txnClient,
-		ClusterNodes:  clusterNodes,
+		SV:                sv,
+		StorageEngine:     storageEngine,
+		TxnClient:         txnClient,
+		ClusterNodes:      clusterNodes,
+		GetClusterDetails: getClusterDetails,
 	}
 }
 

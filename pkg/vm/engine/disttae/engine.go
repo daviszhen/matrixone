@@ -26,13 +26,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
-	"github.com/matrixorigin/matrixone/pkg/pb/logservice"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
-
-type GetClusterDetailsFunc = func() (logservice.ClusterDetails, error)
 
 func New(
 	ctx context.Context,
@@ -40,7 +37,7 @@ func New(
 	fs fileservice.FileService,
 	cli client.TxnClient,
 	idGen IDGenerator,
-	getClusterDetails GetClusterDetailsFunc,
+	getClusterDetails engine.GetClusterDetailsFunc,
 ) *Engine {
 	cluster, err := getClusterDetails()
 	if err != nil {
@@ -104,6 +101,7 @@ func (e *Engine) Database(ctx context.Context, name string,
 		db := &database{
 			txn:          txn,
 			db:           e.db,
+			fs:           e.fs,
 			databaseId:   catalog.MO_CATALOG_ID,
 			databaseName: name,
 		}
@@ -134,17 +132,39 @@ func (e *Engine) Databases(ctx context.Context, op client.TxnOperator) ([]string
 }
 
 func (e *Engine) Delete(ctx context.Context, name string, op client.TxnOperator) error {
+	var db *database
+
 	txn := e.getTransaction(op)
 	if txn == nil {
 		return moerr.NewTxnClosed()
 	}
 	key := genDatabaseKey(ctx, name)
-	txn.databaseMap.Delete(key)
-	id, err := txn.getDatabaseId(ctx, name)
+	if v, ok := txn.databaseMap.Load(key); ok {
+		db = v.(*database)
+		txn.databaseMap.Delete(key)
+	} else {
+		id, err := txn.getDatabaseId(ctx, name)
+		if err != nil {
+			return err
+		}
+		db = &database{
+			txn:          txn,
+			db:           e.db,
+			fs:           e.fs,
+			databaseId:   id,
+			databaseName: name,
+		}
+	}
+	rels, err := db.Relations(ctx)
 	if err != nil {
 		return err
 	}
-	bat, err := genDropDatabaseTuple(id, name, e.mp)
+	for _, relName := range rels {
+		if err := db.Delete(ctx, relName); err != nil {
+			return err
+		}
+	}
+	bat, err := genDropDatabaseTuple(db.databaseId, name, e.mp)
 	if err != nil {
 		return err
 	}
@@ -200,6 +220,7 @@ func (e *Engine) New(ctx context.Context, op client.TxnOperator) error {
 		e.cli,
 		op,
 		e.fs,
+		e.getClusterDetails,
 	)
 	txn := &Transaction{
 		op:             op,
