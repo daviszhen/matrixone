@@ -56,8 +56,8 @@ func init() {
 func mockRecordStatement(ctx context.Context) (context.Context, *gostub.Stubs) {
 	stm := &trace.StatementInfo{}
 	ctx = trace.ContextWithStatement(ctx, stm)
-	stubs := gostub.Stub(&RecordStatement, func(context.Context, *Session, *process.Process, ComputationWrapper, time.Time, string, bool) context.Context {
-		return ctx
+	stubs := gostub.Stub(&RecordStatement, func(context.Context, *Session, *process.Process, ComputationWrapper, time.Time, string, bool) (context.Context, error) {
+		return ctx, nil
 	})
 	return ctx, stubs
 }
