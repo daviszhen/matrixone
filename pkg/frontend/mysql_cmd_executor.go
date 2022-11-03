@@ -167,7 +167,7 @@ func (mce *MysqlCmdExecutor) GetRoutineManager() *RoutineManager {
 
 var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, beginIns time.Time) (context.Context, error) {
 	if !trace.GetTracerProvider().IsEnable() {
-		return ctx
+		return ctx, nil
 	}
 	sessInfo := proc.SessionInfo
 	tenant := ses.GetTenantInfo()
