@@ -165,9 +165,9 @@ func (mce *MysqlCmdExecutor) GetRoutineManager() *RoutineManager {
 	return mce.routineMgr
 }
 
-var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, envBegin time.Time, envStmt string, useEnv bool) (context.Context, error) {
+var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, envBegin time.Time, envStmt string, useEnv bool) context.Context {
 	if !trace.GetTracerProvider().IsEnable() {
-		return ctx, nil
+		return ctx
 	}
 	sessInfo := proc.SessionInfo
 	tenant := ses.GetTenantInfo()
@@ -182,9 +182,10 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
 		txn, err = handler.GetTxn()
 		if err != nil {
-			return nil, err
+			logutil.Errorf("RecordStatement error:%v", err)
+		} else {
+			copy(txnID[:], txn.Txn().ID)
 		}
-		copy(txnID[:], txn.Txn().ID)
 	}
 	var sesID uuid.UUID
 	copy(sesID[:], ses.GetUUID())
@@ -208,12 +209,12 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 		RequestAt:            requestAt,
 	}
 	sc := trace.SpanContextWithID(trace.TraceID(stmID))
-	return trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm), nil
+	return trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
 }
 
-var RecordParseErrorStatement = func(ctx context.Context, ses *Session, proc *process.Process, envBegin time.Time, envStmt string, err error) (context.Context, error) {
+var RecordParseErrorStatement = func(ctx context.Context, ses *Session, proc *process.Process, envBegin time.Time, envStmt string, err error) context.Context {
 	if !trace.GetTracerProvider().IsEnable() {
-		return ctx, nil
+		return ctx
 	}
 	sessInfo := proc.SessionInfo
 	tenant := ses.GetTenantInfo()
@@ -226,9 +227,10 @@ var RecordParseErrorStatement = func(ctx context.Context, ses *Session, proc *pr
 	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
 		txn, err = handler.GetTxn()
 		if err != nil {
-			return nil, err
+			logutil.Errorf("RecordParseErrorStatement error:%v", err)
+		} else {
+			copy(txnID[:], txn.Txn().ID)
 		}
-		copy(txnID[:], txn.Txn().ID)
 	}
 	var sesID uuid.UUID
 	copy(sesID[:], ses.GetUUID())
@@ -248,7 +250,7 @@ var RecordParseErrorStatement = func(ctx context.Context, ses *Session, proc *pr
 	sc := trace.SpanContextWithID(trace.TraceID(stmID))
 	ctx = trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
 	trace.EndStatement(ctx, err)
-	return ctx, nil
+	return ctx
 }
 
 // RecordStatementTxnID record txnID after TxnBegin or Compile(autocommit=1)
@@ -2458,10 +2460,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		proc, ses)
 	if err != nil {
 		retErr = moerr.NewParseError(err.Error())
-		requestCtx, err2 = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, sql, retErr)
-		if err2 != nil {
-			logutil.Errorf("RecordParseErrorStatement error:%v", err2)
-		}
+		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, sql, retErr)
 		logStatementStringStatus(requestCtx, ses, sql, fail, retErr)
 		return retErr
 	}
@@ -2485,10 +2484,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 	for _, cw := range cws {
 		ses.SetMysqlResultSet(&MysqlResultSet{})
 		stmt := cw.GetAst()
-		requestCtx, err2 = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sql, singleStatement)
-		if err2 != nil {
-			logutil.Errorf("RecordStatement error:%v", err2)
-		}
+		requestCtx = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sql, singleStatement)
 		tenant := ses.GetTenantName(stmt)
 		//skip PREPARE statement here
 		if ses.GetTenantInfo() != nil && !IsPrepareStatement(stmt) {
