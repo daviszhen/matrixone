@@ -2083,11 +2083,12 @@ func (cwft *TxnComputationWrapper) GetAffectedRows() uint64 {
 func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
 	var err error
 	defer RecordStatementTxnID(requestCtx, cwft.ses)
+	logInfof(cwft.ses.GetConciseProfile(), "begin buildPlan")
 	cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 	if err != nil {
 		return nil, err
 	}
-
+	logInfof(cwft.ses.GetConciseProfile(), "end buildPlan")
 	if _, ok := cwft.stmt.(*tree.Execute); ok {
 		executePlan := cwft.plan.GetDcl().GetExecute()
 		stmtName := executePlan.GetName()
@@ -2148,13 +2149,16 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 			return nil, err
 		}
 	}
+	logInfof(cwft.ses.GetConciseProfile(), "begin compile.New")
 	cwft.proc.FileService = cwft.ses.GetParameterUnit().FileService
 	cwft.compile = compile.New(cwft.ses.GetDatabaseName(), cwft.ses.GetSql(), cwft.ses.GetUserName(), requestCtx, cwft.ses.GetStorage(), cwft.proc, cwft.stmt)
-
+	logInfof(cwft.ses.GetConciseProfile(), "end compile.New")
 	if _, ok := cwft.stmt.(*tree.ExplainAnalyze); ok {
 		fill = func(obj interface{}, bat *batch.Batch) error { return nil }
 	}
+	logInfof(cwft.ses.GetConciseProfile(), "begin compile.Compile")
 	err = cwft.compile.Compile(cwft.plan, cwft.ses, fill)
+	logInfof(cwft.ses.GetConciseProfile(), "end compile.Compile")
 	if err != nil {
 		return nil, err
 	}
