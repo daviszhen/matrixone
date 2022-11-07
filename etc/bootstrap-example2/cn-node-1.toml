@@ -1,12 +1,11 @@
 # service node type, [DN|CN|LOG]
-service-type = "DN"
+service-type = "CN"
 data-dir = "./mo-data"
 
 [log]
 level = "debug"
 format = "json"
 max-size = 512
-
 
 [hakeeper-client]
 service-addresses = [
@@ -27,22 +26,19 @@ backend = "MEM"
 name = "ETL"
 backend = "DISK-ETL"
 
-[dn]
-uuid = "dd4dccb4-4d3c-41f8-b482-5251dc7a41bf"
-listen-address = "127.0.0.1:41010"
-service-address = "127.0.0.1:41010"
+[cn]
+uuid = "3ACD476F-CC47-1600-2C81-F62182A0CDF5"
+listen-address = "127.0.0.1:3308"
+role = "TP"
 
-[dn.Txn.Storage]
-backend = "TAE"
-log-backend = "logservice"
+[cn.Engine]
+type = "distributed-tae"
 
-[dn.rpc]
+[cn.rpc]
 max-message-size = "100mb"
 
-[dn.Ckp]
-flush-interval = "60s"
-min-count = 100
-scan-interval = "5s"
-incremental-interval = "1000000s"
-global-interval = "100000s"
+[cn.frontend]
+port = 30003
 
+[observability]
+statusPort = 9001

@@ -1,0 +1,14 @@
+logservices = [
+    "./etc/bootstrap-example2/log-node-1.toml",
+    "./etc/bootstrap-example2/log-node-2.toml",
+    "./etc/bootstrap-example2/log-node-3.toml",
+]
+
+dnservices = [
+    "./etc/bootstrap-example2/dn-node-1.toml",
+]
+
+cnservices = [
+    "./etc/bootstrap-example2/cn-node-1.toml",
+    "./etc/bootstrap-example2/cn-node-2.toml",
+]
