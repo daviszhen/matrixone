@@ -19,11 +19,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/fagongzi/goetty/v2"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/fagongzi/goetty/v2"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
@@ -230,14 +230,14 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 				// do upgradeTls
 				tlsConn := tls.Server(rs.RawConn(), rm.getTlsConfig())
 				logDebugf(protoProfile, "get TLS conn ok")
-				newCtx, cancelFun := context.WithTimeout(ses.GetRequestContext(), 20*time.Second)
+				newCtx, _ := context.WithTimeout(ses.GetRequestContext(), 20*time.Second)
 				if err = tlsConn.HandshakeContext(newCtx); err != nil {
 					logErrorf(protoProfile, "before cancel() error:%v", err)
-					cancelFun()
+					//cancelFun()
 					logErrorf(protoProfile, "after cancel() error:%v", err)
 					return err
 				}
-				cancelFun()
+				//cancelFun()
 				logDebugf(protoProfile, "TLS handshake ok")
 				rs.UseConn(tlsConn)
 				logDebugf(protoProfile, "TLS handshake finished")

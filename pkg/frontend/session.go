@@ -265,7 +265,7 @@ func NewBackgroundSession(ctx context.Context, mp *mpool.MPool, PU *config.Param
 
 func (bgs *BackgroundSession) Close() {
 	if bgs.cancel != nil {
-		bgs.cancel()
+		//bgs.cancel()
 	}
 }
 

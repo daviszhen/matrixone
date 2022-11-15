@@ -171,7 +171,7 @@ func (routine *Routine) Loop(routineCtx context.Context) {
 			logDebugf(ses.GetConciseProfile(), "the time of handling the request %s", time.Since(reqBegin).String())
 		}
 
-		cancelRequestFunc()
+		//cancelRequestFunc()
 	}
 
 	ses = routine.GetSession()
@@ -198,7 +198,7 @@ func (routine *Routine) Quit() {
 
 		cancel := routine.GetCancelRoutineFunc()
 		if cancel != nil {
-			cancel()
+			//cancel()
 		}
 
 		proto := routine.GetClientProtocol()
