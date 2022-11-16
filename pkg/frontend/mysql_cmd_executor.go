@@ -2101,10 +2101,12 @@ func (cwft *TxnComputationWrapper) GetAffectedRows() uint64 {
 func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
 	var err error
 	defer RecordStatementTxnID(requestCtx, cwft.ses)
+	logDebugf(cwft.ses.GetConciseProfile(), "begin buildplan")
 	cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 	if err != nil {
 		return nil, err
 	}
+	logDebugf(cwft.ses.GetConciseProfile(), "end buildplan")
 
 	if _, ok := cwft.stmt.(*tree.Execute); ok {
 		executePlan := cwft.plan.GetDcl().GetExecute()
@@ -2156,6 +2158,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		}
 	}
 
+	logDebugf(cwft.ses.GetConciseProfile(), "begin get txn")
 	cwft.proc.UnixTime = time.Now().UnixNano()
 	txnHandler := cwft.ses.GetTxnHandler()
 	if cwft.plan.GetQuery().GetLoadTag() {
@@ -2166,6 +2169,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 			return nil, err
 		}
 	}
+	logDebugf(cwft.ses.GetConciseProfile(), "end get txn")
 	addr := ""
 	if len(cwft.ses.GetParameterUnit().ClusterNodes) > 0 {
 		addr = cwft.ses.GetParameterUnit().ClusterNodes[0].Addr
@@ -2176,7 +2180,9 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	if _, ok := cwft.stmt.(*tree.ExplainAnalyze); ok {
 		fill = func(obj interface{}, bat *batch.Batch) error { return nil }
 	}
+	logDebugf(cwft.ses.GetConciseProfile(), "begin compile")
 	err = cwft.compile.Compile(cwft.plan, cwft.ses, fill)
+	logDebugf(cwft.ses.GetConciseProfile(), "end compile")
 	if err != nil {
 		return nil, err
 	}
@@ -2218,7 +2224,9 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	}
 	if ret != nil {
 		if ses != nil && ses.GetTenantInfo() != nil {
+			logDebugf(ses.GetConciseProfile(), "begin auth plan 1")
 			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, ret)
+			logDebugf(ses.GetConciseProfile(), "end auth plan 1")
 			if err != nil {
 				return nil, err
 			}
@@ -2246,7 +2254,9 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	}
 	if ret != nil {
 		if ses != nil && ses.GetTenantInfo() != nil {
+			logDebugf(ses.GetConciseProfile(), "begin auth plan")
 			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, ret)
+			logDebugf(ses.GetConciseProfile(), "end auth plan")
 			if err != nil {
 				return nil, err
 			}
