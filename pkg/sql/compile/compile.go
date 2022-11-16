@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"runtime"
 	"sync/atomic"
 
@@ -211,7 +212,9 @@ func (c *Compile) compileQuery(qry *plan.Query) (*Scope, error) {
 		return nil, moerr.NewNYI(fmt.Sprintf("query '%s'", qry))
 	}
 	var err error
+	logutil.Debugf("begin nodes")
 	c.cnList, err = c.e.Nodes()
+	logutil.Debugf("end nodes")
 	if err != nil {
 		return nil, err
 	}
@@ -225,10 +228,16 @@ func (c *Compile) compileQuery(qry *plan.Query) (*Scope, error) {
 		}
 	}
 	c.initAnalyze(qry)
+	logutil.Debugf("begin compilePlanScope")
 	ss, err := c.compilePlanScope(qry.Nodes[qry.Steps[0]], qry.Nodes)
+	logutil.Debugf("end compilePlanScope")
 	if err != nil {
 		return nil, err
 	}
+	logutil.Debugf("begin compileAP+TpQuery")
+	defer func() {
+		logutil.Debugf("end compileAP+TpQuery")
+	}()
 	if c.info.Typ == plan2.ExecTypeTP {
 		return c.compileTpQuery(qry, ss)
 	}
