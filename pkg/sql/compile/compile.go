@@ -58,12 +58,13 @@ func New(addr, db string, sql string, uid string, ctx context.Context,
 
 // Compile is the entrance of the compute-layer, it compiles AST tree to scope list.
 // A scope is an execution unit.
-func (c *Compile) Compile(pn *plan.Plan, u any, fill func(any, *batch.Batch) error) (err error) {
+func (c *Compile) Compile(pn *plan.Plan, u any, profile string, fill func(any, *batch.Batch) error) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			err = moerr.ConvertPanicError(e)
 		}
 	}()
+	c.conciseProfile = profile
 	c.u = u
 	c.fill = fill
 	c.info = plan2.GetExecTypeFromPlan(pn)
@@ -212,9 +213,9 @@ func (c *Compile) compileQuery(qry *plan.Query) (*Scope, error) {
 		return nil, moerr.NewNYI(fmt.Sprintf("query '%s'", qry))
 	}
 	var err error
-	logutil.Debugf("begin nodes")
+	logutil.Debugf("begin nodes %s", c.conciseProfile)
 	c.cnList, err = c.e.Nodes()
-	logutil.Debugf("end nodes")
+	logutil.Debugf("end nodes %s", c.conciseProfile)
 	if err != nil {
 		return nil, err
 	}
@@ -228,15 +229,15 @@ func (c *Compile) compileQuery(qry *plan.Query) (*Scope, error) {
 		}
 	}
 	c.initAnalyze(qry)
-	logutil.Debugf("begin compilePlanScope")
+	logutil.Debugf("begin compilePlanScope %s", c.conciseProfile)
 	ss, err := c.compilePlanScope(qry.Nodes[qry.Steps[0]], qry.Nodes)
-	logutil.Debugf("end compilePlanScope")
+	logutil.Debugf("end compilePlanScope %s", c.conciseProfile)
 	if err != nil {
 		return nil, err
 	}
-	logutil.Debugf("begin compileAP+TpQuery")
+	logutil.Debugf("begin compileAP+TpQuery %s", c.conciseProfile)
 	defer func() {
-		logutil.Debugf("end compileAP+TpQuery")
+		logutil.Debugf("end compileAP+TpQuery %s", c.conciseProfile)
 	}()
 	if c.info.Typ == plan2.ExecTypeTP {
 		return c.compileTpQuery(qry, ss)

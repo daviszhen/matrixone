@@ -163,5 +163,6 @@ type Compile struct {
 
 	cnList engine.Nodes
 	// ast
-	stmt tree.Statement
+	stmt           tree.Statement
+	conciseProfile string
 }

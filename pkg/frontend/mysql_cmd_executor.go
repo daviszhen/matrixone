@@ -2181,7 +2181,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		fill = func(obj interface{}, bat *batch.Batch) error { return nil }
 	}
 	logDebugf(cwft.ses.GetConciseProfile(), "begin compile")
-	err = cwft.compile.Compile(cwft.plan, cwft.ses, fill)
+	err = cwft.compile.Compile(cwft.plan, cwft.ses, cwft.ses.GetConciseProfile(), fill)
 	logDebugf(cwft.ses.GetConciseProfile(), "end compile")
 	if err != nil {
 		return nil, err
