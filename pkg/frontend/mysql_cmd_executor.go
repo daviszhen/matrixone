@@ -72,11 +72,16 @@ func abortTransactionErrorInfo() string {
 	return "Previous DML conflicts with existing constraints or data format. This transaction has to be aborted"
 }
 
+func writeConflictsErrorInfo() string {
+	return "Write conflicts detected. Previous transaction has to be aborted."
+}
+
 var (
 	errorOnlyCreateStatement        = moerr.NewInternalError(onlyCreateStatementErrorInfo())
 	errorAdministrativeStatement    = moerr.NewInternalError("administrative command is unsupported in transactions")
 	errorParameterModificationInTxn = moerr.NewInternalError(parameterModificationInTxnErrorInfo())
 	errorUnclassifiedStatement      = moerr.NewInternalError("unclassified statement appears in uncommitted transaction")
+	errorWriteConflicts             = moerr.NewInternalError(writeConflictsErrorInfo())
 )
 
 const (

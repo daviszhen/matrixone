@@ -1267,6 +1267,9 @@ func (th *TxnHandler) NewTxn() error {
 	if th.IsValidTxn() {
 		err = th.CommitTxn()
 		if err != nil {
+			if strings.Contains(err.Error(), "w-w conflict") {
+				return errorWriteConflicts
+			}
 			return err
 		}
 	}
