@@ -1,14 +1,16 @@
 package newplan
 
 import (
+	"math"
+
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
-	"math"
 )
 
 const (
-	AmbiguousName = math.MaxInt32
+	NotFound      int32 = math.MaxInt32
+	AmbiguousName       = math.MaxInt32
 )
 
 type Binder interface {
@@ -54,6 +56,20 @@ type HavingBinder struct {
 	insideAgg bool
 }
 
+type ProjectionBinder struct {
+	baseBinder
+	havingBinder *HavingBinder
+}
+
+type OrderBinder struct {
+	*ProjectionBinder
+	selectList tree.SelectExprs
+}
+
+type LimitBinder struct {
+	baseBinder
+}
+
 type BindContext struct {
 	binder          Binder
 	parent          *BindContext
@@ -76,6 +92,19 @@ type BindContext struct {
 
 	groupByAst map[string]int32
 	groups     []*plan.Expr
+
+	aggregateByAst map[string]int32
+	aggregates     []*plan.Expr
+
+	projects      []*plan.Expr
+	projectByExpr map[string]int32
+
+	isDistinct   bool
+	isCorrelated bool
+
+	results []*plan.Expr
+
+	resultTag int32
 }
 
 type NameTuple struct {
@@ -108,6 +137,14 @@ type Binding struct {
 	types       []*plan.Type
 	refCnts     []uint
 	colIdByName map[string]int32
+}
+
+func (b *Binding) FindColumn(col string) int32 {
+	if id, ok := b.colIdByName[col]; ok {
+		return id
+	}
+
+	return NotFound
 }
 
 func NewBind(tag, nodeID int32, table string, cols []string, types []*plan.Type) *Binding {

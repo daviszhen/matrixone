@@ -1426,6 +1426,8 @@ func (builder *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, is
 		ctx.projects[i] = proj
 	}
 
+	fmt.Println("projectlist", ctx.projects)
+
 	nodeID = builder.appendNode(&plan.Node{
 		NodeType:    plan.Node_PROJECT,
 		ProjectList: ctx.projects,

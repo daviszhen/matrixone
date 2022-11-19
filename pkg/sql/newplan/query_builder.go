@@ -2,12 +2,15 @@ package newplan
 
 import (
 	"fmt"
+	"strings"
+
+	"github.com/matrixorigin/matrixone/pkg/catalog"
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
-	"github.com/matrixorigin/matrixone/pkg/sql/errors"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/catalog"
 )
 
 func NewQueryBuilder(queryType plan.Query_StatementType, ctx plan2.CompilerContext) *QueryBuilder {
@@ -21,13 +24,16 @@ func NewQueryBuilder(queryType plan.Query_StatementType, ctx plan2.CompilerConte
 }
 
 func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot bool) (int32, error) {
+	astOrderBy := stmt.OrderBy
+	astLimit := stmt.Limit
+
 	var clause *tree.SelectClause
 	switch selectClause := stmt.Select.(type) {
 	case *tree.SelectClause:
 		clause = selectClause
 	}
 
-	nodeId, err := qb.buildFrom(clause.From.Tables, ctx)
+	nodeID, err := qb.buildFrom(clause.From.Tables, ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -86,7 +92,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 	}
 
 	if len(selectList) == 0 {
-		return 0, errors.New("", "No tables used")
+		return 0, moerr.NewParseError("No tables used")
 	}
 
 	if clause.Where != nil {
@@ -99,7 +105,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 		var expr *plan.Expr
 
 		for _, where := range whereList {
-			nodeId, expr, err = qb.flattenSubqueries(nodeId, where, ctx)
+			nodeID, expr, err = qb.flattenSubqueries(nodeID, where, ctx)
 			if err != nil {
 				return 0, err
 			}
@@ -109,9 +115,9 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 			}
 		}
 
-		nodeId = qb.appendNode(&plan.Node{
+		nodeID = qb.appendNode(&plan.Node{
 			NodeType:   plan.Node_FILTER,
-			Children:   []int32{nodeId},
+			Children:   []int32{nodeID},
 			FilterList: newFilterList,
 		}, ctx)
 	}
@@ -135,9 +141,236 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 		}
 	}
 
-	//TODO: HAVING
-	panic("TODO")
-	return 0, nil
+	var havingList []*plan.Expr
+	havingBinder := NewHavingBinder(qb, ctx)
+	if clause.Having != nil {
+		ctx.binder = havingBinder
+		havingList, err = splitAndBindCondition(clause.Having.Expr, ctx)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	projectionBinder := NewProjectionBinder(qb, ctx, havingBinder)
+	ctx.binder = projectionBinder
+	for i, selectExpr := range selectList {
+		astExpr, err := ctx.qualifyColumnNames(selectExpr.Expr, nil, false)
+		if err != nil {
+			return 0, err
+		}
+
+		expr, err := projectionBinder.BindExpr(astExpr, 0, true)
+		if err != nil {
+			return 0, err
+		}
+
+		qb.nameByColRef[[2]int32{ctx.projectTag, int32(i)}] = tree.String(astExpr, dialect.MYSQL)
+
+		alias := string(selectExpr.As)
+		if len(alias) > 0 {
+			ctx.aliasMap[alias] = int32(len(ctx.projects))
+		}
+		ctx.projects = append(ctx.projects, expr)
+	}
+
+	resultLen := len(ctx.projects)
+	for i, proj := range ctx.projects {
+		exprStr := proj.String()
+		if _, ok := ctx.projectByExpr[exprStr]; !ok {
+			ctx.projectByExpr[exprStr] = int32(i)
+		}
+	}
+	ctx.isDistinct = clause.Distinct
+
+	var orderBys []*plan.OrderBySpec
+	if astOrderBy != nil {
+		orderBinder := NewOrderBinder(projectionBinder, selectList)
+		orderBys = make([]*plan.OrderBySpec, 0, len(astOrderBy))
+
+		for _, order := range astOrderBy {
+			expr, err := orderBinder.BindExpr(order.Expr)
+			if err != nil {
+				return 0, err
+			}
+
+			orderBy := &plan.OrderBySpec{
+				Expr: expr,
+				Flag: plan.OrderBySpec_INTERNAL,
+			}
+
+			switch order.Direction {
+			case tree.Ascending:
+				orderBy.Flag |= plan.OrderBySpec_ASC
+			case tree.Descending:
+				orderBy.Flag |= plan.OrderBySpec_DESC
+			}
+
+			switch order.NullsPosition {
+			case tree.NullsFirst:
+				orderBy.Flag |= plan.OrderBySpec_NULLS_FIRST
+			case tree.NullsLast:
+				orderBy.Flag |= plan.OrderBySpec_NULLS_LAST
+			}
+
+			orderBys = append(orderBys, orderBy)
+		}
+	}
+
+	var limitExpr *plan.Expr
+	var offsetExpr *plan.Expr
+	if astLimit != nil {
+		limitBinder := NewLimitBinder(qb, ctx)
+		if astLimit.Offset != nil {
+			offsetExpr, err = limitBinder.BindExpr(astLimit.Offset, 0, true)
+			if err != nil {
+				return 0, err
+			}
+		}
+
+		if astLimit.Count != nil {
+			limitExpr, err = limitBinder.BindExpr(astLimit.Count, 0, true)
+			if err != nil {
+				return 0, err
+			}
+
+			if cExpr, ok := limitExpr.Expr.(*plan.Expr_C); ok {
+				if c, ok := cExpr.C.Value.(*plan.Const_I64Val); ok {
+					ctx.hasSingleRow = c.I64Val == 1
+				}
+			}
+		}
+	}
+
+	if (len(ctx.groups) > 0 || len(ctx.aggregates) > 0) && len(projectionBinder.boundCols) > 0 {
+		mode, err := qb.compCtx.ResolveVariable("sql_mode", true, false)
+		if err != nil {
+			return 0, err
+		}
+
+		if strings.Contains(mode.(string), "ONLY_FULL_GROUP_BY") {
+			return 0, moerr.NewSyntaxError("column %q must appear in the GROUP BY clause or be used in an aggregate function", projectionBinder.boundCols[0])
+		}
+
+		// for i, proj := range ctx.projects {
+		// 	//TODO
+		// }
+	}
+
+	if len(ctx.groups) == 0 && len(ctx.aggregates) > 0 {
+		ctx.hasSingleRow = true
+	}
+
+	if len(ctx.groups) > 0 || len(ctx.aggregates) > 0 {
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType:    plan.Node_AGG,
+			Children:    []int32{nodeID},
+			GroupBy:     ctx.groups,
+			AggList:     ctx.aggregates,
+			BindingTags: []int32{ctx.groupTag, ctx.aggregateTag},
+		}, ctx)
+
+		if len(havingList) > 0 {
+			var newFilterList []*plan.Expr
+			var expr *plan.Expr
+			for _, cond := range havingList {
+				nodeID, expr, err = qb.flattenSubqueries(nodeID, cond, ctx)
+				if err != nil {
+					return 0, err
+				}
+
+				if expr != nil {
+					newFilterList = append(newFilterList, expr)
+				}
+			}
+
+			nodeID = qb.appendNode(&plan.Node{
+				NodeType:   plan.Node_FILTER,
+				Children:   []int32{nodeID},
+				FilterList: newFilterList,
+			}, ctx)
+		}
+
+		for name, id := range ctx.groupByAst {
+			qb.nameByColRef[[2]int32{ctx.groupTag, id}] = name
+		}
+
+		for name, id := range ctx.aggregateByAst {
+			qb.nameByColRef[[2]int32{ctx.aggregateTag, id}] = name
+		}
+	}
+
+	for i, proj := range ctx.projects {
+		nodeID, proj, err = qb.flattenSubqueries(nodeID, proj, ctx)
+		if err != nil {
+			return 0, err
+		}
+
+		if proj == nil {
+			return 0, moerr.NewNYI("non-scalar subquery in SELECT clause")
+		}
+
+		ctx.projects[i] = proj
+	}
+
+	fmt.Println("projectlist", ctx.projects)
+
+	nodeID = qb.appendNode(&plan.Node{
+		NodeType:    plan.Node_PROJECT,
+		ProjectList: ctx.projects,
+		Children:    []int32{nodeID},
+		BindingTags: []int32{ctx.projectTag},
+	}, ctx)
+
+	if clause.Distinct {
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType: plan.Node_DISTINCT,
+			Children: []int32{nodeID},
+		}, ctx)
+	}
+
+	if len(orderBys) > 0 {
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType: plan.Node_SORT,
+			Children: []int32{nodeID},
+			OrderBy:  orderBys,
+		}, ctx)
+	}
+
+	if limitExpr != nil || offsetExpr != nil {
+		node := qb.qry.Nodes[nodeID]
+		node.Limit = limitExpr
+		node.Offset = offsetExpr
+	}
+
+	if qb.qry.Nodes[nodeID].NodeType != plan.Node_PROJECT {
+		for i := 0; i < resultLen; i++ {
+			ctx.results = append(ctx.results, &plan.Expr{
+				Typ: ctx.projects[i].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: ctx.projectTag,
+						ColPos: int32(i),
+					},
+				},
+			})
+		}
+
+		ctx.resultTag = qb.genNewTag()
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType:    plan.Node_PROJECT,
+			ProjectList: ctx.results,
+			Children:    []int32{nodeID},
+			BindingTags: []int32{ctx.resultTag},
+		}, ctx)
+	} else {
+		ctx.results = ctx.projects
+	}
+
+	if isRoot {
+		qb.qry.Headings = append(qb.qry.Headings, ctx.headings...)
+	}
+
+	return nodeID, nil
 }
 
 func (qb *QueryBuilder) buildFrom(stmt tree.TableExprs, ctx *BindContext) (int32, error) {
@@ -164,7 +397,7 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 
 		obj, tableDef := qb.compCtx.Resolve(schema, table)
 		if tableDef == nil {
-			return 0, errors.New("", fmt.Sprintf("table %q does not exist", table))
+			return 0, moerr.NewParseError("table %q does not exist", table)
 		}
 
 		tableDef.Name2ColIndex = map[string]int32{}
@@ -196,13 +429,16 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 			BindingTags: []int32{qb.genNewTag()},
 		}, ctx)
 	case *tree.JoinTableExpr:
+		if tbl.Right == nil {
+			return qb.buildTable(tbl.Left, ctx)
+		}
 		return qb.buildJoinTable(tbl, ctx)
 	case *tree.ParenTableExpr:
 		return qb.buildTable(tbl.Expr, ctx)
 	case *tree.AliasedTableExpr:
 		if _, ok := tbl.Expr.(*tree.Select); ok {
 			if tbl.As.Alias == "" {
-				return 0, errors.New("", fmt.Sprintf("subquery in FROM must have an alias: %T", stmt))
+				return 0, moerr.NewSyntaxError("subquery in FROM must have an alias: %T", stmt)
 			}
 		}
 
@@ -215,7 +451,7 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 
 		return
 	default:
-		return 0, errors.New("", fmt.Sprintf("unsupport table expr: %T", stmt))
+		return 0, moerr.NewParseError("unsupport table expr: %T", stmt)
 	}
 
 	return
@@ -238,7 +474,7 @@ func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *Bi
 	var binding *Binding
 	if node.NodeType == plan.Node_TABLE_SCAN || node.NodeType == plan.Node_MATERIAL_SCAN || node.NodeType == plan.Node_EXTERNAL_SCAN {
 		if len(alias.Cols) > len(node.TableDef.Cols) {
-			return errors.New("", fmt.Sprintf("table %q has %d columns available but %d columns specified", alias.Alias, len(node.TableDef.Cols), len(alias.Cols)))
+			return moerr.NewSyntaxError("table %q has %d columns available but %d columns specified", alias.Alias, len(node.TableDef.Cols), len(alias.Cols))
 		}
 
 		var table string
@@ -249,7 +485,7 @@ func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *Bi
 		}
 
 		if _, ok := ctx.bindingByTable[table]; ok {
-			return errors.New("", fmt.Sprintf("table name %q specified more than once", table))
+			return moerr.NewSyntaxError("table name %q specified more than once", table)
 		}
 
 		cols = make([]string, len(node.TableDef.Cols))
@@ -296,9 +532,73 @@ func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *Bi
 	return nil
 }
 
+type ColRefRemapping struct {
+	globalToLocal map[[2]int32][2]int32
+	localToGlobal [][2]int32
+}
+
+func (m *ColRefRemapping) addColRef(colRef [2]int32) {
+	m.globalToLocal[colRef] = [2]int32{0, int32(len(m.localToGlobal))}
+	m.localToGlobal = append(m.localToGlobal, colRef)
+}
+
+func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int) (*ColRefRemapping, error) {
+	node := qb.qry.Nodes[nodeID]
+
+	remapping := &ColRefRemapping{
+		globalToLocal: make(map[[2]int32][2]int32),
+	}
+
+	// switch node.NodeType {
+	// case plan.Node_TABLE_SCAN,
+	// 	plan.Node_MATERIAL_SCAN,
+	// 	plan.Node_EXTERNAL_SCAN,
+	// 	plan.Node_TABLE_FUNCTION:
+	// 	for _, expr := range node.FilterList {
+
+	// 	}
+	// case plan.Node_INTERSECT,
+	// 	plan.Node_INTERSECT_ALL,
+	// 	plan.Node_UNION,
+	// 	plan.Node_UNION_ALL,
+	// 	plan.Node_MINUS,
+	// 	plan.Node_MINUS_ALL:
+	// case plan.Node_JOIN:
+	// case plan.Node_AGG:
+	// case plan.Node_SORT:
+	// case plan.Node_FILTER:
+	// case plan.Node_PROJECT, plan.Node_MATERIAL:
+	// case plan.Node_DISTINCT:
+	// case plan.Node_VALUE_SCAN:
+	// default:
+	// 	return nil, moerr.NewInternalError("unsupport node type")
+	// }
+
+	node.BindingTags = nil
+
+	return remapping, nil
+}
+
 func (qb *QueryBuilder) createQuery() (*plan.Query, error) {
-	panic("TODO")
-	return nil, nil
+	for i, rootId := range qb.qry.Steps {
+		rootId, _ = qb.pushdownFilters(rootId, nil)
+		rootId = qb.determineJoinOrder(rootId)
+		rootId = qb.pushdownSemiAntiJoins(rootId)
+		qb.qry.Steps[i] = rootId
+
+		colRefCnt := make(map[[2]int32]int)
+		rootNode := qb.qry.Nodes[rootId]
+		resultTag := rootNode.BindingTags[0]
+		for i := range rootNode.ProjectList {
+			colRefCnt[[2]int32{resultTag, int32(i)}] = 1
+		}
+
+		_, err := qb.remapAllColRefs(rootId, colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return qb.qry, nil
 }
 
 func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
@@ -394,11 +694,33 @@ func splitAstConjunction(astExpr tree.Expr) []tree.Expr {
 
 func (qb *QueryBuilder) flattenSubqueries(nodeID int32, expr *plan.Expr, ctx *BindContext) (int32, *plan.Expr, error) {
 	var err error
-	switch expr.Expr.(type) {
+	switch exprImpl := expr.Expr.(type) {
 	case *plan.Expr_F:
-		panic("unspported")
+		for i, arg := range exprImpl.F.Args {
+			nodeID, exprImpl.F.Args[i], err = qb.flattenSubqueries(nodeID, arg, ctx)
+			if err != nil {
+				return 0, nil, err
+			}
+		}
 	case *plan.Expr_Sub:
-		panic("unspported")
+		nodeID, expr, err = qb.flattenSubquery(nodeID, exprImpl.Sub, ctx)
 	}
 	return nodeID, expr, err
+}
+
+func (qb *QueryBuilder) flattenSubquery(nodeID int32, subquery *plan.SubqueryRef, ctx *BindContext) (int32, *plan.Expr, error) {
+	return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented")
+}
+
+func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int32, []*plan.Expr) {
+	logutil.Infof("pushdownFilters not implement")
+	return nodeID, nil
+}
+
+func (qb *QueryBuilder) determineJoinOrder(nodeID int32) int32 {
+	return nodeID
+}
+
+func (qb *QueryBuilder) pushdownSemiAntiJoins(nodeID int32) int32 {
+	return nodeID
 }
