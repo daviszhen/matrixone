@@ -426,7 +426,7 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 			Cost:        qb.compCtx.Cost(obj, nil),
 			ObjRef:      obj,
 			TableDef:    tableDef,
-			BindingTags: []int32{qb.genNewTag()},
+			BindingTags: []int32{qb.genNewTag()}, //?
 		}, ctx)
 	case *tree.JoinTableExpr:
 		if tbl.Right == nil {
@@ -464,7 +464,7 @@ func (qb *QueryBuilder) genNewTag() int32 {
 
 func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *BindContext) error {
 	node := qb.qry.Nodes[nodeID]
-
+	fmt.Println("addBinding", nodeID)
 	if node.NodeType == plan.Node_VALUE_SCAN {
 		return nil
 	}

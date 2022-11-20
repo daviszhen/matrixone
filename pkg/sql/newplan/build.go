@@ -28,10 +28,10 @@ var _ Binder = &GroupBinder{}
 var _ Binder = &HavingBinder{}
 
 type baseBinder struct {
-	builder   *QueryBuilder
-	ctx       *BindContext
-	impl      Binder
-	boundCols []string
+	builder   *QueryBuilder // current query builder
+	ctx       *BindContext  // current context
+	impl      Binder        // current Binder implementation
+	boundCols []string      // columns that have be found in a table in a Binding
 }
 
 type DefaultBinder struct {
@@ -73,17 +73,18 @@ type LimitBinder struct {
 type BindContext struct {
 	binder          Binder
 	parent          *BindContext
+	id              uint32
 	defaultDatabase string
 	hasSingleRow    bool
 
-	bindings       []*Binding
-	bindingByTag   map[int32]*Binding
-	bindingByTable map[string]*Binding
-	bindingByCol   map[string]*Binding
+	bindings       []*Binding          //addBinding appends new one
+	bindingByTag   map[int32]*Binding  //tag -> binding
+	bindingByTable map[string]*Binding //table -> binding
+	bindingByCol   map[string]*Binding //column -> binding
 
 	bindingTree *BindingTreeNode
 
-	headings []string
+	headings []string //origin name of the select expr
 	aliasMap map[string]int32
 
 	groupTag     int32
@@ -96,7 +97,7 @@ type BindContext struct {
 	aggregateByAst map[string]int32
 	aggregates     []*plan.Expr
 
-	projects      []*plan.Expr
+	projects      []*plan.Expr //bound exprs from select exprs
 	projectByExpr map[string]int32
 
 	isDistinct   bool
@@ -123,20 +124,23 @@ type QueryBuilder struct {
 	qry     *plan.Query
 	compCtx plan2.CompilerContext
 
-	ctxByNode    []*BindContext
+	ctxByNode []*BindContext
+	//<tag,columnIdx> -> table.columnName
+	//addBinding set the field first
 	nameByColRef map[[2]int32]string
 
 	nextTag int32
 }
 
+// tag -> nodeId, table
 type Binding struct {
 	tag         int32
 	nodeId      int32
 	table       string
 	cols        []string
 	types       []*plan.Type
-	refCnts     []uint
-	colIdByName map[string]int32
+	refCnts     []uint           //init with count of column
+	colIdByName map[string]int32 // column name -> column index in the table
 }
 
 func (b *Binding) FindColumn(col string) int32 {
