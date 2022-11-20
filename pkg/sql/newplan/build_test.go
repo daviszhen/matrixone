@@ -24,6 +24,7 @@ func Test_build(t *testing.T) {
 		plan2, err = sqlplan.BuildPlan(cc, one)
 		fmt.Println()
 		fmt.Println(plan2.String())
+		convey.So(plan1.String() == plan2.String(), convey.ShouldBeTrue)
 
 	})
 }
