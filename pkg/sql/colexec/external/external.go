@@ -67,6 +67,8 @@ func Prepare(proc *process.Process, arg any) error {
 	param.maxBatchSize = uint64(float64(param.maxBatchSize) * 0.6)
 	param.extern = &tree.ExternParam{}
 	err := json.Unmarshal([]byte(param.CreateSql), param.extern)
+	logutil.Infof("******* 1 create sql %s filepath %s compress type %s file list %d %v",
+		param.CreateSql, param.extern.Filepath, param.extern.CompressType, len(param.FileList), param.FileList)
 	if err != nil {
 		param.Fileparam.End = true
 		return err
@@ -100,19 +102,29 @@ func Call(idx int, proc *process.Process, arg any) (bool, error) {
 	anal.Start()
 	defer anal.Stop()
 	anal.Input(nil)
+	argx := arg.(*Argument)
+	argx.Mu.Lock()
+	defer argx.Mu.Unlock()
 	param := arg.(*Argument).Es
 	if param.Fileparam.End {
 		proc.SetInputBatch(nil)
 		return true, nil
 	}
+	logutil.Infof("****** 2 idx %d create sql %d:%s filepath %s compress type %s file list %d",
+		idx, len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	if param.extern.Filepath == "" {
 		if param.Fileparam.FileIndex >= len(param.FileList) {
 			proc.SetInputBatch(nil)
 			return true, nil
 		}
 		param.extern.Filepath = param.FileList[param.Fileparam.FileIndex]
+		logutil.Infof("****** 2.5 idx %d file index %d filepath %s", idx, param.Fileparam.FileIndex, param.FileList[param.Fileparam.FileIndex])
 		param.Fileparam.FileIndex++
 	}
+	logutil.Infof("****** 3 idx %d create sql %d:%s filepath %s compress type %s file list %d",
+		idx, len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	bat, err := ScanFileData(param, proc)
 	if err != nil {
 		param.Fileparam.End = true
@@ -121,6 +133,9 @@ func Call(idx int, proc *process.Process, arg any) (bool, error) {
 	proc.SetInputBatch(bat)
 	anal.Output(bat)
 	anal.Alloc(int64(bat.Size()))
+	logutil.Infof("****** 8 idx %d create sql %d:%s filepath %s compress type %s file list %d",
+		idx, len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	return false, nil
 }
 
@@ -259,6 +274,8 @@ func getCompressType(param *tree.ExternParam) string {
 }
 
 func getUnCompressReader(param *tree.ExternParam, r io.ReadCloser) (io.ReadCloser, error) {
+	logutil.Infof("****** 6 filepath %s compress type %s",
+		param.Filepath, param.CompressType)
 	switch strings.ToLower(getCompressType(param)) {
 	case tree.NOCOMPRESS:
 		return r, nil
@@ -362,10 +379,16 @@ func GetBatchData(param *ExternalParam, plh *ParseLineHandler, proc *process.Pro
 // GetSimdcsvReader get file reader from external file
 func GetSimdcsvReader(param *ExternalParam) (*ParseLineHandler, error) {
 	var err error
+	logutil.Infof("****** 4 create sql %d:%s, filepath %s compress type %s file list %d",
+		len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	param.reader, err = ReadFile(param.extern)
 	if err != nil {
 		return nil, err
 	}
+	logutil.Infof("****** 5 create sql %d:%s, filepath %s compress type %s file list %d",
+		len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	param.reader, err = getUnCompressReader(param.extern, param.reader)
 	if err != nil {
 		return nil, err
@@ -395,6 +418,9 @@ func ScanFileData(param *ExternalParam, proc *process.Process) (*batch.Batch, er
 	var bat *batch.Batch
 	var err error
 	var cnt int
+	logutil.Infof("****** 9 create sql %d:%s filepath %s compress type %s file list %d",
+		len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	if param.plh == nil {
 		param.IgnoreLine = param.IgnoreLineTag
 		param.plh, err = GetSimdcsvReader(param)
@@ -402,6 +428,9 @@ func ScanFileData(param *ExternalParam, proc *process.Process) (*batch.Batch, er
 			return nil, err
 		}
 	}
+	logutil.Infof("****** 10 create sql %d:%s filepath %s compress type %s file list %d",
+		len(param.CreateSql), param.CreateSql,
+		param.extern.Filepath, param.extern.CompressType, len(param.FileList))
 	plh := param.plh
 	plh.simdCsvLineArray = make([][]string, ONE_BATCH_MAX_ROW)
 	finish := false

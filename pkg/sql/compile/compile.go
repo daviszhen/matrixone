@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"runtime"
 	"sync/atomic"
 
@@ -543,6 +544,7 @@ func (c *Compile) compileExternScan(n *plan.Node) ([]*Scope, error) {
 	if err != nil {
 		return nil, err
 	}
+	logutil.Infof("****** x create sql %s file list %d %v", n.TableDef.Createsql, len(fileList), fileList)
 	if param.LoadFile && len(fileList) == 0 {
 		return nil, moerr.NewInvalidInput("the file does not exist in load flow")
 	}

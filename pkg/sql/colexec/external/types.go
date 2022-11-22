@@ -18,6 +18,7 @@ import (
 	"context"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -55,6 +56,7 @@ type ExternalFileparam struct {
 }
 
 type Argument struct {
+	Mu sync.Mutex
 	Es *ExternalParam
 }
 
