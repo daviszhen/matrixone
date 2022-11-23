@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"math"
 	"runtime"
 	"sync"
@@ -293,6 +294,12 @@ func (e *Engine) Commit(ctx context.Context, op client.TxnOperator) error {
 	if err != nil {
 		return err
 	}
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X2  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	_, err = op.Write(ctx, reqs)
 	if err == nil {
 		for _, name := range txn.deleteMetaTables {

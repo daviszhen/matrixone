@@ -1,0 +1,42 @@
+service-type = "CN"
+data-dir = "./mo-data"
+
+[cn]
+uuid = "00000000-0000-0000-0000-200000000000"
+listen-address = "0.0.0.0:6002"
+service-address = "127.0.0.1:6002"
+sql-address = "127.0.0.1:6001"
+role = "TP"
+
+[cn.Engine]
+type = "distributed-tae"
+
+[[fileservice]]
+backend = "DISK"
+name = "LOCAL"
+
+[[fileservice]]
+backend = "S3"
+name = "S3"
+
+[fileservice.s3]
+bucket = "pengzhen-s3"
+endpoint = "s3.us-west-2.amazonaws.com"
+key-prefix = "s3-1115-local2s3/data"
+
+[[fileservice]]
+backend = "S3"
+name = "ETL"
+
+[fileservice.s3]
+bucket = "pengzhen-s3"
+endpoint = "s3.us-west-2.amazonaws.com"
+key-prefix = "s3-1115-local2s3/etl"
+
+[hakeeper-client]
+service-addresses = [
+  "127.0.0.1:32001",
+]
+
+[log]
+level = "debug"

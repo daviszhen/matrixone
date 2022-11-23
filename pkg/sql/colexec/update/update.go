@@ -17,6 +17,7 @@ package update
 import (
 	"bytes"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -63,6 +64,9 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 		bat.Vecs[i] = bat.Vecs[i].ConstExpand(proc.Mp())
 	}
 	defer bat.Clean(proc.Mp())
+
+	d, ok := proc.Ctx.Deadline()
+	logutil.Infof("requestCtx 7 %p, %v %v", proc.Ctx, d, ok)
 
 	// do null check
 	for i, updateCtx := range p.UpdateCtxs {

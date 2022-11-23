@@ -1,0 +1,50 @@
+service-type = "DN"
+data-dir = "./mo-data"
+
+[dn]
+uuid = "00000000-0000-0000-0000-100000000000"
+service-address = "127.0.0.1:41010"
+listen-address = "0.0.0.0:41010"
+
+[dn.Ckp]
+flush-interval = "60s"
+global-interval = "100000s"
+incremental-interval = "180s"
+min-count = 100
+scan-interval = "5s"
+
+[dn.Txn]
+
+[dn.Txn.Storage]
+backend = "TAE"
+log-backend = "logservice"
+
+[[fileservice]]
+backend = "DISK"
+name = "LOCAL"
+
+[[fileservice]]
+backend = "S3"
+name = "S3"
+
+[fileservice.s3]
+bucket = "pengzhen-s3"
+endpoint = "s3.us-west-2.amazonaws.com"
+key-prefix = "s3-1115-local2s3/data"
+
+[[fileservice]]
+backend = "S3"
+name = "ETL"
+
+[fileservice.s3]
+bucket = "pengzhen-s3"
+endpoint = "s3.us-west-2.amazonaws.com"
+key-prefix = "s3-1115-local2s3/etl"
+
+[hakeeper-client]
+service-addresses = [
+  "127.0.0.1:32001",
+]
+
+[log]
+level = "debug"

@@ -249,6 +249,12 @@ func (tc *txnOperator) Read(ctx context.Context, requests []txn.TxnRequest) (*rp
 func (tc *txnOperator) Write(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
 	util.LogTxnWrite(tc.logger, tc.getTxnMeta(false))
 
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X3  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	return tc.doWrite(ctx, requests, false)
 }
 
@@ -355,6 +361,12 @@ func (tc *txnOperator) doWrite(ctx context.Context, requests []txn.TxnRequest, c
 				Disable1PCOpt: tc.option.disable1PCOpt,
 			}})
 	}
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X4  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	return tc.trimResponses(tc.handleError(tc.doSend(ctx, requests, commit)))
 }
 
@@ -479,6 +491,12 @@ func (tc *txnOperator) doSend(ctx context.Context, requests []txn.TxnRequest, lo
 		requests[idx].Txn = txnMeta
 	}
 
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X5  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	util.LogTxnSendRequests(tc.logger, requests)
 	result, err := tc.sender.Send(ctx, requests)
 	if err != nil {

@@ -150,6 +150,8 @@ func (routine *Routine) Loop(routineCtx context.Context) {
 		executor.(*MysqlCmdExecutor).setCancelRequestFunc(cancelRequestFunc)
 		ses = routine.GetSession()
 		ses.MakeProfile()
+		d, o := cancelRequestCtx.Deadline()
+		logInfof(ses.GetConciseProfile(), "requestCtx 4 %p %v %v", cancelRequestCtx, d, o)
 		tenant := ses.GetTenantInfo()
 		tenantCtx := context.WithValue(cancelRequestCtx, defines.TenantIDKey{}, tenant.GetTenantID())
 		tenantCtx = context.WithValue(tenantCtx, defines.UserIDKey{}, tenant.GetUserID())

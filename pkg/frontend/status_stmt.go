@@ -21,7 +21,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
-	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
@@ -40,7 +39,7 @@ func (bte *BeginTxnExecutor) ExecuteImpl(ctx context.Context, ses *Session) erro
 	if err != nil {
 		return err
 	}
-	RecordStatementTxnID(ctx, ses)
+	//RecordStatementTxnID(ctx, ses)
 	return err
 }
 
@@ -121,7 +120,7 @@ func (ie *ImportExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Session)
 	tenant := ie.tenantName
 	incStatementCounter(tenant, stmt)
 	if ie.GetStatus() == stmtExecSuccess {
-		trace.EndStatement(ctx, nil)
+		//trace.EndStatement(ctx, nil)
 		logStatementStatus(ctx, ses, stmt, success, nil)
 	} else {
 		incStatementErrorsCounter(tenant, stmt)
@@ -138,7 +137,7 @@ func (ie *ImportExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Session)
 		if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
-		trace.EndStatement(ctx, ie.err)
+		//trace.EndStatement(ctx, ie.err)
 		logutil.Error(ie.err.Error())
 		logStatementStatus(ctx, ses, stmt, fail, ie.err)
 	}
@@ -155,7 +154,7 @@ func (pse *PrepareStmtExecutor) ResponseAfterExec(ctx context.Context, ses *Sess
 	var err2, retErr error
 	if ses.GetCmd() == COM_STMT_PREPARE {
 		if err2 = ses.GetMysqlProtocol().SendPrepareResponse(pse.prepareStmt); err2 != nil {
-			trace.EndStatement(ctx, err2)
+			//trace.EndStatement(ctx, err2)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 			logStatementStatus(ctx, ses, pse.GetAst(), fail, retErr)
 			return retErr
@@ -163,7 +162,7 @@ func (pse *PrepareStmtExecutor) ResponseAfterExec(ctx context.Context, ses *Sess
 	} else {
 		resp := NewOkResponse(pse.GetAffectedRows(), 0, 0, 0, int(COM_QUERY), "")
 		if err2 = ses.GetMysqlProtocol().SendResponse(resp); err2 != nil {
-			trace.EndStatement(ctx, err2)
+			//trace.EndStatement(ctx, err2)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 			logStatementStatus(ctx, ses, pse.GetAst(), fail, retErr)
 			return retErr
@@ -191,7 +190,7 @@ func (pse *PrepareStringExecutor) ResponseAfterExec(ctx context.Context, ses *Se
 	var err2, retErr error
 	if ses.GetCmd() == COM_STMT_PREPARE {
 		if err2 = ses.GetMysqlProtocol().SendPrepareResponse(pse.prepareStmt); err2 != nil {
-			trace.EndStatement(ctx, err2)
+			//trace.EndStatement(ctx, err2)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 			logStatementStatus(ctx, ses, pse.GetAst(), fail, retErr)
 			return retErr
@@ -199,7 +198,7 @@ func (pse *PrepareStringExecutor) ResponseAfterExec(ctx context.Context, ses *Se
 	} else {
 		resp := NewOkResponse(pse.GetAffectedRows(), 0, 0, 0, int(COM_QUERY), "")
 		if err2 = ses.GetMysqlProtocol().SendResponse(resp); err2 != nil {
-			trace.EndStatement(ctx, err2)
+			//trace.EndStatement(ctx, err2)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 			logStatementStatus(ctx, ses, pse.GetAst(), fail, retErr)
 			return retErr
@@ -229,7 +228,7 @@ func (de *DeallocateExecutor) ResponseAfterExec(ctx context.Context, ses *Sessio
 	if ses.GetCmd() != COM_STMT_CLOSE {
 		resp := NewOkResponse(de.GetAffectedRows(), 0, 0, 0, int(COM_QUERY), "")
 		if err2 = ses.GetMysqlProtocol().SendResponse(resp); err2 != nil {
-			trace.EndStatement(ctx, err2)
+			//trace.EndStatement(ctx, err2)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 			logStatementStatus(ctx, ses, de.GetAst(), fail, retErr)
 			return retErr
@@ -466,7 +465,7 @@ func (ie *InsertExecutor) ResponseAfterExec(ctx context.Context, ses *Session) e
 		resp := NewOkResponse(ie.GetAffectedRows(), 0, 0, 0, int(COM_QUERY), "")
 		resp.lastInsertId = 1
 		if err = ses.GetMysqlProtocol().SendResponse(resp); err != nil {
-			trace.EndStatement(ctx, err)
+			//trace.EndStatement(ctx, err)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err)
 			logStatementStatus(ctx, ses, ie.GetAst(), fail, retErr)
 			return retErr
@@ -485,7 +484,7 @@ func (le *LoadExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Session) e
 	tenant := le.tenantName
 	incStatementCounter(tenant, stmt)
 	if le.GetStatus() == stmtExecSuccess {
-		trace.EndStatement(ctx, nil)
+		//trace.EndStatement(ctx, nil)
 		logStatementStatus(ctx, ses, stmt, success, nil)
 	} else {
 		incStatementErrorsCounter(tenant, stmt)
@@ -502,7 +501,7 @@ func (le *LoadExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Session) e
 		if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
-		trace.EndStatement(ctx, le.err)
+		//trace.EndStatement(ctx, le.err)
 		logutil.Error(le.err.Error())
 		logStatementStatus(ctx, ses, stmt, fail, le.err)
 	}

@@ -21,7 +21,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/util/metric"
-	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
@@ -93,7 +92,7 @@ func Execute(ctx context.Context, ses *Session, proc *process.Process, stmtExec 
 	var err, err2 error
 	var cmpBegin, runBegin time.Time
 	pu := ses.GetParameterUnit()
-	ctx = RecordStatement(ctx, ses, proc, stmtExec, beginInstant, envStmt, useEnv)
+	//ctx = RecordStatement(ctx, ses, proc, stmtExec, beginInstant, envStmt, useEnv)
 	err = stmtExec.Setup(ctx, ses)
 	if err != nil {
 		goto handleRet
@@ -193,11 +192,11 @@ func (bse *baseStmtExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Sessi
 		txnErr = ses.TxnCommitSingleStatement(stmt)
 		if txnErr != nil {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeCommit)
-			trace.EndStatement(ctx, txnErr)
+			//trace.EndStatement(ctx, txnErr)
 			logStatementStatus(ctx, ses, stmt, fail, txnErr)
 			return txnErr
 		}
-		trace.EndStatement(ctx, nil)
+		//trace.EndStatement(ctx, nil)
 		logStatementStatus(ctx, ses, stmt, success, nil)
 	} else {
 		incStatementErrorsCounter(tenant, stmt)
@@ -214,7 +213,7 @@ func (bse *baseStmtExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Sessi
 		if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
-		trace.EndStatement(ctx, bse.err)
+		//trace.EndStatement(ctx, bse.err)
 		logutil.Error(bse.err.Error())
 		txnErr = ses.TxnRollbackSingleStatement(stmt)
 		if txnErr != nil {
@@ -302,7 +301,7 @@ func (bse *baseStmtExecutor) ResponseAfterExec(ctx context.Context, ses *Session
 	if bse.GetStatus() == stmtExecSuccess {
 		resp := NewOkResponse(bse.GetAffectedRows(), 0, 0, 0, int(COM_QUERY), "")
 		if err = ses.GetMysqlProtocol().SendResponse(resp); err != nil {
-			trace.EndStatement(ctx, err)
+			//trace.EndStatement(ctx, err)
 			retErr = moerr.NewInternalError("routine send response failed. error:%v ", err)
 			logStatementStatus(ctx, ses, bse.GetAst(), fail, retErr)
 			return retErr

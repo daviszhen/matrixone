@@ -160,6 +160,12 @@ func (s *sender) Send(ctx context.Context, requests []txn.TxnRequest) (*SendResu
 	sr := s.acquireSendResult()
 	if len(requests) == 1 {
 		sr.reset(requests)
+		d, o := ctx.Deadline()
+		logutil.Debugf("requestCtx X6  %p %v %v",
+			ctx,
+			d,
+			o,
+		)
 		resp, err := s.doSend(ctx, requests[0])
 		if err != nil {
 			sr.Release()
@@ -184,6 +190,12 @@ func (s *sender) Send(ctx context.Context, requests []txn.TxnRequest) (*SendResu
 		}
 
 		requests[idx].RequestID = st.ID()
+		d, o := ctx.Deadline()
+		logutil.Debugf("requestCtx X7  %p %v %v",
+			ctx,
+			d,
+			o,
+		)
 		if err := st.Send(ctx, &requests[idx]); err != nil {
 			sr.Release()
 			return nil, err

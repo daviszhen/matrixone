@@ -15,6 +15,7 @@
 package morpc
 
 import (
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -33,6 +34,7 @@ func (m RPCMessage) Timeout() bool {
 // GetTimeoutFromContext returns the timeout duration from context.
 func (m RPCMessage) GetTimeoutFromContext() (time.Duration, error) {
 	d, ok := m.Ctx.Deadline()
+	logutil.Infof("requestCtx 8 %p, %v %v", m.Ctx, d, ok)
 	if !ok {
 		return 0, moerr.NewInvalidInput("timeout deadline not set")
 	}

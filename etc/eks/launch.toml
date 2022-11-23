@@ -1,0 +1,11 @@
+logservices = [
+    "./etc/eks/log.toml",
+]
+
+dnservices = [
+    "./etc/eks/dn.toml"
+]
+
+cnservices = [
+    "./etc/eks/cn.toml"
+]

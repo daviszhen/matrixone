@@ -38,7 +38,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
-	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/moengine"
 
@@ -262,9 +261,9 @@ type BackgroundSession struct {
 func NewBackgroundSession(ctx context.Context, mp *mpool.MPool, PU *config.ParameterUnit, gSysVars *GlobalSystemVariables) *BackgroundSession {
 	ses := NewSession(&FakeProtocol{}, mp, PU, gSysVars, false)
 	ses.SetOutputCallback(fakeDataSetFetcher)
-	if stmt := trace.StatementFromContext(ctx); stmt != nil {
-		logutil.Infof("session uuid: %s -> background session uuid: %s", uuid.UUID(stmt.SessionID).String(), ses.uuid.String())
-	}
+	//if stmt := trace.StatementFromContext(ctx); stmt != nil {
+	//	logutil.Infof("session uuid: %s -> background session uuid: %s", uuid.UUID(stmt.SessionID).String(), ses.uuid.String())
+	//}
 	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(ctx)
 	ses.SetRequestContext(cancelBackgroundCtx)
 	backSes := &BackgroundSession{
@@ -1332,6 +1331,13 @@ func (th *TxnHandler) CommitTxn() error {
 		ctx,
 		storage.Hints().CommitOrRollbackTimeout,
 	)
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X1 timeout:%v %p %v %v",
+		storage.Hints().CommitOrRollbackTimeout,
+		ctx,
+		d,
+		o,
+	)
 	defer cancel()
 	var err, err2 error
 	defer func() {
@@ -1346,13 +1352,17 @@ func (th *TxnHandler) CommitTxn() error {
 	if txnOp == nil {
 		logErrorf(sessionProfile, "CommitTxn: txn operator is null")
 	}
+	var txnID uuid.UUID
+	copy(txnID[:], txnOp.Txn().ID)
+	logInfof(sessionProfile, "CommitTxn uuid:%v", txnID)
 	if err = storage.Commit(ctx, txnOp); err != nil {
 		th.SetInvalid()
-		logErrorf(sessionProfile, "CommitTxn: storage commit failed. error:%v", err)
+		logErrorf(sessionProfile,
+			"CommitTxn: storage commit failed. uuid:%v error:%v", txnID, err)
 		if txnOp != nil {
 			err2 = txnOp.Rollback(ctx)
 			if err2 != nil {
-				logErrorf(sessionProfile, "CommitTxn: txn operator rollback failed. error:%v", err2)
+				logErrorf(sessionProfile, "CommitTxn: txn operator rollback failed. uuid:%v error:%v", txnID, err2)
 			}
 		}
 		return err
@@ -1360,7 +1370,8 @@ func (th *TxnHandler) CommitTxn() error {
 	if txnOp != nil {
 		err = txnOp.Commit(ctx)
 		if err != nil {
-			logErrorf(sessionProfile, "CommitTxn: txn operator commit failed. error:%v", err)
+			th.SetInvalid()
+			logErrorf(sessionProfile, "CommitTxn: txn operator commit failed. uuid:%v error:%v", txnID, err)
 		}
 	}
 	th.SetInvalid()
@@ -1384,6 +1395,13 @@ func (th *TxnHandler) RollbackTxn() error {
 		ctx,
 		storage.Hints().CommitOrRollbackTimeout,
 	)
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X2 timeout:%v %p %v %v",
+		storage.Hints().CommitOrRollbackTimeout,
+		ctx,
+		d,
+		o,
+	)
 	defer cancel()
 	var err, err2 error
 	defer func() {
@@ -1399,13 +1417,16 @@ func (th *TxnHandler) RollbackTxn() error {
 	if txnOp == nil {
 		logErrorf(sessionProfile, "RollbackTxn: txn operator is null")
 	}
+	var txnID uuid.UUID
+	copy(txnID[:], txnOp.Txn().ID)
+	logInfof(sessionProfile, "RollbackTxn uuid:%v", txnID)
 	if err = storage.Rollback(ctx, txnOp); err != nil {
 		th.SetInvalid()
-		logErrorf(sessionProfile, "RollbackTxn: storage rollback failed. error:%v", err)
+		logErrorf(sessionProfile, "RollbackTxn: storage rollback failed. uuid:%v error:%v", txnID, err)
 		if txnOp != nil {
 			err2 = txnOp.Rollback(ctx)
 			if err2 != nil {
-				logErrorf(sessionProfile, "RollbackTxn: txn operator rollback failed. error:%v", err2)
+				logErrorf(sessionProfile, "RollbackTxn: txn operator rollback failed. uuid:%v error:%v", txnID, err2)
 			}
 		}
 		return err
@@ -1413,7 +1434,8 @@ func (th *TxnHandler) RollbackTxn() error {
 	if txnOp != nil {
 		err = txnOp.Rollback(ctx)
 		if err != nil {
-			logErrorf(sessionProfile, "RollbackTxn: txn operator commit failed. error:%v", err)
+			th.SetInvalid()
+			logErrorf(sessionProfile, "RollbackTxn: txn operator commit failed. uuid:%v error:%v", txnID, err)
 		}
 	}
 	th.SetInvalid()

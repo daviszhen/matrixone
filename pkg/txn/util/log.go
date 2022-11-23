@@ -17,6 +17,8 @@ package util
 import (
 	"bytes"
 	"encoding/hex"
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
@@ -112,6 +114,8 @@ func LogTxnHandleResult(
 func LogTxnSendRequests(
 	logger *zap.Logger,
 	requests []txn.TxnRequest) {
+	err2 := moerr.NewInternalError("txn send requests")
+	logutil.Infof("print stack %v", err2)
 	if ce := logger.Check(zap.DebugLevel, "txn send requests"); ce != nil {
 		ce.Write(zap.String("requests", txn.RequestsDebugString(requests, true)))
 	}
@@ -127,6 +131,8 @@ func LogTxnSendRequestsFailed(
 	// at the time of the error and would have manipulated the payload field. And logging
 	// the error, the payload field does not need to be logged to the log either, you can
 	// find the previous log to view the paylaod based on the request-id.
+	err2 := moerr.NewInternalError("txn send requests failed")
+	logutil.Infof("print stack %v", err2)
 	logger.Error("txn send requests failed",
 		zap.String("requests", txn.RequestsDebugString(requests, false)),
 		zap.Error(err))

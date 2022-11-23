@@ -470,7 +470,8 @@ func (s statementStatus) String() string {
 // logStatementStatus prints the status of the statement into the log.
 func logStatementStatus(ctx context.Context, ses *Session, stmt tree.Statement, status statementStatus, err error) {
 	var stmtStr string
-	stm := trace.StatementFromContext(ctx)
+	//stm := trace.StatementFromContext(ctx)
+	var stm *trace.StatementInfo
 	if stm == nil {
 		fmtCtx := tree.NewFmtCtx(dialect.MYSQL)
 		stmt.Format(fmtCtx)

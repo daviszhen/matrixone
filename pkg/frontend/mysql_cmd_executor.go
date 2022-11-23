@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"math"
 	"os"
 	"reflect"
@@ -54,8 +55,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/util/metric"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-
-	"github.com/matrixorigin/matrixone/pkg/util/trace"
 
 	"github.com/google/uuid"
 )
@@ -191,121 +190,121 @@ func (mce *MysqlCmdExecutor) GetRoutineManager() *RoutineManager {
 	return mce.routineMgr
 }
 
-var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, envBegin time.Time, envStmt string, useEnv bool) context.Context {
-	if !trace.GetTracerProvider().IsEnable() {
-		return ctx
-	}
-	sessInfo := proc.SessionInfo
-	tenant := ses.GetTenantInfo()
-	if tenant == nil {
-		tenant, _ = GetTenantInfo("internal")
-	}
-	var stmID uuid.UUID
-	copy(stmID[:], cw.GetUUID())
-	var txnID uuid.UUID
-	var txn TxnOperator
-	var err error
-	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-		txn, err = handler.GetTxn()
-		if err != nil {
-			logutil.Errorf("RecordStatement. error:%v", err)
-		} else {
-			copy(txnID[:], txn.Txn().ID)
-		}
-	}
-	var sesID uuid.UUID
-	copy(sesID[:], ses.GetUUID())
-	requestAt := envBegin
-	if !useEnv {
-		requestAt = time.Now()
-	}
-	fmtCtx := tree.NewFmtCtx(dialect.MYSQL, tree.WithQuoteString(true))
-	cw.GetAst().Format(fmtCtx)
-	text := SubStringFromBegin(fmtCtx.String(), int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
-	stm := &trace.StatementInfo{
-		StatementID:          stmID,
-		TransactionID:        txnID,
-		SessionID:            sesID,
-		Account:              tenant.GetTenant(),
-		User:                 tenant.GetUser(),
-		Host:                 sessInfo.GetHost(),
-		Database:             sessInfo.GetDatabase(),
-		Statement:            text,
-		StatementFingerprint: "", // fixme: (Reserved)
-		StatementTag:         "", // fixme: (Reserved)
-		RequestAt:            requestAt,
-	}
-	if !stm.IsZeroTxnID() {
-		stm.Report(ctx)
-	}
-	sc := trace.SpanContextWithID(trace.TraceID(stmID), trace.SpanKindStatement)
-	reqCtx := ses.GetRequestContext()
-	ses.SetRequestContext(trace.ContextWithSpanContext(reqCtx, sc))
-	return trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
-}
+//var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, envBegin time.Time, envStmt string, useEnv bool) context.Context {
+//	if !trace.GetTracerProvider().IsEnable() {
+//		return ctx
+//	}
+//	sessInfo := proc.SessionInfo
+//	tenant := ses.GetTenantInfo()
+//	if tenant == nil {
+//		tenant, _ = GetTenantInfo("internal")
+//	}
+//	var stmID uuid.UUID
+//	copy(stmID[:], cw.GetUUID())
+//	var txnID uuid.UUID
+//	var txn TxnOperator
+//	var err error
+//	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
+//		txn, err = handler.GetTxn()
+//		if err != nil {
+//			logutil.Errorf("RecordStatement. error:%v", err)
+//		} else {
+//			copy(txnID[:], txn.Txn().ID)
+//		}
+//	}
+//	var sesID uuid.UUID
+//	copy(sesID[:], ses.GetUUID())
+//	requestAt := envBegin
+//	if !useEnv {
+//		requestAt = time.Now()
+//	}
+//	fmtCtx := tree.NewFmtCtx(dialect.MYSQL, tree.WithQuoteString(true))
+//	cw.GetAst().Format(fmtCtx)
+//	text := SubStringFromBegin(fmtCtx.String(), int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+//	stm := &trace.StatementInfo{
+//		StatementID:          stmID,
+//		TransactionID:        txnID,
+//		SessionID:            sesID,
+//		Account:              tenant.GetTenant(),
+//		User:                 tenant.GetUser(),
+//		Host:                 sessInfo.GetHost(),
+//		Database:             sessInfo.GetDatabase(),
+//		Statement:            text,
+//		StatementFingerprint: "", // fixme: (Reserved)
+//		StatementTag:         "", // fixme: (Reserved)
+//		RequestAt:            requestAt,
+//	}
+//	if !stm.IsZeroTxnID() {
+//		stm.Report(ctx)
+//	}
+//	sc := trace.SpanContextWithID(trace.TraceID(stmID), trace.SpanKindStatement)
+//	reqCtx := ses.GetRequestContext()
+//	ses.SetRequestContext(trace.ContextWithSpanContext(reqCtx, sc))
+//	return trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
+//}
 
-var RecordParseErrorStatement = func(ctx context.Context, ses *Session, proc *process.Process, envBegin time.Time, envStmt string, err error) context.Context {
-	if !trace.GetTracerProvider().IsEnable() {
-		return ctx
-	}
-	sessInfo := proc.SessionInfo
-	tenant := ses.GetTenantInfo()
-	if tenant == nil {
-		tenant, _ = GetTenantInfo("internal")
-	}
-	stmID, _ := uuid.NewUUID()
-	var txnID uuid.UUID
-	var txn TxnOperator
-	var err2 error
-	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-		txn, err2 = handler.GetTxn()
-		if err2 != nil {
-			logutil.Errorf("RecordParseErrorStatement. error:%v", err2)
-		} else {
-			copy(txnID[:], txn.Txn().ID)
-		}
-	}
-	var sesID uuid.UUID
-	copy(sesID[:], ses.GetUUID())
-	text := SubStringFromBegin(envStmt, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
-	stm := &trace.StatementInfo{
-		StatementID:          stmID,
-		TransactionID:        txnID,
-		SessionID:            sesID,
-		Account:              tenant.GetTenant(),
-		User:                 tenant.GetUser(),
-		Host:                 sessInfo.GetHost(),
-		Database:             sessInfo.GetDatabase(),
-		Statement:            text,
-		StatementFingerprint: "", // fixme: (Reserved)
-		StatementTag:         "", // fixme: (Reserved)
-		RequestAt:            envBegin,
-	}
-	sc := trace.SpanContextWithID(trace.TraceID(stmID), trace.SpanKindStatement)
-	ctx = trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
-	trace.EndStatement(ctx, err)
-	incStatementCounter(tenant.GetTenant(), nil)
-	incStatementErrorsCounter(tenant.GetTenant(), nil)
-	return ctx
-}
+//var RecordParseErrorStatement = func(ctx context.Context, ses *Session, proc *process.Process, envBegin time.Time, envStmt string, err error) context.Context {
+//	if !trace.GetTracerProvider().IsEnable() {
+//		return ctx
+//	}
+//	sessInfo := proc.SessionInfo
+//	tenant := ses.GetTenantInfo()
+//	if tenant == nil {
+//		tenant, _ = GetTenantInfo("internal")
+//	}
+//	stmID, _ := uuid.NewUUID()
+//	var txnID uuid.UUID
+//	var txn TxnOperator
+//	var err2 error
+//	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
+//		txn, err2 = handler.GetTxn()
+//		if err2 != nil {
+//			logutil.Errorf("RecordParseErrorStatement. error:%v", err2)
+//		} else {
+//			copy(txnID[:], txn.Txn().ID)
+//		}
+//	}
+//	var sesID uuid.UUID
+//	copy(sesID[:], ses.GetUUID())
+//	text := SubStringFromBegin(envStmt, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+//	stm := &trace.StatementInfo{
+//		StatementID:          stmID,
+//		TransactionID:        txnID,
+//		SessionID:            sesID,
+//		Account:              tenant.GetTenant(),
+//		User:                 tenant.GetUser(),
+//		Host:                 sessInfo.GetHost(),
+//		Database:             sessInfo.GetDatabase(),
+//		Statement:            text,
+//		StatementFingerprint: "", // fixme: (Reserved)
+//		StatementTag:         "", // fixme: (Reserved)
+//		RequestAt:            envBegin,
+//	}
+//	sc := trace.SpanContextWithID(trace.TraceID(stmID), trace.SpanKindStatement)
+//	ctx = trace.ContextWithStatement(trace.ContextWithSpanContext(ctx, sc), stm)
+//	trace.EndStatement(ctx, err)
+//	incStatementCounter(tenant.GetTenant(), nil)
+//	incStatementErrorsCounter(tenant.GetTenant(), nil)
+//	return ctx
+//}
 
 // RecordStatementTxnID record txnID after TxnBegin or Compile(autocommit=1)
-var RecordStatementTxnID = func(ctx context.Context, ses *Session) {
-	var err error
-	var txn TxnOperator
-	if stm := trace.StatementFromContext(ctx); ses != nil && stm != nil && stm.IsZeroTxnID() {
-		if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-			txn, err = handler.GetTxn()
-			if err != nil {
-				logutil.Errorf("RecordStatementTxnID. error:%v", err)
-			} else {
-				stm.SetTxnID(txn.Txn().ID)
-			}
-
-		}
-		stm.Report(ctx)
-	}
-}
+//var RecordStatementTxnID = func(ctx context.Context, ses *Session) {
+//	var err error
+//	var txn TxnOperator
+//	if stm := trace.StatementFromContext(ctx); ses != nil && stm != nil && stm.IsZeroTxnID() {
+//		if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
+//			txn, err = handler.GetTxn()
+//			if err != nil {
+//				logutil.Errorf("RecordStatementTxnID. error:%v", err)
+//			} else {
+//				stm.SetTxnID(txn.Txn().ID)
+//			}
+//
+//		}
+//		stm.Report(ctx)
+//	}
+//}
 
 // outputPool outputs the data
 type outputPool interface {
@@ -2176,7 +2175,7 @@ func (cwft *TxnComputationWrapper) GetAffectedRows() uint64 {
 
 func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
 	var err error
-	defer RecordStatementTxnID(requestCtx, cwft.ses)
+	//defer RecordStatementTxnID(requestCtx, cwft.ses)
 	cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 	if err != nil {
 		return nil, err
@@ -2247,6 +2246,8 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		addr = cwft.ses.GetParameterUnit().ClusterNodes[0].Addr
 	}
 	cwft.proc.FileService = cwft.ses.GetParameterUnit().FileService
+	d, o := requestCtx.Deadline()
+	logInfof(cwft.ses.GetConciseProfile(), "requestCtx 5 %p %v %v", requestCtx, d, o)
 	cwft.compile = compile.New(addr, cwft.ses.GetDatabaseName(), cwft.ses.GetSql(), cwft.ses.GetUserName(), requestCtx, cwft.ses.GetStorage(), cwft.proc, cwft.stmt)
 
 	if _, ok := cwft.stmt.(*tree.ExplainAnalyze); ok {
@@ -2260,9 +2261,9 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 }
 
 func (cwft *TxnComputationWrapper) RecordExecPlan(ctx context.Context) error {
-	if stm := trace.StatementFromContext(ctx); stm != nil {
-		stm.SetExecPlan(cwft.plan, SerializeExecPlan)
-	}
+	//if stm := trace.StatementFromContext(ctx); stm != nil {
+	//	stm.SetExecPlan(cwft.plan, SerializeExecPlan)
+	//}
 	return nil
 }
 
@@ -2921,8 +2922,8 @@ func incStatementErrorsCounter(tenant string, stmt tree.Statement) {
 
 // authenticateUserCanExecuteStatement checks the user can execute the statement
 func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Session, stmt tree.Statement) error {
-	requestCtx, span := trace.Debug(requestCtx, "authenticateUserCanExecuteStatement")
-	defer span.End()
+	//requestCtx, span := trace.Debug(requestCtx, "authenticateUserCanExecuteStatement")
+	//defer span.End()
 	if ses.skipAuthForSpecialUser() {
 		return nil
 	}
@@ -3004,7 +3005,7 @@ func (mce *MysqlCmdExecutor) canExecuteStatementInUncommittedTransaction(stmt tr
 
 // execute query
 func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) (retErr error) {
-	beginInstant := time.Now()
+	//	beginInstant := time.Now()
 	ses := mce.GetSession()
 	ses.SetShowStmtType(NotShowStatement)
 	proto := ses.GetMysqlProtocol()
@@ -3053,7 +3054,9 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		if _, ok := err.(*moerr.Error); !ok {
 			retErr = moerr.NewParseError(err.Error())
 		}
-		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, sql, retErr)
+		//requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, sql, retErr)
+		d, ok := requestCtx.Deadline()
+		logInfof(ses.GetConciseProfile(), "requestCtx 2 %p, %v %v", requestCtx, d, ok)
 		logStatementStringStatus(requestCtx, ses, sql, fail, retErr)
 		return retErr
 	}
@@ -3074,11 +3077,16 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 	var columns []interface{}
 	var mrs *MysqlResultSet
 
-	singleStatement := len(cws) == 1
+	d, ok := requestCtx.Deadline()
+	logInfof(ses.GetConciseProfile(), "requestCtx 1 %p, %v %v", requestCtx, d, ok)
+
+	//singleStatement := len(cws) == 1
 	for i, cw := range cws {
 		ses.SetMysqlResultSet(&MysqlResultSet{})
 		stmt := cw.GetAst()
-		requestCtx = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sql, singleStatement)
+		//requestCtx = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sql, singleStatement)
+		d, ok := requestCtx.Deadline()
+		logInfof(ses.GetConciseProfile(), "requestCtx 3 %p, %v %v", requestCtx, d, ok)
 		tenant := ses.GetTenantName(stmt)
 		//skip PREPARE statement here
 		if ses.GetTenantInfo() != nil && !IsPrepareStatement(stmt) {
@@ -3115,7 +3123,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			if err != nil {
 				goto handleFailed
 			}
-			RecordStatementTxnID(requestCtx, ses)
+			//RecordStatementTxnID(requestCtx, ses)
 		case *tree.CommitTransaction:
 			err = ses.TxnCommit()
 			if err != nil {
@@ -3584,7 +3592,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		if !fromLoadData {
 			txnErr = ses.TxnCommitSingleStatement(stmt)
 			if txnErr != nil {
-				trace.EndStatement(requestCtx, txnErr)
+				//trace.EndStatement(requestCtx, txnErr)
 				logStatementStatus(requestCtx, ses, stmt, fail, txnErr)
 				return txnErr
 			}
@@ -3603,7 +3611,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 				resp.lastInsertId = 1
 			}
 			if err2 = mce.GetSession().GetMysqlProtocol().SendResponse(resp); err2 != nil {
-				trace.EndStatement(requestCtx, err2)
+				//trace.EndStatement(requestCtx, err2)
 				retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 				logStatementStatus(requestCtx, ses, stmt, fail, retErr)
 				return retErr
@@ -3612,7 +3620,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		case *tree.PrepareStmt, *tree.PrepareString:
 			if ses.GetCmd() == COM_STMT_PREPARE {
 				if err2 = mce.GetSession().GetMysqlProtocol().SendPrepareResponse(prepareStmt); err2 != nil {
-					trace.EndStatement(requestCtx, err2)
+					//trace.EndStatement(requestCtx, err2)
 					retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 					logStatementStatus(requestCtx, ses, stmt, fail, retErr)
 					return retErr
@@ -3620,7 +3628,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			} else {
 				resp := mce.setResponse(i, len(cws), rspLen)
 				if err2 = mce.GetSession().GetMysqlProtocol().SendResponse(resp); err2 != nil {
-					trace.EndStatement(requestCtx, err2)
+					//trace.EndStatement(requestCtx, err2)
 					retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 					logStatementStatus(requestCtx, ses, stmt, fail, retErr)
 					return retErr
@@ -3638,14 +3646,14 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			if ses.GetCmd() != COM_STMT_CLOSE {
 				resp := mce.setResponse(i, len(cws), rspLen)
 				if err2 = mce.GetSession().GetMysqlProtocol().SendResponse(resp); err2 != nil {
-					trace.EndStatement(requestCtx, err2)
+					//trace.EndStatement(requestCtx, err2)
 					retErr = moerr.NewInternalError("routine send response failed. error:%v ", err2)
 					logStatementStatus(requestCtx, ses, stmt, fail, retErr)
 					return retErr
 				}
 			}
 		}
-		trace.EndStatement(requestCtx, nil)
+		//trace.EndStatement(requestCtx, nil)
 		logStatementStatus(requestCtx, ses, stmt, success, nil)
 		goto handleNext
 	handleFailed:
@@ -3664,7 +3672,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
-		trace.EndStatement(requestCtx, err)
+		//trace.EndStatement(requestCtx, err)
 		logError(ses.GetConciseProfile(), err.Error())
 		if !fromLoadData {
 			txnErr = ses.TxnRollbackSingleStatement(stmt)

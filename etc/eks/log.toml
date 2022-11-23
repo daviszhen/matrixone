@@ -1,0 +1,47 @@
+service-type = "LOG"
+data-dir = "./mo-data"
+
+[[fileservice]]
+backend = "DISK"
+name = "LOCAL"
+
+[[fileservice]]
+backend = "S3"
+name = "S3"
+
+[fileservice.s3]
+bucket = "pengzhen-s3"
+endpoint = "s3.us-west-2.amazonaws.com"
+key-prefix = "s3-1115-local2s3/data"
+
+[[fileservice]]
+backend = "S3"
+name = "ETL"
+
+[fileservice.s3]
+bucket = "pengzhen-s3"
+endpoint = "s3.us-west-2.amazonaws.com"
+key-prefix = "s3-1115-local2s3/etl"
+
+[hakeeper-client]
+service-addresses = [
+  "127.0.0.1:32001",
+]
+
+[logservice]
+gossip-seed-addresses = ["127.0.0.1:32002"]
+uuid = "00000000-0000-0000-0000-000000000000"
+raft-address = "127.0.0.1:32000"
+logservice-address = "127.0.0.1:32001"
+gossip-address = "127.0.0.1:32002"
+deployment-id = 8850055262063083118
+logservice-listen-address = "0.0.0.0:32001"
+gossip-allow-self-as-seed = true
+
+
+[logservice.BootstrapConfig]
+bootstrap-cluster = true
+init-hakeeper-members = ["131072:00000000-0000-0000-0000-000000000000"]
+num-of-dn-shards = 1
+num-of-log-shard-replicas = 1
+num-of-log-shards = 1

@@ -460,17 +460,23 @@ func (rb *remoteBackend) writeLoop(ctx context.Context) {
 
 						writeTimeout += v
 
+						logutil.Infof("requestCtx 9 timeout %v v:%v", writeTimeout, v)
+
 						// For PayloadMessage, the internal Codec will write the Payload directly to the underlying socket
 						// instead of copying it to the buffer, so the write deadline of the underlying conn needs to be reset
 						// here, otherwise an old deadline will be out causing io/timeout.
 						conn := rb.conn.RawConn()
 						if _, ok := f.message.Message.(PayloadMessage); ok && conn != nil {
-							conn.SetWriteDeadline(time.Now().Add(v))
+							dt := time.Now().Add(v)
+							logutil.Infof("requestCtx 10 dt %v", dt)
+							conn.SetWriteDeadline(dt)
 						}
 						rb.logger.Debug("write request",
 							zap.Uint64("request-id", f.message.Message.GetID()),
 							zap.String("request", f.message.Message.DebugString()))
 						if err := rb.conn.Write(f.message, goetty.WriteOptions{}); err != nil {
+							err2 := moerr.NewInternalError("****** Y err:%v", err)
+							rb.logger.Debug("print stack", zap.Error(err2))
 							rb.logger.Error("write request failed",
 								zap.Uint64("request-id", f.message.Message.GetID()),
 								zap.Error(err))
