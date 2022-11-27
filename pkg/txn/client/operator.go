@@ -480,8 +480,19 @@ func (tc *txnOperator) doSend(ctx context.Context, requests []txn.TxnRequest, lo
 	}
 
 	util.LogTxnSendRequests(tc.logger, requests)
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx X8  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		txnMeta.DebugString(),
+	)
 	result, err := tc.sender.Send(ctx, requests)
 	if err != nil {
+		err2 := moerr.NewInternalError("print stack X1 txn:%s err:%v",
+			txnMeta.DebugString(), err)
+		logutil.Errorf("print stack X1s txn:%s error:%v",
+			txnMeta.DebugString(), err2)
 		util.LogTxnSendRequestsFailed(tc.logger, requests, err)
 		return nil, err
 	}

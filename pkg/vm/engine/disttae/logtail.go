@@ -52,8 +52,15 @@ func updatePartition(idx, primaryIdx int, tbl *table, ts timestamp.Timestamp,
 }
 
 func getLogTail(ctx context.Context, op client.TxnOperator, reqs []txn.TxnRequest) ([]*api.SyncLogTailResp, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx T1  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		reqs[0].DebugString(),
+	)
 	result, err := op.Read(ctx, reqs)
 	if err != nil {
 		return nil, err

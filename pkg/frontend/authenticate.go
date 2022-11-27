@@ -4520,6 +4520,8 @@ func InitSysTenant(ctx context.Context) error {
 	ctx = context.WithValue(ctx, defines.UserIDKey{}, uint32(rootID))
 	ctx = context.WithValue(ctx, defines.RoleIDKey{}, uint32(moAdminRoleID))
 
+	//	ctx, _ = context.WithTimeout(ctx, pu.SV.SessionTimeout.Duration)
+	//
 	mp, err := mpool.NewMPool("init_system_tenant", 0, mpool.NoFixed)
 	if err != nil {
 		return err

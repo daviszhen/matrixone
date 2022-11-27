@@ -19,14 +19,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"os"
-	"sync"
-	"time"
-
 	"github.com/fagongzi/goetty/v2"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"os"
+	"sync"
+	"time"
 )
 
 type RoutineManager struct {
@@ -96,7 +95,15 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	// XXX MPOOL can choose to use a Mid sized mpool, if, we know
 	// this mpool will be deleted.  Maybe in the following Closed method.
 	ses := NewSession(routine.GetClientProtocol(), nil, pu, gSysVariables, true)
-	ses.SetRequestContext(routine.GetCancelRoutineCtx())
+	timeoutCtx, _ := context.WithTimeout(routine.GetCancelRoutineCtx(), pu.SV.SessionTimeout.Duration)
+	ses.SetRequestContext(timeoutCtx)
+	requestCtx := ses.GetRequestContext()
+	d, o := requestCtx.Deadline()
+	logutil.Debugf("requestCtx Y1  %p %v %v",
+		requestCtx,
+		d,
+		o,
+	)
 	ses.SetFromRealUser(true)
 	routine.SetSession(ses)
 	pro.SetSession(ses)

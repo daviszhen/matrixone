@@ -1087,6 +1087,12 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 	pu := ses.GetParameterUnit()
 	mp := ses.GetMemPool()
 	logDebugf(sessionProfile, "check tenant %s exists", tenant)
+	d, o := sysTenantCtx.Deadline()
+	logutil.Debugf("requestCtx Y2  %p %v %v",
+		sysTenantCtx,
+		d,
+		o,
+	)
 	rsset, err = executeSQLInBackgroundSession(sysTenantCtx, mp, pu, sqlForCheckTenant)
 	if err != nil {
 		return nil, err
@@ -1109,6 +1115,12 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 	logDebugf(sessionProfile, "check user of %s exists", tenant)
 	//Get the password of the user in an independent session
 	sqlForPasswordOfUser := getSqlForPasswordOfUser(tenant.GetUser())
+	d, o = tenantCtx.Deadline()
+	logutil.Debugf("requestCtx Y2  %p %v %v",
+		tenantCtx,
+		d,
+		o,
+	)
 	rsset, err = executeSQLInBackgroundSession(tenantCtx, mp, pu, sqlForPasswordOfUser)
 	if err != nil {
 		return nil, err
@@ -1273,16 +1285,36 @@ func (th *TxnHandler) NewTxn() error {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeBegin)
 		}
 	}()
+	ses := th.GetSession()
+	sessionProfile := ses.GetConciseProfile()
 	err = th.TxnClientNew()
 	if err != nil {
+		logErrorf(sessionProfile, "NewTxn : TxnClientNew failed. error:%v", err)
 		return err
 	}
-	ctx := th.GetSession().GetRequestContext()
+
+	ctx := ses.GetRequestContext()
 	if ctx == nil {
 		panic("context should not be nil")
 	}
+	d, o := ctx.Deadline()
+	logDebugf(sessionProfile, "requestCtx X9  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
+	txnOp := th.GetTxnOperator()
+	txnId := txnOp.Txn().DebugString()
+	logDebugf(sessionProfile, "NewTxn txnId:%s", txnId)
+	defer func() {
+		logDebugf(sessionProfile, "NewTxn exit txnId:%s", txnId)
+	}()
 	storage := th.GetStorage()
 	err = storage.New(ctx, th.GetTxnOperator())
+	if err != nil {
+		th.SetInvalid()
+		logErrorf(sessionProfile, "NewTxn : Engine.New failed. error:%v", err)
+	}
 	return err
 }
 
@@ -1323,10 +1355,22 @@ func (th *TxnHandler) CommitTxn() error {
 	if ctx == nil {
 		panic("context should not be nil")
 	}
+	d, o := ctx.Deadline()
+	logDebugf(sessionProfile, "requestCtx X10  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	storage := th.GetStorage()
 	ctx, cancel := context.WithTimeout(
 		ctx,
 		storage.Hints().CommitOrRollbackTimeout,
+	)
+	d, o = ctx.Deadline()
+	logDebugf(sessionProfile, "requestCtx X11  %p %v %v",
+		ctx,
+		d,
+		o,
 	)
 	defer cancel()
 	var err, err2 error
@@ -1381,10 +1425,22 @@ func (th *TxnHandler) RollbackTxn() error {
 	if ctx == nil {
 		panic("context should not be nil")
 	}
+	d, o := ctx.Deadline()
+	logDebugf(sessionProfile, "requestCtx X12  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	storage := th.GetStorage()
 	ctx, cancel := context.WithTimeout(
 		ctx,
 		storage.Hints().CommitOrRollbackTimeout,
+	)
+	d, o = ctx.Deadline()
+	logDebugf(sessionProfile, "requestCtx X13  %p %v %v",
+		ctx,
+		d,
+		o,
 	)
 	defer cancel()
 	var err, err2 error
@@ -1435,11 +1491,16 @@ func (th *TxnHandler) GetStorage() engine.Engine {
 }
 
 func (th *TxnHandler) GetTxn() (TxnOperator, error) {
-	err := th.GetSession().TxnStart()
+	ses := th.GetSession()
+	sessionProfile := ses.GetConciseProfile()
+	err := ses.TxnStart()
 	if err != nil {
-		logutil.Errorf("GetTxn. error:%v", err)
+		logErrorf(ses.GetConciseProfile(), "GetTxn. error:%v", err)
 		return nil, err
 	}
+	txnOp := th.GetTxnOperator()
+	txnId := txnOp.Txn().DebugString()
+	logDebugf(sessionProfile, "GetTxn txnId:%s", txnId)
 	return th.GetTxnOperator(), nil
 }
 
@@ -1887,6 +1948,12 @@ func executeSQLInBackgroundSession(ctx context.Context, mp *mpool.MPool, pu *con
 	bh := NewBackgroundHandler(ctx, mp, pu)
 	defer bh.Close()
 	logutil.Debugf("background exec sql:%v", sql)
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx Y3  %p %v %v",
+		ctx,
+		d,
+		o,
+	)
 	err := bh.Exec(ctx, sql)
 	logutil.Debugf("background exec sql done")
 	if err != nil {

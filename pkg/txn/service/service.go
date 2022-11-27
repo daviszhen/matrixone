@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"sync"
 	"time"
 
@@ -238,6 +239,8 @@ func (s *service) parallelSendWithRetry(
 			util.LogTxnSendRequests(s.logger, requests)
 			result, err := s.sender.Send(ctx, requests)
 			if err != nil {
+				err2 := moerr.NewInternalError("print stack X2 err:%v", err)
+				logutil.Errorf("print stack X2 error:%v", err2)
 				util.LogTxnSendRequestsFailed(s.logger, requests, err)
 				continue
 			}

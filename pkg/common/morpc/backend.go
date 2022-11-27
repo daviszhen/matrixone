@@ -246,14 +246,34 @@ func (rb *remoteBackend) adjust() {
 func (rb *remoteBackend) Send(ctx context.Context, request Message) (*Future, error) {
 	rb.active()
 	request.SetID(rb.nextID())
-
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx Z4  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	f := rb.newFuture()
 	f.init(request.GetID(), ctx)
 	rb.addFuture(f)
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx Z5  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	if err := rb.doSend(backendSendMessage{message: RPCMessage{Ctx: ctx, Message: request}, completed: f.unRef}); err != nil {
 		f.Close()
 		return nil, err
 	}
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx Z6  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	return f, nil
 }
 
@@ -277,6 +297,13 @@ func (rb *remoteBackend) NewStream(unlockAfterClose bool) (Stream, error) {
 
 func (rb *remoteBackend) doSend(m backendSendMessage) error {
 	for {
+		d, o := m.message.Ctx.Deadline()
+		logutil.Debugf("requestCtx Z7  %p %v %v txn:%s",
+			m.message.Ctx,
+			d,
+			o,
+			m.message.Message.DebugString(),
+		)
 		rb.stateMu.RLock()
 		if rb.stateMu.state == stateStopped {
 			rb.stateMu.RUnlock()

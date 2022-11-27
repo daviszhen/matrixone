@@ -167,12 +167,32 @@ func (c *client) maybeInitBackends() error {
 }
 
 func (c *client) Send(ctx context.Context, backend string, request Message) (*Future, error) {
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx Z1  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	b, err := c.getBackend(backend, false)
 	if err != nil {
 		return nil, err
 	}
-
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx Z2  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	f, err := b.Send(ctx, request)
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx Z3  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -160,6 +160,13 @@ func (s *sender) Send(ctx context.Context, requests []txn.TxnRequest) (*SendResu
 	sr := s.acquireSendResult()
 	if len(requests) == 1 {
 		sr.reset(requests)
+		d, o := ctx.Deadline()
+		logutil.Debugf("requestCtx X6  %p %v %v txn:%s",
+			ctx,
+			d,
+			o,
+			requests[0].DebugString(),
+		)
 		resp, err := s.doSend(ctx, requests[0])
 		if err != nil {
 			sr.Release()
@@ -184,6 +191,13 @@ func (s *sender) Send(ctx context.Context, requests []txn.TxnRequest) (*SendResu
 		}
 
 		requests[idx].RequestID = st.ID()
+		d, o := ctx.Deadline()
+		logutil.Debugf("requestCtx X7  %p %v %v txn:%s",
+			ctx,
+			d,
+			o,
+			requests[idx].DebugString(),
+		)
 		if err := st.Send(ctx, &requests[idx]); err != nil {
 			sr.Release()
 			return nil, err
@@ -209,7 +223,21 @@ func (s *sender) Send(ctx context.Context, requests []txn.TxnRequest) (*SendResu
 }
 
 func (s *sender) doSend(ctx context.Context, request txn.TxnRequest) (txn.TxnResponse, error) {
+	d, o := ctx.Deadline()
+	logutil.Debugf("requestCtx XX1  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	ctx, span := trace.Debug(ctx, "sender.doSend")
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx XX2  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	defer span.End()
 	dn := request.GetTargetDN()
 	if s.options.localDispatch != nil {
@@ -220,13 +248,48 @@ func (s *sender) doSend(ctx context.Context, request txn.TxnRequest) (txn.TxnRes
 		}
 	}
 
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx XX3  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	f, err := s.client.Send(ctx, dn.Address, &request)
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx XX4  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	if err != nil {
 		return txn.TxnResponse{}, err
 	}
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx XX5  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	defer f.Close()
 
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx XX6  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	v, err := f.Get()
+	d, o = ctx.Deadline()
+	logutil.Debugf("requestCtx XX7  %p %v %v txn:%s",
+		ctx,
+		d,
+		o,
+		request.DebugString(),
+	)
 	if err != nil {
 		return txn.TxnResponse{}, err
 	}
