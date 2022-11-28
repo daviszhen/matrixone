@@ -1,13 +1,24 @@
 package newplan
 
 import (
+	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+	"sync/atomic"
 )
+
+var (
+	bindCtxCounter atomic.Uint32
+)
+
+func getBindCtxCounter() uint32 {
+	return bindCtxCounter.Add(1)
+}
 
 func NewBindContext(parent *BindContext) *BindContext {
 	bc := &BindContext{
 		parent:         parent,
+		id:             getBindCtxCounter(),
 		bindingByTag:   make(map[int32]*Binding),
 		bindingByTable: make(map[string]*Binding),
 		bindingByCol:   make(map[string]*Binding),
@@ -16,6 +27,7 @@ func NewBindContext(parent *BindContext) *BindContext {
 		aggregateByAst: make(map[string]int32),
 		projectByExpr:  make(map[string]int32),
 	}
+	fmt.Println("NewBindCountext", bc.id)
 	if parent != nil {
 		bc.defaultDatabase = parent.defaultDatabase
 	}
@@ -44,6 +56,8 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 				}
 			}
 		}
+	default:
+		panic("not implement")
 	}
 
 	return astExpr, err

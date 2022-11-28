@@ -2,11 +2,11 @@ package newplan
 
 import (
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
@@ -426,7 +426,7 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 			Cost:        qb.compCtx.Cost(obj, nil),
 			ObjRef:      obj,
 			TableDef:    tableDef,
-			BindingTags: []int32{qb.genNewTag()},
+			BindingTags: []int32{qb.genNewTag()}, //?
 		}, ctx)
 	case *tree.JoinTableExpr:
 		if tbl.Right == nil {
@@ -464,7 +464,7 @@ func (qb *QueryBuilder) genNewTag() int32 {
 
 func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *BindContext) error {
 	node := qb.qry.Nodes[nodeID]
-
+	fmt.Println("addBinding", nodeID)
 	if node.NodeType == plan.Node_VALUE_SCAN {
 		return nil
 	}
@@ -542,6 +542,29 @@ func (m *ColRefRemapping) addColRef(colRef [2]int32) {
 	m.localToGlobal = append(m.localToGlobal, colRef)
 }
 
+func (qb *QueryBuilder) remapExpr(expr *plan.Expr, colMap map[[2]int32][2]int32) error {
+	switch ne := expr.Expr.(type) {
+	case *plan.Expr_Col:
+		mapId := [2]int32{ne.Col.RelPos, ne.Col.ColPos}
+		if ids, ok := colMap[mapId]; ok {
+			ne.Col.RelPos = ids[0]
+			ne.Col.ColPos = ids[1]
+			ne.Col.Name = qb.nameByColRef[mapId]
+		} else {
+			return moerr.NewParseError("can't find column %v in context's map %v", mapId, colMap)
+		}
+
+	case *plan.Expr_F:
+		for _, arg := range ne.F.GetArgs() {
+			err := qb.remapExpr(arg, colMap)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int) (*ColRefRemapping, error) {
 	node := qb.qry.Nodes[nodeID]
 
@@ -549,30 +572,169 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 		globalToLocal: make(map[[2]int32][2]int32),
 	}
 
-	// switch node.NodeType {
-	// case plan.Node_TABLE_SCAN,
-	// 	plan.Node_MATERIAL_SCAN,
-	// 	plan.Node_EXTERNAL_SCAN,
-	// 	plan.Node_TABLE_FUNCTION:
-	// 	for _, expr := range node.FilterList {
+	switch node.NodeType {
+	case plan.Node_TABLE_SCAN,
+		plan.Node_MATERIAL_SCAN,
+		plan.Node_EXTERNAL_SCAN,
+		plan.Node_TABLE_FUNCTION:
+		for _, expr := range node.FilterList {
+			increaseRefCnt(expr, colRefCnt)
+		}
 
-	// 	}
-	// case plan.Node_INTERSECT,
-	// 	plan.Node_INTERSECT_ALL,
-	// 	plan.Node_UNION,
-	// 	plan.Node_UNION_ALL,
-	// 	plan.Node_MINUS,
-	// 	plan.Node_MINUS_ALL:
-	// case plan.Node_JOIN:
-	// case plan.Node_AGG:
-	// case plan.Node_SORT:
-	// case plan.Node_FILTER:
-	// case plan.Node_PROJECT, plan.Node_MATERIAL:
-	// case plan.Node_DISTINCT:
-	// case plan.Node_VALUE_SCAN:
-	// default:
-	// 	return nil, moerr.NewInternalError("unsupport node type")
-	// }
+		internalRemapping := &ColRefRemapping{
+			globalToLocal: make(map[[2]int32][2]int32),
+		}
+
+		tag := node.BindingTags[0]
+		newTableDef := &plan.TableDef{
+			Name:          node.TableDef.Name,
+			Defs:          node.TableDef.Defs,
+			TableType:     node.TableDef.TableType,
+			Createsql:     node.TableDef.Createsql,
+			Name2ColIndex: node.TableDef.Name2ColIndex,
+			CompositePkey: node.TableDef.CompositePkey,
+			TblFunc:       node.TableDef.TblFunc,
+			IndexInfos:    node.TableDef.IndexInfos,
+		}
+
+		for i, col := range node.TableDef.Cols {
+			globalRef := [2]int32{tag, int32(i)}
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			internalRemapping.addColRef(globalRef)
+			newTableDef.Cols = append(newTableDef.Cols, col)
+		}
+
+		if len(newTableDef.Cols) == 0 {
+			internalRemapping.addColRef([2]int32{tag, 0})
+			newTableDef.Cols = append(newTableDef.Cols, node.TableDef.Cols[0])
+		}
+
+		node.TableDef = newTableDef
+
+		for _, expr := range node.FilterList {
+			decreaseRefCnt(expr, colRefCnt)
+			err := qb.remapExpr(expr, internalRemapping.globalToLocal)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		for i, col := range node.TableDef.Cols {
+			if colRefCnt[internalRemapping.localToGlobal[i]] == 0 {
+				continue
+			}
+
+			remapping.addColRef(internalRemapping.localToGlobal[i])
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: col.Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: 0,
+						ColPos: int32(i),
+						Name:   qb.nameByColRef[internalRemapping.localToGlobal[i]],
+					},
+				},
+			})
+		}
+
+		if len(node.ProjectList) == 0 {
+			if len(node.TableDef.Cols) == 0 {
+				globalRef := [2]int32{tag, 0}
+				remapping.addColRef(globalRef)
+
+				node.ProjectList = append(node.ProjectList, &plan.Expr{
+					Typ: node.TableDef.Cols[0].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: 0,
+							ColPos: 0,
+							Name:   qb.nameByColRef[globalRef],
+						},
+					},
+				})
+			} else {
+				remapping.addColRef(internalRemapping.localToGlobal[0])
+				node.ProjectList = append(node.ProjectList, &plan.Expr{
+					Typ: node.TableDef.Cols[0].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: 0,
+							ColPos: 0,
+							Name:   qb.nameByColRef[internalRemapping.localToGlobal[0]],
+						},
+					},
+				})
+			}
+		}
+
+		if node.NodeType == plan.Node_TABLE_FUNCTION {
+			return nil, moerr.NewInternalError("not implement qb 1")
+		}
+	case plan.Node_INTERSECT,
+		plan.Node_INTERSECT_ALL,
+		plan.Node_UNION,
+		plan.Node_UNION_ALL,
+		plan.Node_MINUS,
+		plan.Node_MINUS_ALL:
+		return nil, moerr.NewInternalError("not implement qb 2")
+	case plan.Node_JOIN:
+		return nil, moerr.NewInternalError("not implement qb 3")
+	case plan.Node_AGG:
+		return nil, moerr.NewInternalError("not implement qb 4")
+	case plan.Node_SORT:
+		return nil, moerr.NewInternalError("not implement qb 5")
+	case plan.Node_FILTER:
+		return nil, moerr.NewInternalError("not implement qb 6")
+	case plan.Node_PROJECT, plan.Node_MATERIAL:
+		projectTag := node.BindingTags[0]
+		var neededProj []int32
+		for i, expr := range node.ProjectList {
+			globalRef := [2]int32{projectTag, int32(i)}
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			neededProj = append(neededProj, int32(i))
+			increaseRefCnt(expr, colRefCnt)
+		}
+
+		if len(neededProj) == 0 {
+			increaseRefCnt(node.ProjectList[0], colRefCnt)
+			neededProj = append(neededProj, 0)
+		}
+
+		childRemapping, err := qb.remapAllColRefs(node.Children[0], colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+
+		var newProjList []*plan.Expr
+		for _, needed := range neededProj {
+			expr := node.ProjectList[needed]
+			decreaseRefCnt(expr, colRefCnt)
+			err := qb.remapExpr(expr, childRemapping.globalToLocal)
+			if err != nil {
+				return nil, err
+			}
+
+			globalRef := [2]int32{projectTag, needed}
+			remapping.addColRef(globalRef)
+
+			newProjList = append(newProjList, expr)
+		}
+
+		node.ProjectList = newProjList
+	case plan.Node_DISTINCT:
+		return nil, moerr.NewInternalError("not implement qb 7")
+	case plan.Node_VALUE_SCAN:
+		return nil, moerr.NewInternalError("not implement qb 8")
+	default:
+		return nil, moerr.NewInternalError("unsupport node type")
+	}
 
 	node.BindingTags = nil
 
@@ -608,8 +770,21 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 	qb.ctxByNode = append(qb.ctxByNode, ctx)
 
 	switch node.NodeType {
+	case plan.Node_JOIN:
+		panic("appendNode node join not implement 1")
+	case plan.Node_AGG:
+		panic("appendNode node join not implement 2")
 	default:
-		//TODO
+		if len(node.Children) > 0 {
+			childCost := qb.qry.Nodes[node.Children[0]].Cost
+			node.Cost = &plan.Cost{
+				Card: childCost.Card,
+			}
+		} else if node.Cost == nil {
+			node.Cost = &plan.Cost{
+				Card: 1,
+			}
+		}
 	}
 	return nodeId
 }
@@ -713,8 +888,61 @@ func (qb *QueryBuilder) flattenSubquery(nodeID int32, subquery *plan.SubqueryRef
 }
 
 func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int32, []*plan.Expr) {
-	logutil.Infof("pushdownFilters not implement")
-	return nodeID, nil
+	node := qb.qry.Nodes[nodeID]
+	var canPushdown, cantPushdown []*plan.Expr
+	switch node.NodeType {
+	case plan.Node_AGG:
+		logutil.Infof("pushdownFilter not implement 1")
+	case plan.Node_FILTER:
+		logutil.Infof("pushdownFilter not implement 2")
+	case plan.Node_JOIN:
+		logutil.Infof("pushdownFilter not implement 3")
+	case plan.Node_UNION, plan.Node_UNION_ALL, plan.Node_MINUS, plan.Node_MINUS_ALL, plan.Node_INTERSECT, plan.Node_INTERSECT_ALL:
+		logutil.Infof("pushdownFilter not implement 4")
+	case plan.Node_PROJECT:
+		child := qb.qry.Nodes[node.Children[0]]
+		if (child.NodeType == plan.Node_VALUE_SCAN || child.NodeType == plan.Node_EXTERNAL_SCAN) && child.RowsetData == nil {
+			cantPushdown = filters
+			break
+		}
+
+		projectTag := node.BindingTags[0]
+
+		for _, filter := range filters {
+			canPushdown = append(canPushdown, replaceColRefs(filter, projectTag, node.ProjectList))
+		}
+
+		childID, cantPushdownChild := qb.pushdownFilters(node.Children[0], canPushdown)
+		if len(cantPushdownChild) > 0 {
+			childID = qb.appendNode(&plan.Node{
+				NodeType:   plan.Node_FILTER,
+				Children:   []int32{node.Children[0]},
+				FilterList: cantPushdownChild,
+			}, nil)
+		}
+
+		node.Children[0] = childID
+	case plan.Node_TABLE_SCAN, plan.Node_EXTERNAL_SCAN:
+		node.FilterList = append(node.FilterList, filters...)
+	case plan.Node_TABLE_FUNCTION:
+		logutil.Infof("pushdownFilter not implement 5")
+	default:
+		if len(node.Children) > 0 {
+			childID, cantPushdownChild := qb.pushdownFilters(node.Children[0], filters)
+			if len(cantPushdownChild) > 0 {
+				childID = qb.appendNode(&plan.Node{
+					NodeType:   plan.Node_FILTER,
+					Children:   []int32{node.Children[0]},
+					FilterList: cantPushdownChild,
+				}, nil)
+
+				node.Children[0] = childID
+			}
+		} else {
+			cantPushdown = filters
+		}
+	}
+	return nodeID, cantPushdown
 }
 
 func (qb *QueryBuilder) determineJoinOrder(nodeID int32) int32 {
