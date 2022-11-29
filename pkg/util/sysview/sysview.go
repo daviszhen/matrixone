@@ -186,7 +186,7 @@ var (
 			"att_comment as COLUMN_COMMENT," +
 			"'' as GENERATION_EXPRESSION," +
 			"0 as SRS_ID " +
-			"from mo_catalog.mo_columns where att_relname!='%!%mo_increment_columns' and att_relname not like '__mo_cpkey%' and attname != '__mo_rowid'",
+			"from mo_catalog2.mo_columns where att_relname!='%!%mo_increment_columns' and att_relname not like '__mo_cpkey%' and attname != '__mo_rowid'",
 		//"CREATE TABLE IF NOT EXISTS COLUMNS(" +
 		//	"TABLE_CATALOG varchar(64)," +
 		//	"TABLE_SCHEMA varchar(64)," +
@@ -263,7 +263,7 @@ var (
 			"'utf8mb4_0900_ai_ci' AS DEFAULT_COLLATION_NAME," +
 			"'' AS SQL_PATH," +
 			"'NO' AS DEFAULT_ENCRYPTION " +
-			"FROM mo_catalog.mo_database;",
+			"FROM mo_catalog2.mo_database;",
 		"CREATE TABLE IF NOT EXISTS CHARACTER_SETS(" +
 			"CHARACTER_SET_NAME varchar(64)," +
 			"DEFAULT_COLLATE_NAME varchar(64)," +
@@ -316,7 +316,7 @@ var (
 			"0 AS CHECKSUM," +
 			"'' AS CREATE_OPTIONS," +
 			"rel_comment AS TABLE_COMMENT " +
-			"FROM mo_catalog.mo_tables;",
+			"FROM mo_catalog2.mo_tables;",
 		"CREATE TABLE IF NOT EXISTS ENGINES (" +
 			"ENGINE varchar(64)," +
 			"SUPPORT varchar(8)," +

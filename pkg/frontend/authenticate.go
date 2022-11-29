@@ -727,28 +727,34 @@ var (
 			);`,
 	}
 
-	//drop tables for the tenant
-	dropSqls = []string{
-		`drop table if exists mo_catalog.mo_user;`,
-		`drop table if exists mo_catalog.mo_role;`,
-		`drop table if exists mo_catalog.mo_user_grant;`,
-		`drop table if exists mo_catalog.mo_role_grant;`,
-		`drop table if exists mo_catalog.mo_role_privs;`,
-		//"drop table if exists mo_catalog.`%!%mo_increment_columns`;",
+	createViewFormats = []string{
+		`create view mo_database as select * from mo_catalog.mo_database where account_id = %d;`,
+		`create view mo_tables as select * from mo_catalog.mo_tables where account_id = %d;`,
+		`create view mo_columns as select * from mo_catalog.mo_columns where account_id = %d;`,
 	}
 
-	initMoAccountFormat = `insert into mo_catalog.mo_account(
+	//drop tables for the tenant
+	dropSqls = []string{
+		`drop table if exists mo_catalog2.mo_user;`,
+		`drop table if exists mo_catalog2.mo_role;`,
+		`drop table if exists mo_catalog2.mo_user_grant;`,
+		`drop table if exists mo_catalog2.mo_role_grant;`,
+		`drop table if exists mo_catalog2.mo_role_privs;`,
+		//"drop table if exists mo_catalog2.`%!%mo_increment_columns`;",
+	}
+
+	initMoAccountFormat = `insert into mo_catalog2.mo_account(
 				account_id,
 				account_name,
 				status,
 				created_time,
 				comments) values (%d,"%s","%s","%s","%s");`
-	initMoAccountWithoutIDFormat = `insert into mo_catalog.mo_account(
+	initMoAccountWithoutIDFormat = `insert into mo_catalog2.mo_account(
 				account_name,
 				status,
 				created_time,
 				comments) values ("%s","%s","%s","%s");`
-	initMoRoleFormat = `insert into mo_catalog.mo_role(
+	initMoRoleFormat = `insert into mo_catalog2.mo_role(
 				role_id,
 				role_name,
 				creator,
@@ -756,14 +762,14 @@ var (
 				created_time,
 				comments
 			) values (%d,"%s",%d,%d,"%s","%s");`
-	initMoRoleWithoutIDFormat = `insert into mo_catalog.mo_role(
+	initMoRoleWithoutIDFormat = `insert into mo_catalog2.mo_role(
 				role_name,
 				creator,
 				owner,
 				created_time,
 				comments
 			) values ("%s",%d,%d,"%s","%s");`
-	initMoUserFormat = `insert into mo_catalog.mo_user(
+	initMoUserFormat = `insert into mo_catalog2.mo_user(
 				user_id,
 				user_host,
 				user_name,
@@ -776,7 +782,7 @@ var (
 				owner,
 				default_role
     		) values(%d,"%s","%s","%s","%s","%s",%s,"%s",%d,%d,%d);`
-	initMoUserWithoutIDFormat = `insert into mo_catalog.mo_user(
+	initMoUserWithoutIDFormat = `insert into mo_catalog2.mo_user(
 				user_host,
 				user_name,
 				authentication_string,
@@ -788,7 +794,7 @@ var (
 				owner,
 				default_role
     		) values("%s","%s","%s","%s","%s",%s,"%s",%d,%d,%d);`
-	initMoRolePrivFormat = `insert into mo_catalog.mo_role_privs(
+	initMoRolePrivFormat = `insert into mo_catalog2.mo_role_privs(
 				role_id,
 				role_name,
 				obj_type,
@@ -800,7 +806,7 @@ var (
 				granted_time,
 				with_grant_option
 			) values(%d,"%s","%s",%d,%d,"%s","%s",%d,"%s",%v);`
-	initMoUserGrantFormat = `insert into mo_catalog.mo_user_grant(
+	initMoUserGrantFormat = `insert into mo_catalog2.mo_user_grant(
             	role_id,
 				user_id,
 				granted_time,
@@ -810,72 +816,72 @@ var (
 
 const (
 	//privilege verification
-	checkTenantFormat = `select account_id,account_name from mo_catalog.mo_account where account_name = "%s";`
+	checkTenantFormat = `select account_id,account_name from mo_catalog2.mo_account where account_name = "%s";`
 
-	deleteAccountFromMoAccountFormat = `delete from mo_catalog.mo_account where account_name = "%s";`
+	deleteAccountFromMoAccountFormat = `delete from mo_catalog2.mo_account where account_name = "%s";`
 
-	getPasswordOfUserFormat = `select user_id,authentication_string,default_role from mo_catalog.mo_user where user_name = "%s";`
+	getPasswordOfUserFormat = `select user_id,authentication_string,default_role from mo_catalog2.mo_user where user_name = "%s";`
 
-	checkRoleExistsFormat = `select role_id from mo_catalog.mo_role where role_id = %d and role_name = "%s";`
+	checkRoleExistsFormat = `select role_id from mo_catalog2.mo_role where role_id = %d and role_name = "%s";`
 
-	roleNameOfRoleIdFormat = `select role_name from mo_catalog.mo_role where role_id = %d;`
+	roleNameOfRoleIdFormat = `select role_name from mo_catalog2.mo_role where role_id = %d;`
 
-	roleIdOfRoleFormat = `select role_id from mo_catalog.mo_role where role_name = "%s";`
+	roleIdOfRoleFormat = `select role_id from mo_catalog2.mo_role where role_name = "%s";`
 
 	//operations on the mo_user_grant
-	getRoleOfUserFormat = `select r.role_id from  mo_catalog.mo_role r, mo_catalog.mo_user_grant ug where ug.role_id = r.role_id and ug.user_id = %d and r.role_name = "%s";`
+	getRoleOfUserFormat = `select r.role_id from  mo_catalog2.mo_role r, mo_catalog2.mo_user_grant ug where ug.role_id = r.role_id and ug.user_id = %d and r.role_name = "%s";`
 
-	getRoleIdOfUserIdFormat = `select role_id,with_grant_option from mo_catalog.mo_user_grant where user_id = %d;`
+	getRoleIdOfUserIdFormat = `select role_id,with_grant_option from mo_catalog2.mo_user_grant where user_id = %d;`
 
-	checkUserGrantFormat = `select role_id,user_id,with_grant_option from mo_catalog.mo_user_grant where role_id = %d and user_id = %d;`
+	checkUserGrantFormat = `select role_id,user_id,with_grant_option from mo_catalog2.mo_user_grant where role_id = %d and user_id = %d;`
 
-	checkUserHasRoleFormat = `select u.user_id,ug.role_id from mo_catalog.mo_user u, mo_catalog.mo_user_grant ug where u.user_id = ug.user_id and u.user_name = "%s" and ug.role_id = %d;`
+	checkUserHasRoleFormat = `select u.user_id,ug.role_id from mo_catalog2.mo_user u, mo_catalog2.mo_user_grant ug where u.user_id = ug.user_id and u.user_name = "%s" and ug.role_id = %d;`
 
 	//with_grant_option = true
-	checkUserGrantWGOFormat = `select role_id,user_id from mo_catalog.mo_user_grant where with_grant_option = true and role_id = %d and user_id = %d;`
+	checkUserGrantWGOFormat = `select role_id,user_id from mo_catalog2.mo_user_grant where with_grant_option = true and role_id = %d and user_id = %d;`
 
-	updateUserGrantFormat = `update mo_catalog.mo_user_grant set granted_time = "%s", with_grant_option = %v where role_id = %d and user_id = %d;`
+	updateUserGrantFormat = `update mo_catalog2.mo_user_grant set granted_time = "%s", with_grant_option = %v where role_id = %d and user_id = %d;`
 
-	insertUserGrantFormat = `insert into mo_catalog.mo_user_grant(role_id,user_id,granted_time,with_grant_option) values (%d,%d,"%s",%v);`
+	insertUserGrantFormat = `insert into mo_catalog2.mo_user_grant(role_id,user_id,granted_time,with_grant_option) values (%d,%d,"%s",%v);`
 
-	deleteUserGrantFormat = `delete from mo_catalog.mo_user_grant where role_id = %d and user_id = %d;`
+	deleteUserGrantFormat = `delete from mo_catalog2.mo_user_grant where role_id = %d and user_id = %d;`
 
 	//operations on the mo_role_grant
-	checkRoleGrantFormat = `select granted_id,grantee_id,with_grant_option from mo_catalog.mo_role_grant where granted_id = %d and grantee_id = %d;`
+	checkRoleGrantFormat = `select granted_id,grantee_id,with_grant_option from mo_catalog2.mo_role_grant where granted_id = %d and grantee_id = %d;`
 
 	//with_grant_option = true
-	getRoleGrantWGOFormat = `select grantee_id from mo_catalog.mo_role_grant where with_grant_option = true and granted_id = %d;`
+	getRoleGrantWGOFormat = `select grantee_id from mo_catalog2.mo_role_grant where with_grant_option = true and granted_id = %d;`
 
-	updateRoleGrantFormat = `update mo_catalog.mo_role_grant set operation_role_id = %d, operation_user_id = %d, granted_time = "%s", with_grant_option = %v where granted_id = %d and grantee_id = %d;`
+	updateRoleGrantFormat = `update mo_catalog2.mo_role_grant set operation_role_id = %d, operation_user_id = %d, granted_time = "%s", with_grant_option = %v where granted_id = %d and grantee_id = %d;`
 
-	insertRoleGrantFormat = `insert mo_catalog.mo_role_grant(granted_id,grantee_id,operation_role_id,operation_user_id,granted_time,with_grant_option) values (%d,%d,%d,%d,"%s",%v);`
+	insertRoleGrantFormat = `insert mo_catalog2.mo_role_grant(granted_id,grantee_id,operation_role_id,operation_user_id,granted_time,with_grant_option) values (%d,%d,%d,%d,"%s",%v);`
 
-	deleteRoleGrantFormat = `delete from mo_catalog.mo_role_grant where granted_id = %d and grantee_id = %d;`
+	deleteRoleGrantFormat = `delete from mo_catalog2.mo_role_grant where granted_id = %d and grantee_id = %d;`
 
-	getAllStuffRoleGrantFormat = `select granted_id,grantee_id,with_grant_option from mo_catalog.mo_role_grant;`
+	getAllStuffRoleGrantFormat = `select granted_id,grantee_id,with_grant_option from mo_catalog2.mo_role_grant;`
 
-	getInheritedRoleIdOfRoleIdFormat = `select granted_id,with_grant_option from mo_catalog.mo_role_grant where grantee_id = %d;`
+	getInheritedRoleIdOfRoleIdFormat = `select granted_id,with_grant_option from mo_catalog2.mo_role_grant where grantee_id = %d;`
 
-	checkRoleHasPrivilegeFormat = `select role_id,with_grant_option from mo_catalog.mo_role_privs where role_id = %d and obj_type = "%s" and obj_id = %d and privilege_id = %d;`
+	checkRoleHasPrivilegeFormat = `select role_id,with_grant_option from mo_catalog2.mo_role_privs where role_id = %d and obj_type = "%s" and obj_id = %d and privilege_id = %d;`
 
 	//with_grant_option = true
-	checkRoleHasPrivilegeWGOFormat = `select role_id from mo_catalog.mo_role_privs where with_grant_option = true and privilege_id = %d;`
+	checkRoleHasPrivilegeWGOFormat = `select role_id from mo_catalog2.mo_role_privs where with_grant_option = true and privilege_id = %d;`
 
-	updateRolePrivsFormat = `update mo_catalog.mo_role_privs set operation_user_id = %d, granted_time = "%s", with_grant_option = %v where role_id = %d and obj_type = "%s" and obj_id = %d and privilege_id = %d;`
+	updateRolePrivsFormat = `update mo_catalog2.mo_role_privs set operation_user_id = %d, granted_time = "%s", with_grant_option = %v where role_id = %d and obj_type = "%s" and obj_id = %d and privilege_id = %d;`
 
-	insertRolePrivsFormat = `insert into mo_catalog.mo_role_privs(role_id,role_name,obj_type,obj_id,privilege_id,privilege_name,privilege_level,operation_user_id,granted_time,with_grant_option) 
+	insertRolePrivsFormat = `insert into mo_catalog2.mo_role_privs(role_id,role_name,obj_type,obj_id,privilege_id,privilege_name,privilege_level,operation_user_id,granted_time,with_grant_option) 
 								values (%d,"%s","%s",%d,%d,"%s","%s",%d,"%s",%v);`
 
-	deleteRolePrivsFormat = `delete from mo_catalog.mo_role_privs 
+	deleteRolePrivsFormat = `delete from mo_catalog2.mo_role_privs 
        									where role_id = %d 
        									    and obj_type = "%s" 
        									    and obj_id = %d 
        									    and privilege_id = %d 
        									    and privilege_level = "%s";`
 
-	checkDatabaseFormat = `select dat_id from mo_catalog.mo_database where datname = "%s";`
+	checkDatabaseFormat = `select dat_id from mo_catalog2.mo_database where datname = "%s";`
 
-	checkDatabaseTableFormat = `select t.rel_id from mo_catalog.mo_database d, mo_catalog.mo_tables t
+	checkDatabaseTableFormat = `select t.rel_id from mo_catalog2.mo_database d, mo_catalog2.mo_tables t
 										where d.dat_id = t.reldatabase_id
 											and d.datname = "%s"
 											and t.relname = "%s";`
@@ -883,7 +889,7 @@ const (
 	//TODO:fix privilege_level string and obj_type string
 	//For object_type : table, privilege_level : *.*
 	checkWithGrantOptionForTableStarStar = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = 0
 					and rp.obj_type = "%s"
@@ -894,7 +900,7 @@ const (
 
 	//For object_type : table, privilege_level : db.*
 	checkWithGrantOptionForTableDatabaseStar = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = 0
 					and rp.obj_type = "%s"
@@ -906,7 +912,7 @@ const (
 
 	//For object_type : table, privilege_level : db.table
 	checkWithGrantOptionForTableDatabaseTable = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = t.rel_id
 					and rp.obj_type = "%s"
@@ -919,7 +925,7 @@ const (
 
 	//For object_type : database, privilege_level : *
 	checkWithGrantOptionForDatabaseStar = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = 0
 					and rp.obj_type = "%s"
@@ -930,7 +936,7 @@ const (
 
 	//For object_type : database, privilege_level : *.*
 	checkWithGrantOptionForDatabaseStarStar = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = 0
 					and rp.obj_type = "%s"
@@ -941,7 +947,7 @@ const (
 
 	//For object_type : database, privilege_level : db
 	checkWithGrantOptionForDatabaseDB = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = d.dat_id
 					and rp.obj_type = "%s"
@@ -953,7 +959,7 @@ const (
 
 	//For object_type : account, privilege_level : *
 	checkWithGrantOptionForAccountStar = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = 0
 					and rp.obj_type = "%s"
@@ -965,7 +971,7 @@ const (
 	//for database.table or table
 	//check the role has the table level privilege for the privilege level (d.t or t)
 	checkRoleHasTableLevelPrivilegeFormat = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_tables t, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_tables t, mo_catalog2.mo_role_privs rp
 				where d.dat_id = t.reldatabase_id
 					and rp.obj_id = t.rel_id
 					and rp.obj_type = "%s"
@@ -977,7 +983,7 @@ const (
 
 	//for database.* or *
 	checkRoleHasTableLevelForDatabaseStarFormat = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_role_privs rp
 				where d.dat_id = rp.obj_id
 					and rp.obj_type = "%s"
 					and rp.role_id = %d
@@ -987,7 +993,7 @@ const (
 
 	//for *.*
 	checkRoleHasTableLevelForStarStarFormat = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_role_privs rp
 				where rp.obj_id = 0
 					and rp.obj_type = "%s"
 					and rp.role_id = %d
@@ -996,7 +1002,7 @@ const (
 
 	//for * or *.*
 	checkRoleHasDatabaseLevelForStarStarFormat = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_role_privs rp
 				where rp.obj_id = 0
 					and rp.obj_type = "%s"
 					and rp.role_id = %d
@@ -1005,7 +1011,7 @@ const (
 
 	//for database
 	checkRoleHasDatabaseLevelForDatabaseFormat = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_database d, mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_database d, mo_catalog2.mo_role_privs rp
 				where d.dat_id = rp.obj_id
 					and rp.obj_type = "%s"
 					and rp.role_id = %d
@@ -1015,7 +1021,7 @@ const (
 
 	//for *
 	checkRoleHasAccountLevelForStarFormat = `select rp.privilege_id,rp.with_grant_option
-				from mo_catalog.mo_role_privs rp
+				from mo_catalog2.mo_role_privs rp
 				where rp.obj_id = 0
 					and rp.obj_type = "%s"
 					and rp.role_id = %d
@@ -1023,18 +1029,18 @@ const (
 					and rp.privilege_level = "%s";`
 
 	//delete role from mo_role,mo_user_grant,mo_role_grant,mo_role_privs
-	deleteRoleFromMoRoleFormat = `delete from mo_catalog.mo_role where role_id = %d;`
+	deleteRoleFromMoRoleFormat = `delete from mo_catalog2.mo_role where role_id = %d;`
 
-	deleteRoleFromMoUserGrantFormat = `delete from mo_catalog.mo_user_grant where role_id = %d;`
+	deleteRoleFromMoUserGrantFormat = `delete from mo_catalog2.mo_user_grant where role_id = %d;`
 
-	deleteRoleFromMoRoleGrantFormat = `delete from mo_catalog.mo_role_grant where granted_id = %d or grantee_id = %d;`
+	deleteRoleFromMoRoleGrantFormat = `delete from mo_catalog2.mo_role_grant where granted_id = %d or grantee_id = %d;`
 
-	deleteRoleFromMoRolePrivsFormat = `delete from mo_catalog.mo_role_privs where role_id = %d;`
+	deleteRoleFromMoRolePrivsFormat = `delete from mo_catalog2.mo_role_privs where role_id = %d;`
 
 	//delete user from mo_user,mo_user_grant
-	deleteUserFromMoUserFormat = `delete from mo_catalog.mo_user where user_id = %d;`
+	deleteUserFromMoUserFormat = `delete from mo_catalog2.mo_user where user_id = %d;`
 
-	deleteUserFromMoUserGrantFormat = `delete from mo_catalog.mo_user_grant where user_id = %d;`
+	deleteUserFromMoUserGrantFormat = `delete from mo_catalog2.mo_user_grant where user_id = %d;`
 )
 
 var (
@@ -1050,6 +1056,7 @@ var (
 	// the databases that can not operated by the real user
 	bannedCatalogDatabases = map[string]int8{
 		"mo_catalog":         0,
+		"mo_catalog2":        0,
 		"information_schema": 0,
 		"system":             0,
 		"system_metrics":     0,
@@ -1989,7 +1996,7 @@ func doDropAccount(ctx context.Context, ses *Session, da *tree.DropAccount) erro
 		prefix := "drop database if exists "
 
 		for db = range databases {
-			if db == "mo_catalog" {
+			if db == "mo_catalog" || db == "mo_catalog2" {
 				continue
 			}
 			bb := &bytes.Buffer{}
@@ -4497,6 +4504,34 @@ func checkSysExistsOrNot(ctx context.Context, bh BackgroundExec, pu *config.Para
 		}
 	}
 
+	sql = "show tables from mo_catalog2;"
+	bh.ClearExecResultSet()
+	err = bh.Exec(ctx, sql)
+	if err != nil {
+		return false, err
+	}
+
+	erArray, err = getResultSet(bh)
+	if err != nil {
+		return false, err
+	}
+	if execResultArrayHasData(erArray) {
+		for i := uint64(0); i < erArray[0].GetRowCount(); i++ {
+			tableName, err = erArray[0].GetString(i, 0)
+			if err != nil {
+				return false, err
+			}
+			tableNames = append(tableNames, tableName)
+		}
+
+		//if there is at least one catalog table, it denotes the sys tenant exists.
+		for _, name := range tableNames {
+			if _, ok := sysWantedTables[name]; ok {
+				return true, nil
+			}
+		}
+	}
+
 	return false, nil
 }
 
@@ -4528,16 +4563,22 @@ func InitSysTenant(ctx context.Context) error {
 	bh := NewBackgroundHandler(ctx, mp, pu)
 	defer bh.Close()
 
-	//USE the mo_catalog
-	err = bh.Exec(ctx, "use mo_catalog;")
+	//create database mo_catalog2
+	err = bh.Exec(ctx, "create database if not exists mo_catalog2;")
 	if err != nil {
 		return err
 	}
 
-	err = bh.Exec(ctx, createAutoTableSql)
+	//USE the mo_catalog
+	err = bh.Exec(ctx, "use mo_catalog2;")
 	if err != nil {
 		return err
 	}
+
+	//err = bh.Exec(ctx, createAutoTableSql)
+	//if err != nil {
+	//	return err
+	//}
 
 	err = bh.Exec(ctx, "begin;")
 	if err != nil {
@@ -4565,6 +4606,7 @@ func InitSysTenant(ctx context.Context) error {
 	if err != nil {
 		goto handleFailed
 	}
+	plan2.MO_CATALOG_DB_NAME.Store("mo_catalog2")
 	return err
 handleFailed:
 	//ROLLBACK the transaction
@@ -4591,6 +4633,11 @@ func createTablesInMoCatalog(ctx context.Context, bh BackgroundExec, tenant *Ten
 	//create tables for the tenant
 	for _, sql := range createSqls {
 		addSqlIntoSet(sql)
+	}
+
+	//create mo_database,mo_tables,mo_columns
+	for _, format := range createViewFormats {
+		addSqlIntoSet(fmt.Sprintf(format, sysAccountID))
 	}
 
 	//initialize the default data of tables for the tenant
@@ -4735,8 +4782,13 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 
+	err = bh.Exec(ctx, "create database if not exists mo_catalog2;")
+	if err != nil {
+		return err
+	}
+
 	//USE the mo_catalog
-	err = bh.Exec(ctx, "use mo_catalog;")
+	err = bh.Exec(ctx, "use mo_catalog2;")
 	if err != nil {
 		return err
 	}
@@ -4766,10 +4818,10 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 			goto handleFailed
 		}
 
-		err = bh.Exec(newTenantCtx, createAutoTableSql)
-		if err != nil {
-			return err
-		}
+		//err = bh.Exec(newTenantCtx, createAutoTableSql)
+		//if err != nil {
+		//	return err
+		//}
 
 		err = bh.Exec(ctx, "begin;")
 		if err != nil {
@@ -4903,6 +4955,12 @@ func createTablesInMoCatalogOfGeneralTenant2(tenant *TenantInfo, bh BackgroundEx
 	addSqlIntoSet := func(sql string) {
 		initDataSqls = append(initDataSqls, sql)
 	}
+
+	//create mo_database, mo_tales, mo_columns
+	for _, format := range createViewFormats {
+		addSqlIntoSet(fmt.Sprintf(format, newTenantID))
+	}
+
 	//step 2:add new role entries to the mo_role
 	initMoRole1 := fmt.Sprintf(initMoRoleFormat, accountAdminRoleID, accountAdminRoleName, tenant.GetUserID(), tenant.GetDefaultRoleID(), types.CurrentTimestamp().String2(time.UTC, 0), "")
 	initMoRole2 := fmt.Sprintf(initMoRoleFormat, publicRoleID, publicRoleName, tenant.GetUserID(), tenant.GetDefaultRoleID(), types.CurrentTimestamp().String2(time.UTC, 0), "")

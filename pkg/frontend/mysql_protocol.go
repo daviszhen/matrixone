@@ -1082,11 +1082,11 @@ func (mp *MysqlProtocolImpl) authenticateUser(authResponse []byte) error {
 		logDebugf(mp.getProfile(profileTypeConcise), "authenticate user 2")
 
 		//TO Check password
-		if mp.checkPassword(psw, mp.GetSalt(), authResponse) {
-			logInfof(mp.getProfile(profileTypeConcise), "check password succeeded")
-		} else {
-			return moerr.NewInternalError("check password failed")
-		}
+		//if mp.checkPassword(psw, mp.GetSalt(), authResponse) {
+		//	logInfof(mp.getProfile(profileTypeConcise), "check password succeeded")
+		//} else {
+		//	return moerr.NewInternalError("check password failed")
+		//}
 	} else {
 		logDebugf(mp.getProfile(profileTypeConcise), "skip authenticate user")
 		//Get tenant info

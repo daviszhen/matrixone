@@ -17,6 +17,7 @@ package plan
 import (
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -26,12 +27,20 @@ import (
 )
 
 type MockCompilerContext struct {
-	objects map[string]*ObjectRef
-	tables  map[string]*TableDef
-	costs   map[string]*Cost
-	pks     map[string][]int
-
+	objects         map[string]*ObjectRef
+	tables          map[string]*TableDef
+	costs           map[string]*Cost
+	pks             map[string][]int
+	catalog         atomic.Value
 	mysqlCompatible bool
+}
+
+func (m *MockCompilerContext) GetCatalogName() string {
+	return m.catalog.Load().(string)
+}
+
+func (m *MockCompilerContext) SetCatalogName(c string) {
+	m.catalog.Store(c)
 }
 
 func (m *MockCompilerContext) ResolveVariable(varName string, isSystemVar, isGlobalVar bool) (interface{}, error) {
@@ -67,10 +76,12 @@ type col struct {
 
 // NewEmptyCompilerContext for test create/drop statement
 func NewEmptyCompilerContext() *MockCompilerContext {
-	return &MockCompilerContext{
+	mcc := &MockCompilerContext{
 		objects: make(map[string]*ObjectRef),
 		tables:  make(map[string]*TableDef),
 	}
+	mcc.catalog.Store("mo_catalog")
+	return mcc
 }
 
 type Schema struct {

@@ -16,6 +16,7 @@ package memoryengine
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan"
@@ -28,6 +29,7 @@ type CompilerContext struct {
 	defaultDB string
 	engine    *Engine
 	txnOp     client.TxnOperator
+	catalog   atomic.Value
 }
 
 func (e *Engine) NewCompilerContext(
@@ -35,15 +37,25 @@ func (e *Engine) NewCompilerContext(
 	defaultDB string,
 	txnOp client.TxnOperator,
 ) *CompilerContext {
-	return &CompilerContext{
+	cc := &CompilerContext{
 		ctx:       ctx,
 		defaultDB: defaultDB,
 		engine:    e,
 		txnOp:     txnOp,
 	}
+	cc.catalog.Store("mo_catalog")
+	return cc
 }
 
 var _ plan.CompilerContext = new(CompilerContext)
+
+func (cc *CompilerContext) GetCatalogName() string {
+	return cc.catalog.Load().(string)
+}
+
+func (cc *CompilerContext) SetCatalogName(c string) {
+	cc.catalog.Store(c)
+}
 
 func (*CompilerContext) Cost(obj *plan.ObjectRef, e *plan.Expr) *plan.Cost {
 	return &plan.Cost{}

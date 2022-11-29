@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
@@ -1083,6 +1084,8 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 
 	ses.SetTenantInfo(tenant)
 
+	//return nil, nil
+
 	//step1 : check tenant exists or not in SYS tenant context
 	sysTenantCtx := context.WithValue(ses.GetRequestContext(), defines.TenantIDKey{}, uint32(sysAccountID))
 	sysTenantCtx = context.WithValue(sysTenantCtx, defines.UserIDKey{}, uint32(rootID))
@@ -1470,10 +1473,21 @@ type TxnCompilerContext struct {
 	txnHandler *TxnHandler
 	ses        *Session
 	mu         sync.Mutex
+	catalog    atomic.Value
 }
 
 func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
-	return &TxnCompilerContext{txnHandler: txn, dbName: db, QryTyp: TXN_DEFAULT}
+	tcc := &TxnCompilerContext{txnHandler: txn, dbName: db, QryTyp: TXN_DEFAULT}
+	tcc.catalog.Store("mo_catalog")
+	return tcc
+}
+
+func (tcc *TxnCompilerContext) GetCatalogName() string {
+	return tcc.catalog.Load().(string)
+}
+
+func (tcc *TxnCompilerContext) SetCatalogName(c string) {
+	tcc.catalog.Store(c)
 }
 
 func (tcc *TxnCompilerContext) GetQueryType() QueryType {

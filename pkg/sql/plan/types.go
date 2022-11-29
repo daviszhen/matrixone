@@ -57,6 +57,8 @@ type IndexInfo = plan.IndexInfo
 type OrderBySpec = plan.OrderBySpec
 
 type CompilerContext interface {
+	GetCatalogName() string
+	SetCatalogName(string)
 	// Default database/schema in context
 	DefaultDatabase() string
 	// check if database exist
