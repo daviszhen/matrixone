@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"math"
 	"strings"
 	"sync/atomic"
@@ -4747,6 +4748,8 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 	var newTenant *TenantInfo
 	var newTenantCtx context.Context
 	var newUserId int64
+	var erArray []ExecResult
+	var database, table string
 	ctx, span := trace.Debug(ctx, "InitGeneralTenant")
 	defer span.End()
 	tenant := ses.GetTenantInfo()
@@ -4766,6 +4769,7 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 	if err != nil {
 		return err
 	}
+	//sys tenant
 	ctx = context.WithValue(ctx, defines.TenantIDKey{}, uint32(tenant.GetTenantID()))
 	ctx = context.WithValue(ctx, defines.UserIDKey{}, uint32(tenant.GetUserID()))
 	ctx = context.WithValue(ctx, defines.RoleIDKey{}, uint32(tenant.GetDefaultRoleID()))
@@ -4782,11 +4786,7 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 
-	err = bh.Exec(ctx, "create database if not exists mo_catalog2;")
-	if err != nil {
-		return err
-	}
-
+	//TODO:fix bugs here
 	//USE the mo_catalog
 	err = bh.Exec(ctx, "use mo_catalog2;")
 	if err != nil {
@@ -4823,7 +4823,61 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 		//	return err
 		//}
 
-		err = bh.Exec(ctx, "begin;")
+		err = bh.Exec(newTenantCtx, "create database if not exists mo_catalog2;")
+		if err != nil {
+			return err
+		}
+
+		//into general tenant
+		//USE the mo_catalog
+		err = bh.Exec(newTenantCtx, "use mo_catalog2;")
+		if err != nil {
+			return err
+		}
+
+		bh.ClearExecResultSet()
+		err = bh.Exec(newTenantCtx, "show databases;")
+		if err != nil {
+			return err
+		}
+
+		erArray, err = getResultSet(bh)
+		if err != nil {
+			return err
+		}
+
+		if execResultArrayHasData(erArray) {
+			for i := uint64(0); i < erArray[0].GetRowCount(); i++ {
+				database, err = erArray[0].GetString(i, 0)
+				if err != nil {
+					return err
+				}
+				logutil.Debugf("==>:%s", database)
+			}
+		}
+
+		bh.ClearExecResultSet()
+		err = bh.Exec(newTenantCtx, "show tables;")
+		if err != nil {
+			return err
+		}
+
+		erArray, err = getResultSet(bh)
+		if err != nil {
+			return err
+		}
+
+		if execResultArrayHasData(erArray) {
+			for i := uint64(0); i < erArray[0].GetRowCount(); i++ {
+				table, err = erArray[0].GetString(i, 0)
+				if err != nil {
+					return err
+				}
+				logutil.Debugf("++>:%s", table)
+			}
+		}
+
+		err = bh.Exec(newTenantCtx, "begin;")
 		if err != nil {
 			goto handleFailed
 		}
@@ -4844,7 +4898,7 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 		}
 	}
 
-	err = bh.Exec(ctx, "commit;")
+	err = bh.Exec(newTenantCtx, "commit;")
 	if err != nil {
 		goto handleFailed
 	}
@@ -4945,8 +4999,10 @@ func createTablesInMoCatalogOfGeneralTenant2(tenant *TenantInfo, bh BackgroundEx
 		if strings.HasPrefix(sql, "create table mo_account") {
 			continue
 		}
+		logutil.Debugf("-->:%s", sql)
 		err = bh.Exec(newTenantCtx, sql)
 		if err != nil {
+			logutil.Debugf("++>%s error:%v", sql, err)
 			return err
 		}
 	}
