@@ -686,7 +686,59 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 	case plan.Node_AGG:
 		return nil, moerr.NewInternalError("not implement qb 4")
 	case plan.Node_SORT:
-		return nil, moerr.NewInternalError("not implement qb 5")
+		for _, orderBy := range node.OrderBy {
+			increaseRefCnt(orderBy.Expr, colRefCnt)
+		}
+
+		childRemapping, err := qb.remapAllColRefs(node.Children[0], colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, orderBy := range node.OrderBy {
+			decreaseRefCnt(orderBy.Expr, colRefCnt)
+			err := qb.remapExpr(orderBy.Expr, childRemapping.globalToLocal)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		childProjList := qb.qry.Nodes[node.Children[0]].ProjectList
+		for i, globalRef := range childRemapping.localToGlobal {
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			remapping.addColRef(globalRef)
+			node.ProjectList = append(node.ProjectList,
+				&plan.Expr{
+					Typ: childProjList[i].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: 0,
+							ColPos: int32(i),
+							Name:   qb.nameByColRef[globalRef],
+						},
+					},
+				})
+		}
+
+		if len(node.ProjectList) == 0 && len(childRemapping.localToGlobal) > 0 {
+			globalRef := childRemapping.localToGlobal[0]
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: childProjList[0].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: 0,
+						ColPos: 0,
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+		}
+
 	case plan.Node_FILTER:
 		return nil, moerr.NewInternalError("not implement qb 6")
 	case plan.Node_PROJECT, plan.Node_MATERIAL:

@@ -101,6 +101,28 @@ func Test_build3(t *testing.T) {
 	})
 }
 
+func Test_build4(t *testing.T) {
+	convey.Convey("t5", t, func() {
+		sql := `select l_extendedprice * (1 - l_discount) * (1 + l_tax) from lineitem;`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build5(t *testing.T) {
+	convey.Convey("t6", t, func() {
+		sql := `select l_extendedprice * (1 - l_discount) * (1 + l_tax) 
+				from lineitem 
+                order by
+					l_returnflag,
+					l_linestatus;`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select l_extendedprice * (1 - l_discount) from lineitem;`
