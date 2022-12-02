@@ -74,8 +74,20 @@ func (m *ColRefRemapping) addColRef(colRef [2]int32) {
 	m.localToGlobal = append(m.localToGlobal, colRef)
 }
 
+func PrintColRefCnt(tip string, colRefCnt map[[2]int32]int) {
+	for k, v := range colRefCnt {
+		fmt.Println("-->", tip, k, v)
+	}
+}
+
 func (builder *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int) (*ColRefRemapping, error) {
 	node := builder.qry.Nodes[nodeID]
+
+	//PrintColRefCnt("enter "+node.NodeType.String(), colRefCnt)
+	//
+	//defer func() {
+	//	PrintColRefCnt("exit "+node.NodeType.String(), colRefCnt)
+	//}()
 
 	remapping := &ColRefRemapping{
 		globalToLocal: make(map[[2]int32][2]int32),

@@ -565,8 +565,20 @@ func (qb *QueryBuilder) remapExpr(expr *plan.Expr, colMap map[[2]int32][2]int32)
 	return nil
 }
 
+func PrintColRefCnt(tip string, colRefCnt map[[2]int32]int) {
+	for k, v := range colRefCnt {
+		fmt.Println("-->", tip, k, v)
+	}
+}
+
 func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int) (*ColRefRemapping, error) {
 	node := qb.qry.Nodes[nodeID]
+
+	//PrintColRefCnt("enter "+node.NodeType.String(), colRefCnt)
+	//
+	//defer func() {
+	//	PrintColRefCnt("exit "+node.NodeType.String(), colRefCnt)
+	//}()
 
 	remapping := &ColRefRemapping{
 		globalToLocal: make(map[[2]int32][2]int32),

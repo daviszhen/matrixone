@@ -17,7 +17,7 @@ func increaseRefCnt(expr *plan.Expr, colRefCnt map[[2]int32]int) {
 func decreaseRefCnt(expr *plan.Expr, colRefCnt map[[2]int32]int) {
 	switch exprImpl := expr.Expr.(type) {
 	case *plan.Expr_Col:
-		colRefCnt[[2]int32{exprImpl.Col.RelPos, exprImpl.Col.ColPos}]++
+		colRefCnt[[2]int32{exprImpl.Col.RelPos, exprImpl.Col.ColPos}]--
 
 	case *plan.Expr_F:
 		for _, arg := range exprImpl.F.Args {
