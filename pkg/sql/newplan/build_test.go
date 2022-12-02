@@ -31,7 +31,7 @@ func getJSON(v any) []byte {
 func runCase(sql string) (bool, error) {
 	var plan1, plan2 *plan.Plan
 	var err error
-	var one tree.Statement
+	var one, two tree.Statement
 	one, err = parsers.ParseOne(dialect.MYSQL, sql)
 	if err != nil {
 		return false, err
@@ -46,7 +46,13 @@ func runCase(sql string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	plan2, err = sqlplan.BuildPlan(cc, one)
+
+	cc1 := sqlplan.NewMockCompilerContext()
+	two, err = parsers.ParseOne(dialect.MYSQL, sql)
+	if err != nil {
+		return false, err
+	}
+	plan2, err = sqlplan.BuildPlan(cc1, two)
 	if err != nil {
 		return false, err
 	}
@@ -93,4 +99,25 @@ func Test_build3(t *testing.T) {
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(ret, convey.ShouldBeTrue)
 	})
+}
+
+func Test_Debug(t *testing.T) {
+	cc := sqlplan.NewMockCompilerContext()
+	sql := `select l_extendedprice * (1 - l_discount) from lineitem;`
+	var one tree.Statement
+	var err error
+	var plan3 *plan.Plan
+	one, err = parsers.ParseOne(dialect.MYSQL, sql)
+	if err != nil {
+		return
+	}
+	plan3, err = sqlplan.BuildPlan(cc, one)
+	if err != nil {
+		return
+	}
+	fmt.Println("plan3", plan3.String())
+	err = os.WriteFile("plan3.json", getJSON(plan3), 0777)
+	if err != nil {
+		return
+	}
 }

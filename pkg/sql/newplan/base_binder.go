@@ -1,6 +1,8 @@
 package newplan
 
 import (
+	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/sql/plan/function"
 	"go/constant"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -29,7 +31,7 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.UnaryExpr:
 		err = moerr.NewInternalError("not implement 5")
 	case *tree.BinaryExpr:
-		err = moerr.NewInternalError("not implement 6")
+		expr, err = b.bindBinaryExpr(exprImpl, depth, isRoot)
 	case *tree.ComparisonExpr:
 		err = moerr.NewInternalError("not implement 7")
 	case *tree.FuncExpr:
@@ -187,7 +189,31 @@ func (b *baseBinder) bindUnaryExpr(astExpr *tree.UnaryExpr, depth int32, isRoot 
 }
 
 func (b *baseBinder) bindBinaryExpr(astExpr *tree.BinaryExpr, depth int32, isRoot bool) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 32")
+	switch astExpr.Op {
+	case tree.PLUS:
+		return b.bindFuncExprImplByAstExpr("+", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.MINUS:
+		return b.bindFuncExprImplByAstExpr("-", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.MULTI:
+		return b.bindFuncExprImplByAstExpr("*", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.MOD:
+		return b.bindFuncExprImplByAstExpr("%", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.DIV:
+		return b.bindFuncExprImplByAstExpr("/", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.INTEGER_DIV:
+		return b.bindFuncExprImplByAstExpr("div", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.BIT_XOR:
+		return b.bindFuncExprImplByAstExpr("^", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.BIT_OR:
+		return b.bindFuncExprImplByAstExpr("|", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.BIT_AND:
+		return b.bindFuncExprImplByAstExpr("&", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.LEFT_SHIFT:
+		return b.bindFuncExprImplByAstExpr("<<", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	case tree.RIGHT_SHIFT:
+		return b.bindFuncExprImplByAstExpr(">>", []tree.Expr{astExpr.Left, astExpr.Right}, depth)
+	}
+	return nil, moerr.NewNYI("'%v' operator", astExpr.Op.ToString())
 }
 
 func (b *baseBinder) bindComparisonExpr(astExpr *tree.ComparisonExpr, depth int32, isRoot bool) (*plan.Expr, error) {
@@ -199,11 +225,91 @@ func (b *baseBinder) bindFuncExpr(astExpr *tree.FuncExpr, depth int32, isRoot bo
 }
 
 func (b *baseBinder) bindFuncExprImplByAstExpr(name string, astArgs []tree.Expr, depth int32) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 35")
+	args := make([]*plan.Expr, len(astArgs))
+	for idx, arg := range astArgs {
+		expr, err := b.impl.BindExpr(arg, depth, false)
+		if err != nil {
+			return nil, err
+		}
+		args[idx] = expr
+	}
+	return bindFuncExprImplByPlanExpr(name, args)
 }
 
 func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 36")
+	var err error
+	switch name {
+	case "-":
+		if len(args) != 2 {
+			return nil, moerr.NewInvalidArg("operator - need two args", len(args))
+		}
+		if isNullExpr(args[0]) {
+			return args[0], nil
+		}
+		if isNullExpr(args[1]) {
+			return args[1], nil
+		}
+	case "*":
+		if len(args) != 2 {
+			return nil, moerr.NewInvalidArg(fmt.Sprintf("operator %s need two args", name), len(args))
+		}
+		if isNullExpr(args[0]) {
+			return args[0], nil
+		}
+		if isNullExpr(args[1]) {
+			return args[1], nil
+		}
+	}
+	argsLength := len(args)
+	argsType := make([]types.Type, argsLength)
+	for idx, expr := range args {
+		argsType[idx] = makeTypeByPlan2Expr(expr)
+	}
+
+	var funcID int64
+	var returnType types.Type
+	var argsCastType []types.Type
+
+	funcID, returnType, argsCastType, err = function.GetFunctionByName(name, argsType)
+	if err != nil {
+		return nil, err
+	}
+	if function.GetFunctionIsAggregateByName(name) {
+		if constExpr, ok := args[0].Expr.(*plan.Expr_C); ok && constExpr.C.Isnull {
+			args[0].Typ = makePlan2Type(&returnType)
+		}
+	}
+
+	if len(argsCastType) != 0 {
+		if len(argsCastType) != argsLength {
+			return nil, moerr.NewInvalidArg("cast types length not match args length", "")
+		}
+		for idx, castType := range argsCastType {
+			if !argsType[idx].Eq(castType) && castType.Oid != types.T_any {
+				typ := makePlan2Type(&castType)
+				args[idx], err = appendCastBeforeExpr(args[idx], typ)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	if function.GetFunctionAppendHideArgByID(funcID) {
+		args = append(args, makePlan2NullConstExprWithType())
+	}
+
+	Typ := makePlan2Type(&returnType)
+	Typ.NotNullable = function.DeduceNotNullable(funcID, args)
+	return &plan.Expr{
+		Expr: &plan.Expr_F{
+			F: &plan.Function{
+				Func: getFunctionObjRef(funcID, name),
+				Args: args,
+			},
+		},
+		Typ: Typ,
+	}, nil
 }
 
 func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Expr, error) {
@@ -275,13 +381,53 @@ func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Exp
 				Size:        1,
 			},
 		}, nil
+	case tree.P_int64:
+		val, ok := constant.Int64Val(astExpr.Value)
+		if !ok {
+			return nil, moerr.NewInvalidInput("invalid int value '%s'", astExpr.Value.String())
+		}
+		expr := makePlan2Int64ConstExprWithType(val)
+		if typ != nil && typ.Id == int32(types.T_varchar) {
+			return appendCastBeforeExpr(expr, typ)
+		}
+		return expr, nil
 	default:
 		return nil, moerr.NewInvalidInput("unsupport value '%s'", astExpr.String())
 	}
 }
 
-func appendCastBeforeExpr(expr *plan.Expr, toType *plan.Type) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 37")
+func appendCastBeforeExpr(expr *plan.Expr, toType *plan.Type, isBin ...bool) (*plan.Expr, error) {
+	if expr.Typ.Id == int32(types.T_any) {
+		return expr, nil
+	}
+	toType.NotNullable = expr.Typ.NotNullable
+	argsType := []types.Type{
+		makeTypeByPlan2Expr(expr),
+		makeTypeByPlan2Type(toType),
+	}
+	funcID, _, _, err := function.GetFunctionByName("cast", argsType)
+	if err != nil {
+		return nil, err
+	}
+	typ := *toType
+	if len(isBin) == 2 && isBin[0] && isBin[1] {
+		typ.Id = int32(types.T_uint64)
+	}
+	return &plan.Expr{
+		Expr: &plan.Expr_F{
+			F: &plan.Function{
+				Func: getFunctionObjRef(funcID, "cast"),
+				Args: []*plan.Expr{expr, {
+					Expr: &plan.Expr_T{
+						T: &plan.TargetType{
+							Typ: &typ,
+						},
+					},
+				}},
+			},
+		},
+		Typ: &typ,
+	}, nil
 }
 
 func resetDateFunctionArgs(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {

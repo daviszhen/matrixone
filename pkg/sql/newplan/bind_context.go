@@ -3,6 +3,7 @@ package newplan
 import (
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"sync/atomic"
 )
@@ -37,6 +38,9 @@ func NewBindContext(parent *BindContext) *BindContext {
 func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.SelectExprs, expandAlias bool) (tree.Expr, error) {
 	var err error
 	switch exprImpl := astExpr.(type) {
+	case *tree.ParenExpr:
+		astExpr, err = bc.qualifyColumnNames(exprImpl.Expr, selectList, expandAlias)
+
 	case *tree.UnresolvedName:
 		if !exprImpl.Star && exprImpl.NumParts == 1 {
 			col := exprImpl.Parts[0]
@@ -56,8 +60,16 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 				}
 			}
 		}
+	case *tree.BinaryExpr:
+		exprImpl.Left, err = bc.qualifyColumnNames(exprImpl.Left, selectList, expandAlias)
+		if err != nil {
+			return nil, err
+		}
+
+		exprImpl.Right, err = bc.qualifyColumnNames(exprImpl.Right, selectList, expandAlias)
+
 	default:
-		panic("not implement")
+		logutil.Debugf("not implement")
 	}
 
 	return astExpr, err

@@ -16,6 +16,7 @@ package plan
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -251,9 +252,21 @@ func NewMockCompilerContext() *MockCompilerContext {
 	costs := make(map[string]*Cost)
 	pks := make(map[string][]int)
 	// build tpch/mo context data(schema)
-	for db, schema := range schemas {
+	var schNames []string
+	for db, _ := range schemas {
+		schNames = append(schNames, db)
+	}
+	sort.Strings(schNames)
+	for _, db := range schNames {
+		schema := schemas[db]
+		var tableNames []string
+		for tableName, _ := range schema {
+			tableNames = append(tableNames, tableName)
+		}
+		sort.Strings(tableNames)
 		tableIdx := 0
-		for tableName, table := range schema {
+		for _, tableName := range tableNames {
+			table := schema[tableName]
 			colDefs := make([]*ColDef, 0, len(table.cols))
 
 			for _, col := range table.cols {
