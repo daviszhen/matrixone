@@ -236,6 +236,27 @@ func (b *baseBinder) bindFuncExpr(astExpr *tree.FuncExpr, depth int32, isRoot bo
 }
 
 func (b *baseBinder) bindFuncExprImplByAstExpr(name string, astArgs []tree.Expr, depth int32) (*plan.Expr, error) {
+	switch name {
+	case "nullif":
+		return nil, moerr.NewInternalError("not implement baseBinder 1")
+	case "ifnull":
+		return nil, moerr.NewInternalError("not implement baseBinder 2")
+	case "count":
+		if b.ctx == nil {
+			return nil, moerr.NewInvalidInput("invalid field reference to COUNT")
+		}
+		switch nval := astArgs[0].(type) {
+		case *tree.NumVal:
+			if nval.String() == "*" {
+				if len(b.ctx.bindings) == 0 || len(b.ctx.bindings[0].cols) == 0 {
+
+				} else {
+					name = "starcount"
+					astArgs[0] = tree.NewNumValWithType(constant.MakeInt64(1), "1", false, tree.P_int64)
+				}
+			}
+		}
+	}
 	args := make([]*plan.Expr, len(astArgs))
 	for idx, arg := range astArgs {
 		expr, err := b.impl.BindExpr(arg, depth, false)
@@ -324,44 +345,6 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 }
 
 func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Expr, error) {
-	//getStringExpr := func(val string) *plan.Expr {
-	//	return &plan.Expr{
-	//		Expr: &plan.Expr_C{
-	//			C: &plan.Const{
-	//				Isnull: false,
-	//				Value: &plan.Const_Sval{
-	//					Sval: val,
-	//				},
-	//			},
-	//		},
-	//		Typ: &plan.Type{
-	//			Id:       int32(types.T_varchar),
-	//			Nullable: false,
-	//			Size:     4,
-	//			Width:    int32(len(val)),
-	//		},
-	//	}
-	//}
-
-	//returnDecimalExpr := func(val string) (*plan.Expr, error) {
-	//	if typ != nil {
-	//		return appendCastBeforeExpr(getStringExpr(val), typ)
-	//	}
-	//
-	//	_, scale, err := types.ParseStringToDecimal128WithoutTable(val)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	typ := &plan.Type{
-	//		Id:        int32(types.T_decimal128),
-	//		Width:     34,
-	//		Scale:     scale,
-	//		Precision: 34,
-	//		Nullable:  false,
-	//	}
-	//	return appendCastBeforeExpr(getStringExpr(val), typ)
-	//}
-
 	switch astExpr.ValType {
 	case tree.P_null:
 		return &plan.Expr{

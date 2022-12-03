@@ -142,9 +142,52 @@ func Test_build6(t *testing.T) {
 	})
 }
 
+func Test_build8(t *testing.T) {
+	convey.Convey("t8", t, func() {
+		sql := `select
+					l_returnflag,
+					l_linestatus,
+					sum(l_quantity) as sum_qty,
+					sum(l_extendedprice) as sum_base_price,
+					sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+    				sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+					avg(l_quantity) as avg_qty,
+					avg(l_extendedprice) as avg_price,
+					avg(l_discount) as avg_disc,
+					count(*) as count_order
+				from lineitem 
+				group by
+					l_returnflag,
+					l_linestatus
+                order by
+					l_returnflag,
+					l_linestatus;`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
-	sql := `select l_extendedprice * (1 - l_discount) from lineitem;`
+	sql := `select
+					l_returnflag,
+					l_linestatus,
+					sum(l_quantity) as sum_qty,
+					sum(l_extendedprice) as sum_base_price,
+					sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+    				sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+					avg(l_quantity) as avg_qty,
+					avg(l_extendedprice) as avg_price,
+					avg(l_discount) as avg_disc,
+					count(*) as count_order
+				from lineitem 
+				group by
+					l_returnflag,
+					l_linestatus
+                order by
+					l_returnflag,
+					l_linestatus;`
 	var one tree.Statement
 	var err error
 	var plan3 *plan.Plan
