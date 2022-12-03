@@ -21,7 +21,7 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 			expr, err = b.bindNumVal(exprImpl, nil)
 		}
 	case *tree.ParenExpr:
-		err = moerr.NewInternalError("not implement 1")
+		expr, err = b.impl.BindExpr(exprImpl.Expr, depth, isRoot)
 	case *tree.OrExpr:
 		err = moerr.NewInternalError("not implement 2")
 	case *tree.NotExpr:
@@ -35,7 +35,7 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.ComparisonExpr:
 		err = moerr.NewInternalError("not implement 7")
 	case *tree.FuncExpr:
-		err = moerr.NewInternalError("not implement 8")
+		expr, err = b.bindFuncExpr(exprImpl, depth, isRoot)
 	case *tree.RangeCond:
 		err = moerr.NewInternalError("not implement 9")
 	case *tree.UnresolvedName:
@@ -221,7 +221,18 @@ func (b *baseBinder) bindComparisonExpr(astExpr *tree.ComparisonExpr, depth int3
 }
 
 func (b *baseBinder) bindFuncExpr(astExpr *tree.FuncExpr, depth int32, isRoot bool) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 34")
+	funcRef, ok := astExpr.Func.FunctionReference.(*tree.UnresolvedName)
+	if !ok {
+		return nil, moerr.NewNYI("function expr '%v'", astExpr)
+	}
+	funcName := funcRef.Parts[0]
+	if function.GetFunctionIsAggregateByName(funcName) {
+		return b.impl.BindAggFunc(funcName, astExpr, depth, isRoot)
+	} else if function.GetFunctionIsWinfunByName(funcName) {
+		return b.impl.BindWinFunc(funcName, astExpr, depth, isRoot)
+	}
+
+	return b.bindFuncExprImplByAstExpr(funcName, astExpr.Exprs, depth)
 }
 
 func (b *baseBinder) bindFuncExprImplByAstExpr(name string, astArgs []tree.Expr, depth int32) (*plan.Expr, error) {

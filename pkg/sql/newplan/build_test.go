@@ -123,6 +123,25 @@ func Test_build5(t *testing.T) {
 	})
 }
 
+func Test_build6(t *testing.T) {
+	convey.Convey("t7", t, func() {
+		sql := `select
+					l_returnflag,
+					l_linestatus,
+    				sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge 
+				from lineitem 
+				group by
+					l_returnflag,
+					l_linestatus
+                order by
+					l_returnflag,
+					l_linestatus;`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select l_extendedprice * (1 - l_discount) from lineitem;`

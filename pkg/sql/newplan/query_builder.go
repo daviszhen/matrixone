@@ -696,7 +696,107 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 	case plan.Node_JOIN:
 		return nil, moerr.NewInternalError("not implement qb 3")
 	case plan.Node_AGG:
-		return nil, moerr.NewInternalError("not implement qb 4")
+		for _, expr := range node.GroupBy {
+			increaseRefCnt(expr, colRefCnt)
+		}
+
+		for _, expr := range node.AggList {
+			increaseRefCnt(expr, colRefCnt)
+		}
+
+		childRemapping, err := qb.remapAllColRefs(node.Children[0], colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+
+		groupTag := node.BindingTags[0]
+		aggregateTag := node.BindingTags[1]
+
+		for idx, expr := range node.GroupBy {
+			decreaseRefCnt(expr, colRefCnt)
+			err := qb.remapExpr(expr, childRemapping.globalToLocal)
+			if err != nil {
+				return nil, err
+			}
+
+			globalRef := [2]int32{groupTag, int32(idx)}
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: expr.Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: -1,
+						ColPos: int32(idx),
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+		}
+
+		for idx, expr := range node.AggList {
+			decreaseRefCnt(expr, colRefCnt)
+			err := qb.remapExpr(expr, childRemapping.globalToLocal)
+			if err != nil {
+				return nil, err
+			}
+
+			globalRef := [2]int32{aggregateTag, int32(idx)}
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: expr.Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: -2,
+						ColPos: int32(idx),
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+		}
+
+		if len(node.ProjectList) == 0 {
+			if len(node.GroupBy) > 0 {
+				globalRef := [2]int32{groupTag, 0}
+				remapping.addColRef(globalRef)
+
+				node.ProjectList = append(node.ProjectList, &plan.Expr{
+					Typ: node.GroupBy[0].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: -1,
+							ColPos: 0,
+							Name:   qb.nameByColRef[globalRef],
+						},
+					},
+				})
+			} else {
+				globalRef := [2]int32{aggregateTag, 0}
+				remapping.addColRef(globalRef)
+
+				node.ProjectList = append(node.ProjectList, &plan.Expr{
+					Typ: node.AggList[0].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: -2,
+							ColPos: 0,
+							Name:   qb.nameByColRef[globalRef],
+						},
+					},
+				})
+			}
+
+		}
+
 	case plan.Node_SORT:
 		for _, orderBy := range node.OrderBy {
 			increaseRefCnt(orderBy.Expr, colRefCnt)
@@ -837,7 +937,16 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 	case plan.Node_JOIN:
 		panic("appendNode node join not implement 1")
 	case plan.Node_AGG:
-		panic("appendNode node join not implement 2")
+		if len(node.GroupBy) > 0 {
+			childCost := qb.qry.Nodes[node.Children[0]].Cost
+			node.Cost = &plan.Cost{
+				Card: childCost.Card * 0.1,
+			}
+		} else {
+			node.Cost = &plan.Cost{
+				Card: 1,
+			}
+		}
 	default:
 		if len(node.Children) > 0 {
 			childCost := qb.qry.Nodes[node.Children[0]].Cost

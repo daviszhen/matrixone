@@ -3,7 +3,6 @@ package newplan
 import (
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"sync/atomic"
 )
@@ -41,6 +40,18 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 	case *tree.ParenExpr:
 		astExpr, err = bc.qualifyColumnNames(exprImpl.Expr, selectList, expandAlias)
 
+	case *tree.OrExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 1")
+	case *tree.NotExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 2")
+	case *tree.AndExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 3")
+	case *tree.UnaryExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 4")
+	case *tree.ComparisonExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 5")
+	case *tree.RangeCond:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 6")
 	case *tree.UnresolvedName:
 		if !exprImpl.Star && exprImpl.NumParts == 1 {
 			col := exprImpl.Parts[0]
@@ -68,8 +79,25 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 
 		exprImpl.Right, err = bc.qualifyColumnNames(exprImpl.Right, selectList, expandAlias)
 
-	default:
-		logutil.Debugf("not implement")
+	case *tree.FuncExpr:
+		for i := range exprImpl.Exprs {
+			exprImpl.Exprs[i], err = bc.qualifyColumnNames(exprImpl.Exprs[i], selectList, expandAlias)
+			if err != nil {
+				return nil, err
+			}
+		}
+	case *tree.CastExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 7")
+	case *tree.IsNullExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 8")
+	case *tree.IsNotNullExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 9")
+	case *tree.Tuple:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 10")
+	case *tree.CaseExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 11")
+	case *tree.XorExpr:
+		return nil, moerr.NewInternalError("not implement qualifyColumnNames 12")
 	}
 
 	return astExpr, err
