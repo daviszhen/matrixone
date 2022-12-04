@@ -2,7 +2,7 @@ package newplan
 
 import (
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -852,7 +852,59 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 		}
 
 	case plan.Node_FILTER:
-		return nil, moerr.NewInternalError("not implement qb 6")
+		for _, expr := range node.FilterList {
+			increaseRefCnt(expr, colRefCnt)
+		}
+
+		childRemapping, err := qb.remapAllColRefs(node.Children[0], colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, expr := range node.FilterList {
+			decreaseRefCnt(expr, colRefCnt)
+			err := qb.remapExpr(expr, childRemapping.globalToLocal)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		childProjList := qb.qry.Nodes[node.Children[0]].ProjectList
+		for i, globalRef := range childRemapping.localToGlobal {
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: childProjList[i].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: 0,
+						ColPos: int32(i),
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+		}
+
+		if len(node.ProjectList) == 0 {
+			if len(childRemapping.localToGlobal) > 0 {
+				remapping.addColRef(childRemapping.localToGlobal[0])
+			}
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: childProjList[0].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: 0,
+						ColPos: 0,
+					},
+				},
+			})
+		}
+
 	case plan.Node_PROJECT, plan.Node_MATERIAL:
 		projectTag := node.BindingTags[0]
 		var neededProj []int32
@@ -1017,7 +1069,10 @@ func splitAndBindCondition(astExpr tree.Expr, ctx *BindContext) ([]*plan.Expr, e
 		}
 
 		if expr.GetSub() == nil {
-			panic("unsupported")
+			expr, err = makePlan2CastExpr(expr, &plan.Type{Id: int32(types.T_bool)})
+			if err != nil {
+				return nil, err
+			}
 		}
 		exprs[i] = expr
 	}
@@ -1065,13 +1120,63 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 	var canPushdown, cantPushdown []*plan.Expr
 	switch node.NodeType {
 	case plan.Node_AGG:
-		logutil.Infof("pushdownFilter not implement 1")
+		groupTag := node.BindingTags[0]
+		aggregateTag := node.BindingTags[1]
+
+		for _, filter := range filters {
+			if !containsTag(filter, aggregateTag) {
+				canPushdown = append(canPushdown, replaceColRefs(filter, groupTag, node.GroupBy))
+			} else {
+				cantPushdown = append(cantPushdown, filter)
+			}
+		}
+
+		childID, cantPushdownChild := qb.pushdownFilters(node.Children[0], canPushdown)
+
+		if len(cantPushdownChild) > 0 {
+			childID = qb.appendNode(&plan.Node{
+				NodeType:   plan.Node_FILTER,
+				Children:   []int32{node.Children[0]},
+				FilterList: cantPushdownChild,
+			}, nil)
+		}
+
+		node.Children[0] = childID
 	case plan.Node_FILTER:
-		logutil.Infof("pushdownFilter not implement 2")
+		canPushdown = filters
+		for _, filter := range node.FilterList {
+			canPushdown = append(canPushdown, splitPlanConjunction(applyDistributivity(filter))...)
+		}
+
+		childID, cantPushdownChild := qb.pushdownFilters(node.Children[0], canPushdown)
+
+		var extraFilters []*plan.Expr
+		for _, filter := range cantPushdownChild {
+			switch exprImpl := filter.Expr.(type) {
+			case *plan.Expr_F:
+				if exprImpl.F.Func.ObjName == "or" {
+					keys := checkDNF(filter)
+					for _, key := range keys {
+						extraFilter := walkThroughDNF(filter, key)
+						if extraFilter != nil {
+							extraFilters = append(extraFilters, DeepCopyExpr(extraFilter))
+						}
+					}
+				}
+			}
+		}
+		qb.pushdownFilters(node.Children[0], extraFilters)
+
+		if len(cantPushdownChild) > 0 {
+			node.Children[0] = childID
+			node.FilterList = cantPushdownChild
+		} else {
+			nodeID = childID
+		}
 	case plan.Node_JOIN:
-		logutil.Infof("pushdownFilter not implement 3")
+		panic("pushdownFilter not implement 3")
 	case plan.Node_UNION, plan.Node_UNION_ALL, plan.Node_MINUS, plan.Node_MINUS_ALL, plan.Node_INTERSECT, plan.Node_INTERSECT_ALL:
-		logutil.Infof("pushdownFilter not implement 4")
+		panic("pushdownFilter not implement 4")
 	case plan.Node_PROJECT:
 		child := qb.qry.Nodes[node.Children[0]]
 		if (child.NodeType == plan.Node_VALUE_SCAN || child.NodeType == plan.Node_EXTERNAL_SCAN) && child.RowsetData == nil {
@@ -1098,7 +1203,7 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 	case plan.Node_TABLE_SCAN, plan.Node_EXTERNAL_SCAN:
 		node.FilterList = append(node.FilterList, filters...)
 	case plan.Node_TABLE_FUNCTION:
-		logutil.Infof("pushdownFilter not implement 5")
+		panic("pushdownFilter not implement 5")
 	default:
 		if len(node.Children) > 0 {
 			childID, cantPushdownChild := qb.pushdownFilters(node.Children[0], filters)

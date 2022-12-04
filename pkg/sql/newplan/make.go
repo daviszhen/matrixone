@@ -3,6 +3,7 @@ package newplan
 import (
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
+	"github.com/matrixorigin/matrixone/pkg/sql/plan/function"
 )
 
 func makePlan2Type(typ *types.Type) *plan.Type {
@@ -73,4 +74,57 @@ func makeTypeByPlan2Type(typ *plan.Type) types.Type {
 		Scale:     typ.Scale,
 		Precision: typ.Precision,
 	}
+}
+
+func makePlan2StringConstExpr(v string, isBin ...bool) *plan.Expr_C {
+	c := &plan.Expr_C{C: &plan.Const{
+		Isnull: false,
+		Value: &plan.Const_Sval{
+			Sval: v,
+		},
+	}}
+	if len(isBin) > 0 {
+		c.C.IsBin = isBin[0]
+	}
+	return c
+}
+
+func makePlan2StringConstExprWithType(v string, isBin ...bool) *plan.Expr {
+	return &plan.Expr{
+		Expr: makePlan2StringConstExpr(v, isBin...),
+		Typ: &plan.Type{
+			Id:          int32(types.T_varchar),
+			NotNullable: true,
+			Size:        4,
+			Width:       int32(len(v)),
+		},
+	}
+}
+
+func makePlan2CastExpr(expr *plan.Expr, targetType *plan.Type) (*plan.Expr, error) {
+	if isSameColumnType(expr.Typ, targetType) {
+		return expr, nil
+	}
+	targetType.NotNullable = expr.Typ.NotNullable
+	t1, t2 := makeTypeByPlan2Expr(expr), makeTypeByPlan2Type(targetType)
+	if types.T(expr.Typ.Id) == types.T_any {
+		expr.Typ = targetType
+		return expr, nil
+	}
+	id, _, _, err := function.GetFunctionByName("cast", []types.Type{t1, t2})
+	if err != nil {
+		return nil, err
+	}
+	t := &plan.Expr{Expr: &plan.Expr_T{T: &plan.TargetType{
+		Typ: targetType,
+	}}}
+	return &plan.Expr{
+		Expr: &plan.Expr_F{
+			F: &plan.Function{
+				Func: &plan.ObjectRef{Obj: id, ObjName: "cast"},
+				Args: []*plan.Expr{expr, t},
+			},
+		},
+		Typ: targetType,
+	}, nil
 }

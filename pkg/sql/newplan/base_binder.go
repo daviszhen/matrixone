@@ -33,7 +33,7 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.BinaryExpr:
 		expr, err = b.bindBinaryExpr(exprImpl, depth, isRoot)
 	case *tree.ComparisonExpr:
-		err = moerr.NewInternalError("not implement 7")
+		expr, err = b.bindComparisonExpr(exprImpl, depth, isRoot)
 	case *tree.FuncExpr:
 		expr, err = b.bindFuncExpr(exprImpl, depth, isRoot)
 	case *tree.RangeCond:
@@ -217,7 +217,44 @@ func (b *baseBinder) bindBinaryExpr(astExpr *tree.BinaryExpr, depth int32, isRoo
 }
 
 func (b *baseBinder) bindComparisonExpr(astExpr *tree.ComparisonExpr, depth int32, isRoot bool) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 33")
+	var op string
+	switch astExpr.Op {
+	case tree.EQUAL:
+		op = "="
+
+	case tree.LESS_THAN:
+		op = "<"
+
+	case tree.LESS_THAN_EQUAL:
+		op = "<="
+
+	case tree.GREAT_THAN:
+		op = ">"
+
+	case tree.GREAT_THAN_EQUAL:
+		op = ">="
+
+	case tree.NOT_EQUAL:
+		op = "<>"
+
+	case tree.LIKE:
+		op = "like"
+
+	case tree.NOT_LIKE:
+		return nil, moerr.NewInternalError("not implement bindComparisonExpr 1")
+	case tree.NOT_IN:
+		return nil, moerr.NewInternalError("not implement bindComparisonExpr 2")
+	case tree.REG_MATCH:
+		op = "reg_match"
+	case tree.NOT_REG_MATCH:
+		op = "not_reg_match"
+	default:
+		return nil, moerr.NewNYI("'%v'", astExpr)
+	}
+	if astExpr.SubOp >= tree.ANY {
+		return nil, moerr.NewInternalError("not implement bindComparisonExpr 3")
+	}
+	return b.bindFuncExprImplByAstExpr(op, []tree.Expr{astExpr.Left, astExpr.Right}, depth)
 }
 
 func (b *baseBinder) bindFuncExpr(astExpr *tree.FuncExpr, depth int32, isRoot bool) (*plan.Expr, error) {
@@ -271,6 +308,73 @@ func (b *baseBinder) bindFuncExprImplByAstExpr(name string, astArgs []tree.Expr,
 func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, error) {
 	var err error
 	switch name {
+	case "date":
+		// rewrite date function to cast function, and retrun directly
+		if len(args) == 0 {
+			return nil, moerr.NewInvalidArg(name+" function have invalid input args length", len(args))
+		}
+		if args[0].Typ.Id != int32(types.T_varchar) && args[0].Typ.Id != int32(types.T_char) {
+			return appendCastBeforeExpr(args[0], &plan.Type{
+				Id: int32(types.T_date),
+			})
+		}
+	case "interval":
+		// rewrite interval function to ListExpr, and retrun directly
+		return &plan.Expr{
+			Typ: &plan.Type{
+				Id: int32(types.T_interval),
+			},
+			Expr: &plan.Expr_List{
+				List: &plan.ExprList{
+					List: args,
+				},
+			},
+		}, nil
+	case "and", "or", "not", "xor":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 3")
+	case "=", "<", "<=", ">", ">=", "<>":
+		// why not append cast function?
+		if err := convertValueIntoBool(name, args, false); err != nil {
+			return nil, err
+		}
+	case "date_add", "date_sub":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 5")
+	case "adddate", "subdate":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 6")
+	case "+":
+		if len(args) != 2 {
+			return nil, moerr.NewInvalidArg("operator + need two args", len(args))
+		}
+		if isNullExpr(args[0]) {
+			return args[0], nil
+		}
+		if isNullExpr(args[1]) {
+			return args[1], nil
+		}
+		if args[0].Typ.Id == int32(types.T_date) && args[1].Typ.Id == int32(types.T_interval) {
+			name = "date_add"
+			args, err = resetDateFunctionArgs(args[0], args[1])
+		} else if args[0].Typ.Id == int32(types.T_interval) && args[1].Typ.Id == int32(types.T_date) {
+			name = "date_add"
+			args, err = resetDateFunctionArgs(args[1], args[0])
+		} else if args[0].Typ.Id == int32(types.T_datetime) && args[1].Typ.Id == int32(types.T_interval) {
+			name = "date_add"
+			args, err = resetDateFunctionArgs(args[0], args[1])
+		} else if args[0].Typ.Id == int32(types.T_interval) && args[1].Typ.Id == int32(types.T_datetime) {
+			name = "date_add"
+			args, err = resetDateFunctionArgs(args[1], args[0])
+		} else if args[0].Typ.Id == int32(types.T_varchar) && args[1].Typ.Id == int32(types.T_interval) {
+			name = "date_add"
+			args, err = resetDateFunctionArgs(args[0], args[1])
+		} else if args[0].Typ.Id == int32(types.T_interval) && args[1].Typ.Id == int32(types.T_varchar) {
+			name = "date_add"
+			args, err = resetDateFunctionArgs(args[1], args[0])
+		} else if args[0].Typ.Id == int32(types.T_varchar) && args[1].Typ.Id == int32(types.T_varchar) {
+			name = "concat"
+		}
+		if err != nil {
+			return nil, err
+		}
 	case "-":
 		if len(args) != 2 {
 			return nil, moerr.NewInvalidArg("operator - need two args", len(args))
@@ -281,7 +385,21 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 		if isNullExpr(args[1]) {
 			return args[1], nil
 		}
-	case "*":
+		// rewrite "date '2001' - interval '1 day'" to date_sub(date '2001', 1, day(unit))
+		if args[0].Typ.Id == int32(types.T_date) && args[1].Typ.Id == int32(types.T_interval) {
+			name = "date_sub"
+			args, err = resetDateFunctionArgs(args[0], args[1])
+		} else if args[0].Typ.Id == int32(types.T_datetime) && args[1].Typ.Id == int32(types.T_interval) {
+			name = "date_sub"
+			args, err = resetDateFunctionArgs(args[0], args[1])
+		} else if args[0].Typ.Id == int32(types.T_varchar) && args[1].Typ.Id == int32(types.T_interval) {
+			name = "date_sub"
+			args, err = resetDateFunctionArgs(args[0], args[1])
+		}
+		if err != nil {
+			return nil, err
+		}
+	case "*", "/", "%":
 		if len(args) != 2 {
 			return nil, moerr.NewInvalidArg(fmt.Sprintf("operator %s need two args", name), len(args))
 		}
@@ -291,6 +409,18 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 		if isNullExpr(args[1]) {
 			return args[1], nil
 		}
+	case "unary_minus":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 8")
+	case "oct", "bit_and", "bit_or", "bit_xor":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 9")
+	case "like":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 10")
+	case "timediff":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 11")
+	case "str_to_date", "to_date":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 12")
+	case "unix_timestamp":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 13")
 	}
 	argsLength := len(args)
 	argsType := make([]types.Type, argsLength)
@@ -310,6 +440,37 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 		if constExpr, ok := args[0].Expr.(*plan.Expr_C); ok && constExpr.C.Isnull {
 			args[0].Typ = makePlan2Type(&returnType)
 		}
+	}
+
+	switch name {
+	case "=", "<", "<=", ">", ">=", "<>":
+		switch leftExpr := args[0].Expr.(type) {
+		case *plan.Expr_C:
+			if _, ok := args[1].Expr.(*plan.Expr_Col); ok {
+				if checkNoNeedCast(types.T(args[0].Typ.Id), types.T(args[1].Typ.Id), leftExpr) {
+					tmpType := types.T(args[1].Typ.Id).ToType() // cast const_expr as column_expr's type
+					argsCastType = []types.Type{tmpType, tmpType}
+					// need to update function id
+					funcID, _, _, err = function.GetFunctionByName(name, argsCastType)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+		case *plan.Expr_Col:
+			if rightExpr, ok := args[1].Expr.(*plan.Expr_C); ok {
+				if checkNoNeedCast(types.T(args[1].Typ.Id), types.T(args[0].Typ.Id), rightExpr) {
+					tmpType := types.T(args[0].Typ.Id).ToType() // cast const_expr as column_expr's type
+					argsCastType = []types.Type{tmpType, tmpType}
+					funcID, _, _, err = function.GetFunctionByName(name, argsCastType)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	case "timediff":
+		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 14")
 	}
 
 	if len(argsCastType) != 0 {
@@ -385,6 +546,23 @@ func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Exp
 			return appendCastBeforeExpr(expr, typ)
 		}
 		return expr, nil
+	case tree.P_uint64:
+		return nil, moerr.NewInvalidInput("unsupport value 1 '%s'", astExpr.String())
+	case tree.P_decimal:
+		return nil, moerr.NewInvalidInput("unsupport value 2 '%s'", astExpr.String())
+	case tree.P_float64:
+		return nil, moerr.NewInvalidInput("unsupport value 3 '%s'", astExpr.String())
+	case tree.P_hexnum:
+		return nil, moerr.NewInvalidInput("unsupport value 4 '%s'", astExpr.String())
+	case tree.P_ScoreBinary:
+		return nil, moerr.NewInvalidInput("unsupport value 5 '%s'", astExpr.String())
+	case tree.P_bit:
+		return nil, moerr.NewInvalidInput("unsupport value 6 '%s'", astExpr.String())
+	case tree.P_char:
+		expr := makePlan2StringConstExprWithType(astExpr.String())
+		return expr, nil
+	case tree.P_nulltext:
+		return nil, moerr.NewInvalidInput("unsupport value 8 '%s'", astExpr.String())
 	default:
 		return nil, moerr.NewInvalidInput("unsupport value '%s'", astExpr.String())
 	}
@@ -425,7 +603,77 @@ func appendCastBeforeExpr(expr *plan.Expr, toType *plan.Type, isBin ...bool) (*p
 }
 
 func resetDateFunctionArgs(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 38")
+	firstExpr := intervalExpr.Expr.(*plan.Expr_List).List.List[0]
+	secondExpr := intervalExpr.Expr.(*plan.Expr_List).List.List[1]
+
+	intervalTypeStr := secondExpr.Expr.(*plan.Expr_C).C.Value.(*plan.Const_Sval).Sval
+	intervalType, err := types.IntervalTypeOf(intervalTypeStr)
+	if err != nil {
+		return nil, err
+	}
+
+	intervalTypeInFunction := &plan.Type{
+		Id:   int32(types.T_int64),
+		Size: 8,
+	}
+
+	if firstExpr.Typ.Id == int32(types.T_varchar) || firstExpr.Typ.Id == int32(types.T_char) {
+		s := firstExpr.Expr.(*plan.Expr_C).C.Value.(*plan.Const_Sval).Sval
+		returnNum, returnType, err := types.NormalizeInterval(s, intervalType)
+
+		if err != nil {
+			return nil, err
+		}
+		// "date '2020-10-10' - interval 1 Hour"  will return datetime
+		// so we rewrite "date '2020-10-10' - interval 1 Hour"  to  "date_add(datetime, 1, hour)"
+		if dateExpr.Typ.Id == int32(types.T_date) {
+			switch returnType {
+			case types.Day, types.Week, types.Month, types.Quarter, types.Year:
+			default:
+				dateExpr, err = appendCastBeforeExpr(dateExpr, &plan.Type{
+					Id:   int32(types.T_datetime),
+					Size: 8,
+				})
+
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		return []*plan.Expr{
+			dateExpr,
+			makePlan2Int64ConstExprWithType(returnNum),
+			makePlan2Int64ConstExprWithType(int64(returnType)),
+		}, nil
+	}
+
+	// "date '2020-10-10' - interval 1 Hour"  will return datetime
+	// so we rewrite "date '2020-10-10' - interval 1 Hour"  to  "date_add(datetime, 1, hour)"
+	if dateExpr.Typ.Id == int32(types.T_date) {
+		switch intervalType {
+		case types.Day, types.Week, types.Month, types.Quarter, types.Year:
+		default:
+			dateExpr, err = appendCastBeforeExpr(dateExpr, &plan.Type{
+				Id:   int32(types.T_datetime),
+				Size: 8,
+			})
+
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	numberExpr, err := appendCastBeforeExpr(firstExpr, intervalTypeInFunction)
+	if err != nil {
+		return nil, err
+	}
+
+	return []*plan.Expr{
+		dateExpr,
+		numberExpr,
+		makePlan2Int64ConstExprWithType(int64(intervalType)),
+	}, nil
 }
 
 func resetDateFunctionArgs2(dateExpr *plan.Expr, intervalExpr *plan.Expr) ([]*plan.Expr, error) {

@@ -49,7 +49,12 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 	case *tree.UnaryExpr:
 		return nil, moerr.NewInternalError("not implement qualifyColumnNames 4")
 	case *tree.ComparisonExpr:
-		return nil, moerr.NewInternalError("not implement qualifyColumnNames 5")
+		exprImpl.Left, err = bc.qualifyColumnNames(exprImpl.Left, selectList, expandAlias)
+		if err != nil {
+			return nil, err
+		}
+
+		exprImpl.Right, err = bc.qualifyColumnNames(exprImpl.Right, selectList, expandAlias)
 	case *tree.RangeCond:
 		return nil, moerr.NewInternalError("not implement qualifyColumnNames 6")
 	case *tree.UnresolvedName:
