@@ -115,9 +115,9 @@ type BindContext struct {
 	isDistinct   bool //from selectClause.Distinct
 	isCorrelated bool
 
-	results []*plan.Expr
+	results []*plan.Expr //projects or results with Virtual ColRef
 
-	resultTag int32
+	resultTag int32 //project tag
 }
 
 type NameTuple struct {
@@ -141,6 +141,9 @@ type QueryBuilder struct {
 	//<binding tag,columnIdx> -> (table name or alias).columnName
 	//Bind project list set the field second
 	//<projectTag,project index> -> (qualified column name)
+	//Add group or aggregate node
+	//<groupTag, index> -> groupByExpr
+	//<aggregateTag, index> -> aggregateExpr
 	nameByColRef map[[2]int32]string
 
 	nextTag int32

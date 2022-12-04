@@ -297,7 +297,6 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 			}, ctx)
 		}
 
-		//TODO:
 		for name, id := range ctx.groupByAst {
 			qb.nameByColRef[[2]int32{ctx.groupTag, id}] = name
 		}
@@ -344,13 +343,17 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 		}, ctx)
 	}
 
+	//current Node with Limit & Offset
 	if limitExpr != nil || offsetExpr != nil {
 		node := qb.qry.Nodes[nodeID]
 		node.Limit = limitExpr
 		node.Offset = offsetExpr
 	}
 
+	//Last One is not PROJECT
 	if qb.qry.Nodes[nodeID].NodeType != plan.Node_PROJECT {
+		//resultLen is the count of projects
+		//Virtual ColRef
 		for i := 0; i < resultLen; i++ {
 			ctx.results = append(ctx.results, &plan.Expr{
 				Typ: ctx.projects[i].Typ,
@@ -363,6 +366,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 			})
 		}
 
+		//new tag
 		ctx.resultTag = qb.genNewTag()
 		nodeID = qb.appendNode(&plan.Node{
 			NodeType:    plan.Node_PROJECT,
@@ -375,6 +379,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 	}
 
 	if isRoot {
+		//select expr list
 		qb.qry.Headings = append(qb.qry.Headings, ctx.headings...)
 	}
 
