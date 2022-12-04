@@ -169,7 +169,7 @@ func Test_build8(t *testing.T) {
 }
 
 func Test_build9(t *testing.T) {
-	convey.Convey("t9", t, func() {
+	convey.Convey("tpch-q1", t, func() {
 		sql := `select
 					l_returnflag,
 					l_linestatus,
