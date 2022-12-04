@@ -7,6 +7,15 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+// BindExpr ->If astExpr in GroupByAst -> (groupTag,colPos)
+//
+//	If astExpr in AggregateByAst -> (aggregateTag,colPos)
+//
+// BindColRef -> baseBindColRef
+// BindAggFunc -> havingBinder.BindAggFunc
+// Except Win,
+//Subquery -> baseBindSubquery
+
 func NewProjectionBinder(qb *QueryBuilder, ctx *BindContext, havingBinder *HavingBinder) *ProjectionBinder {
 	b := &ProjectionBinder{
 		havingBinder: havingBinder,
@@ -18,6 +27,7 @@ func NewProjectionBinder(qb *QueryBuilder, ctx *BindContext, havingBinder *Havin
 	return b
 }
 
+// Virtual ColRef (groupTag,groups[colPos]),(aggregateTag,aggregates[colPos])
 func (b *ProjectionBinder) BindExpr(astExpr tree.Expr, depth int32, isRoot bool) (*plan.Expr, error) {
 	astStr := tree.String(astExpr, dialect.MYSQL)
 

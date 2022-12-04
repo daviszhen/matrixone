@@ -34,6 +34,9 @@ func NewBindContext(parent *BindContext) *BindContext {
 	return bc
 }
 
+// make every column name have table prefix.
+// astExpr - unqualified
+// selectList - qualified select list
 func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.SelectExprs, expandAlias bool) (tree.Expr, error) {
 	var err error
 	switch exprImpl := astExpr.(type) {
@@ -60,7 +63,7 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 	case *tree.UnresolvedName:
 		if !exprImpl.Star && exprImpl.NumParts == 1 {
 			col := exprImpl.Parts[0]
-			if expandAlias {
+			if expandAlias { //orderBy use the alias in project list first
 				if colPos, ok := bc.aliasMap[col]; ok {
 					astExpr = selectList[colPos].Expr
 					break

@@ -6,6 +6,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+// WhereBinder is almost the same as the BaseBinder
+// except AggregateFunc, WindowFunc
 func NewWhereBinder(qb *QueryBuilder, ctx *BindContext) *WhereBinder {
 	wb := &WhereBinder{}
 	wb.builder = qb

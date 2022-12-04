@@ -28,10 +28,12 @@ var _ Binder = &GroupBinder{}
 var _ Binder = &HavingBinder{}
 
 type baseBinder struct {
-	builder   *QueryBuilder // current query builder
-	ctx       *BindContext  // current context
-	impl      Binder        // current Binder implementation
-	boundCols []string      // columns that have be found in a table in a Binding
+	builder *QueryBuilder // current query builder
+	ctx     *BindContext  // current context
+	impl    Binder        // current Binder implementation
+	//Set in baseBindColRef
+	//Found Columns(table+"."+col) in any Binding
+	boundCols []string // columns that have be found in a table in a Binding
 }
 
 type DefaultBinder struct {
@@ -63,7 +65,7 @@ type ProjectionBinder struct {
 
 type OrderBinder struct {
 	*ProjectionBinder
-	selectList tree.SelectExprs
+	selectList tree.SelectExprs //qualified
 }
 
 type LimitBinder struct {
@@ -71,36 +73,46 @@ type LimitBinder struct {
 }
 
 type BindContext struct {
+	//current binder for current clause (from, where,group by, having, project, order by, limit)
 	binder          Binder
 	parent          *BindContext
 	id              uint32
 	defaultDatabase string
-	hasSingleRow    bool
+	hasSingleRow    bool //true when ('dual' or without From or without groupby but with aggregates)
 
-	bindings       []*Binding          //addBinding appends new one
+	//Node_TABLE_SCAN or Node_MATERIAL_SCAN or Node_EXTERNAL_SCAN or subquery,
+	//tag,nodeID,table,columns,types
+	//addBinding appends new one.
+	bindings       []*Binding
 	bindingByTag   map[int32]*Binding  //tag -> binding
-	bindingByTable map[string]*Binding //table -> binding
+	bindingByTable map[string]*Binding //table name or alias -> binding
 	bindingByCol   map[string]*Binding //column -> binding
 
 	bindingTree *BindingTreeNode
 
-	headings []string //origin name of the select expr
+	//UnresolvedName -> alias or just parts[0]
+	//Others -> alias or exprString
+	headings []string //origin name of the select expr.
+	//the alias of project expr  -> index of bound project expr
 	aliasMap map[string]int32
 
 	groupTag     int32
 	aggregateTag int32
 	projectTag   int32
 
-	groupByAst map[string]int32
+	groupByAst map[string]int32 //groupByExpr -> the index of bound groupByExpr
 	groups     []*plan.Expr
 
-	aggregateByAst map[string]int32
+	aggregateByAst map[string]int32 //aggregateByExpr -> the index of bound aggregateByExpr
 	aggregates     []*plan.Expr
 
-	projects      []*plan.Expr //bound exprs from select exprs
+	projects []*plan.Expr //bound project exprs from select exprs
+	//first, buildSelect update it
+	//second, orderBinder.BindExpr update it
+	//bound project expr string -> the index of bound project expr
 	projectByExpr map[string]int32
 
-	isDistinct   bool
+	isDistinct   bool //from selectClause.Distinct
 	isCorrelated bool
 
 	results []*plan.Expr
@@ -125,8 +137,10 @@ type QueryBuilder struct {
 	compCtx plan2.CompilerContext
 
 	ctxByNode []*BindContext
-	//<tag,columnIdx> -> table.columnName
 	//addBinding set the field first
+	//<binding tag,columnIdx> -> (table name or alias).columnName
+	//Bind project list set the field second
+	//<projectTag,project index> -> (qualified column name)
 	nameByColRef map[[2]int32]string
 
 	nextTag int32

@@ -12,6 +12,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+// key point: baseBindColRef, bindFuncExprImplByPlanExpr
+
 func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (expr *plan.Expr, err error) {
 	switch exprImpl := astExpr.(type) {
 	case *tree.NumVal:
@@ -84,6 +86,7 @@ func (b *baseBinder) baseBindVar(astExpr *tree.VarExpr, depth int32, isRoot bool
 	return nil, moerr.NewInternalError("not implement 26")
 }
 
+// Get relPos,colPos of columns from Binding or Parent Binding
 func (b *baseBinder) baseBindColRef(astExpr *tree.UnresolvedName, depth int32, isRoot bool) (expr *plan.Expr, err error) {
 	if b.ctx == nil {
 		return nil, moerr.NewInvalidInput("ambigous column reference '%v'", astExpr.Parts[0])

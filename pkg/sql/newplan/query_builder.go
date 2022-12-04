@@ -40,6 +40,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 
 	ctx.binder = NewWhereBinder(qb, ctx)
 
+	//make every column for select list have table prefix
 	var selectList tree.SelectExprs
 	for _, selectExpr := range clause.Exprs {
 		switch expr := selectExpr.Expr.(type) {
@@ -96,6 +97,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 	}
 
 	if clause.Where != nil {
+		//why split ?
 		whereList, err := splitAndBindCondition(clause.Where.Expr, ctx)
 		if err != nil {
 			return 0, err
@@ -104,6 +106,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 		var newFilterList []*plan.Expr
 		var expr *plan.Expr
 
+		//do nothing in tpch.q1
 		for _, where := range whereList {
 			nodeID, expr, err = qb.flattenSubqueries(nodeID, where, ctx)
 			if err != nil {
@@ -184,6 +187,8 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 
 	var orderBys []*plan.OrderBySpec
 	if astOrderBy != nil {
+		//astOrderBy is different from selectList
+		//ast in astOrderBy have not been qualified.
 		orderBinder := NewOrderBinder(projectionBinder, selectList)
 		orderBys = make([]*plan.OrderBySpec, 0, len(astOrderBy))
 
@@ -256,10 +261,12 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 		// }
 	}
 
+	//?
 	if len(ctx.groups) == 0 && len(ctx.aggregates) > 0 {
 		ctx.hasSingleRow = true
 	}
 
+	// with groupby or aggregate
 	if len(ctx.groups) > 0 || len(ctx.aggregates) > 0 {
 		nodeID = qb.appendNode(&plan.Node{
 			NodeType:    plan.Node_AGG,
@@ -290,6 +297,7 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 			}, ctx)
 		}
 
+		//TODO:
 		for name, id := range ctx.groupByAst {
 			qb.nameByColRef[[2]int32{ctx.groupTag, id}] = name
 		}
@@ -426,7 +434,7 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 			Cost:        qb.compCtx.Cost(obj, nil),
 			ObjRef:      obj,
 			TableDef:    tableDef,
-			BindingTags: []int32{qb.genNewTag()}, //?
+			BindingTags: []int32{qb.genNewTag()}, //new tag for Node_TABLE_SCAN or Node_EXTERNAL_SCAN
 		}, ctx)
 	case *tree.JoinTableExpr:
 		if tbl.Right == nil {
@@ -447,6 +455,7 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 			return
 		}
 
+		//why here ?
 		err = qb.addBinding(nodeID, tbl.As, ctx)
 
 		return
@@ -462,6 +471,9 @@ func (qb *QueryBuilder) genNewTag() int32 {
 	return qb.nextTag
 }
 
+// tag -> binding
+// table name or alias -> binding
+// column -> binding
 func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *BindContext) error {
 	node := qb.qry.Nodes[nodeID]
 	fmt.Println("addBinding", nodeID)
@@ -478,6 +490,7 @@ func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *Bi
 		}
 
 		var table string
+		//alias
 		if alias.Alias != "" {
 			table = string(alias.Alias)
 		} else {
@@ -501,7 +514,7 @@ func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *Bi
 			}
 			types[i] = col.Typ
 			name := table + "." + cols[i]
-			//<tag,columnIdx> -> table.columnName
+			//<binding tag,columnIdx> -> (table name or alias).columnName
 			qb.nameByColRef[[2]int32{tag, int32(i)}] = name
 		}
 
@@ -1069,6 +1082,7 @@ func splitAndBindCondition(astExpr tree.Expr, ctx *BindContext) ([]*plan.Expr, e
 		}
 
 		if expr.GetSub() == nil {
+			//add CAST
 			expr, err = makePlan2CastExpr(expr, &plan.Type{Id: int32(types.T_bool)})
 			if err != nil {
 				return nil, err

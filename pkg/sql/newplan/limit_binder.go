@@ -7,6 +7,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+// BindExpr -> baseBindExpr
 func NewLimitBinder(qb *QueryBuilder, ctx *BindContext) *LimitBinder {
 	lb := &LimitBinder{}
 	lb.builder = qb

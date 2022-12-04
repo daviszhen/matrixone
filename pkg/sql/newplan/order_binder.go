@@ -8,6 +8,9 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+// BindExpr ->Virtual ColRef (projectTag,projects[colPos]) {UnresolvedName[0] alias, NumVal(index of bound project list)}
+//
+//	internals -> ProjectionBinder.BindExpr
 func NewOrderBinder(projectionBinder *ProjectionBinder, selectList tree.SelectExprs) *OrderBinder {
 	return &OrderBinder{
 		ProjectionBinder: projectionBinder,
@@ -15,6 +18,7 @@ func NewOrderBinder(projectionBinder *ProjectionBinder, selectList tree.SelectEx
 	}
 }
 
+// BindExpr ->Virtual ColRef (projectTag,projects[colPos]) {UnresolvedName[0] alias, NumVal(index of bound project list)}
 func (b *OrderBinder) BindExpr(astExpr tree.Expr) (*plan.Expr, error) {
 	if colRef, ok := astExpr.(*tree.UnresolvedName); ok && colRef.NumParts == 1 {
 		if colPos, ok := b.ctx.aliasMap[colRef.Parts[0]]; ok {
@@ -56,6 +60,8 @@ func (b *OrderBinder) BindExpr(astExpr tree.Expr) (*plan.Expr, error) {
 		}
 	}
 
+	//expand alias
+	//orderBy may use the alias in project list first
 	astExpr, err := b.ctx.qualifyColumnNames(astExpr, b.selectList, true)
 	if err != nil {
 		return nil, err

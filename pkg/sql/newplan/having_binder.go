@@ -8,6 +8,13 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/plan/function"
 )
 
+// BindExpr ->If astExpr in GroupByAst -> (groupTag,colPos)
+//
+//	If astExpr in AggregateByAst -> (aggregateTag,colPos)
+//
+// BindColRef -> Only inside Agg Func, Do base.colRef
+// BindAggFunc -> need update aggregateByAst,aggregates
+// Except Win,Subquery
 func NewHavingBinder(qb *QueryBuilder, ctx *BindContext) *HavingBinder {
 	b := &HavingBinder{
 		insideAgg: false,
@@ -19,10 +26,14 @@ func NewHavingBinder(qb *QueryBuilder, ctx *BindContext) *HavingBinder {
 	return b
 }
 
+// If astExpr in GroupByAst -> (groupTag,colPos)
+// If astExpr in AggregateByAst -> (aggregateTag,colPos)
+// Virtual ColRef (groupTag,groups[colPos]),(aggregateTag,aggregates[colPos])
 func (hb *HavingBinder) BindExpr(astExpr tree.Expr, depth int32, isRoot bool) (*plan.Expr, error) {
 	astStr := tree.String(astExpr, dialect.MYSQL)
 
 	if !hb.insideAgg {
+		//RelPos has been changed to groupTag
 		if colPos, ok := hb.ctx.groupByAst[astStr]; ok {
 			return &plan.Expr{
 				Typ: hb.ctx.groups[colPos].Typ,
@@ -38,6 +49,7 @@ func (hb *HavingBinder) BindExpr(astExpr tree.Expr, depth int32, isRoot bool) (*
 
 	if colPos, ok := hb.ctx.aggregateByAst[astStr]; ok {
 		if !hb.insideAgg {
+			//RelPos has been changed to aggregateTag
 			return &plan.Expr{
 				Typ: hb.ctx.aggregates[colPos].Typ,
 				Expr: &plan.Expr_Col{
@@ -55,6 +67,7 @@ func (hb *HavingBinder) BindExpr(astExpr tree.Expr, depth int32, isRoot bool) (*
 	return hb.baseBindExpr(astExpr, depth, isRoot)
 }
 
+// Only inside Agg Func, Do baseBindColRef
 func (hb *HavingBinder) BindColRef(astExpr *tree.UnresolvedName, depth int32, isRoot bool) (*plan.Expr, error) {
 	if hb.insideAgg {
 		expr, err := hb.baseBindColRef(astExpr, depth, isRoot)
@@ -72,6 +85,8 @@ func (hb *HavingBinder) BindColRef(astExpr *tree.UnresolvedName, depth int32, is
 	}
 }
 
+// BindAggFunc -> need update aggregateByAst,aggregates
+// Virtual ColRef (aggregateTag,aggregates[colPos])
 func (hb *HavingBinder) BindAggFunc(funcName string, astExpr *tree.FuncExpr, depth int32, isRoot bool) (*plan.Expr, error) {
 	if hb.insideAgg {
 		return nil, moerr.NewSyntaxError("aggregate function %s calls cannot be nested", funcName)
