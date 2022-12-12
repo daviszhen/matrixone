@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"math"
 	"runtime"
 	"sync"
@@ -244,7 +245,9 @@ func (e *Engine) New(ctx context.Context, op client.TxnOperator) error {
 		createTableMap: make(map[uint64]uint8),
 	}
 	txn.writes = append(txn.writes, make([]Entry, 0, 1))
+	logutil.Debugf("NewTxn New 1 %s", op.Txn().DebugString())
 	e.newTransaction(op, txn)
+	logutil.Debugf("NewTxn New 2 %s", op.Txn().DebugString())
 	// update catalog's cache
 	table := &table{
 		db: &database{
@@ -254,6 +257,7 @@ func (e *Engine) New(ctx context.Context, op client.TxnOperator) error {
 	}
 	table.tableId = catalog.MO_DATABASE_ID
 	table.tableName = catalog.MO_DATABASE
+	logutil.Debugf("NewTxn New 1 %s", op.Txn().DebugString())
 	if err := e.db.Update(ctx, txn.dnStores[:1], table, op, catalog.MO_TABLES_REL_ID_IDX,
 		catalog.MO_CATALOG_ID, catalog.MO_DATABASE_ID, txn.meta.SnapshotTS); err != nil {
 		e.delTransaction(txn)

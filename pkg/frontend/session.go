@@ -1323,12 +1323,18 @@ func (th *TxnHandler) NewTxn() error {
 	if err != nil {
 		return err
 	}
-	ctx := th.GetSession().GetRequestContext()
+	ses := th.GetSession()
+	sessionProfile := ses.GetConciseProfile()
+	ctx := ses.GetRequestContext()
 	if ctx == nil {
 		panic("context should not be nil")
 	}
+	txnOp := th.GetTxnOperator()
+	txnId := txnOp.Txn().DebugString()
+	logDebugf(sessionProfile, "NewTxn 1 txnId:%s", txnId)
 	storage := th.GetStorage()
 	err = storage.New(ctx, th.GetTxnOperator())
+	logDebugf(sessionProfile, "NewTxn 2 txnId:%s", txnId)
 	return err
 }
 

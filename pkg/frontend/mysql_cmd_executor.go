@@ -1012,15 +1012,19 @@ func doUse(ctx context.Context, ses *Session, db string) error {
 	txnHandler := ses.GetTxnHandler()
 	var txn TxnOperator
 	var err error
+	sessionProfile := ses.GetConciseProfile()
+	logDebugf(sessionProfile, "doUse 1")
 	txn, err = txnHandler.GetTxn()
 	if err != nil {
 		return err
 	}
+	logDebugf(sessionProfile, "doUse 2")
 	//TODO: check meta data
 	if _, err = ses.GetParameterUnit().StorageEngine.Database(ctx, db, txn); err != nil {
 		//echo client. no such database
 		return moerr.NewBadDB(ctx, db)
 	}
+	logDebugf(sessionProfile, "doUse 3")
 	oldDB := ses.GetDatabaseName()
 	ses.SetDatabaseName(db)
 
