@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -151,7 +152,48 @@ const (
 )
 
 type MysqlProtocol interface {
-	Protocol
+	profile
+	IsEstablished() bool
+
+	SetEstablished()
+
+	// GetRequest gets Request from Packet
+	GetRequest(payload []byte) *Request
+
+	// ConnectionID the identity of the client
+	ConnectionID() uint32
+
+	// Peer gets the address [Host:Port,Host:Port] of the client and the server
+	Peer() (string, string, string, string)
+
+	GetDatabaseName() string
+
+	SetDatabaseName(string)
+
+	GetUserName() string
+
+	SetUserName(string)
+
+	GetSequenceId() uint8
+
+	SetSequenceID(value uint8)
+
+	GetConciseProfile() string
+
+	GetTcpConnection() goetty.IOSession
+
+	GetCapability() uint32
+
+	IsTlsEstablished() bool
+
+	SetTlsEstablished()
+
+	HandleHandshake(ctx context.Context, payload []byte) (bool, error)
+
+	SendPrepareResponse(ctx context.Context, stmt *PrepareStmt) error
+
+	Quit()
+
 	//the server send group row of the result set as an independent packet thread safe
 	SendResultSetTextBatchRow(mrs *MysqlResultSet, cnt uint64) error
 
@@ -185,7 +227,7 @@ var _ MysqlProtocol = &MysqlProtocolImpl{}
 func (ses *Session) GetMysqlProtocol() MysqlProtocol {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	return ses.protocol.(MysqlProtocol)
+	return ses.protocol
 }
 
 type debugStats struct {
@@ -256,7 +298,31 @@ func (rh *rowHandler) resetFlushCount() {
 }
 
 type MysqlProtocolImpl struct {
-	ProtocolImpl
+	m sync.Mutex
+
+	io IOPackage
+
+	tcpConn goetty.IOSession
+
+	quit atomic.Bool
+
+	//random bytes
+	salt []byte
+
+	//the id of the connection
+	connectionID uint32
+
+	// whether the handshake succeeded
+	established atomic.Bool
+
+	// whether the tls handshake succeeded
+	tlsEstablished atomic.Bool
+
+	//The sequence-id is incremented with each packet and may wrap around.
+	//It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
+	sequenceId atomic.Uint32
+
+	profiles [8]string
 
 	//joint capability shared by the server and the client
 	capability uint32
@@ -295,12 +361,232 @@ type MysqlProtocolImpl struct {
 
 	SV *config.FrontendParameters
 
-	m sync.Mutex
-
 	ses *Session
 
 	//skip checking the password of the user
 	skipCheckUser bool
+}
+
+func (mp *MysqlProtocolImpl) setQuit(b bool) bool {
+	return mp.quit.Swap(b)
+}
+
+func (mp *MysqlProtocolImpl) GetSequenceId() uint8 {
+	return uint8(mp.sequenceId.Load())
+}
+
+func (mp *MysqlProtocolImpl) SetSequenceID(value uint8) {
+	mp.sequenceId.Store(uint32(value))
+}
+
+func (mp *MysqlProtocolImpl) makeProfile(profileTyp profileType) {
+	var mask profileType
+	var profile string
+	for i := uint8(0); i < 8; i++ {
+		mask = 1 << i
+		switch mask & profileTyp {
+		case profileTypeConnectionWithId:
+			if mp.tcpConn != nil {
+				profile = fmt.Sprintf("connectionId %d", mp.connectionID)
+			}
+		case profileTypeConnectionWithIp:
+			if mp.tcpConn != nil {
+				client := mp.tcpConn.RemoteAddress()
+				profile = "client " + client
+			}
+		default:
+			profile = ""
+		}
+		mp.profiles[i] = profile
+	}
+}
+
+func (mp *MysqlProtocolImpl) getProfile(profileTyp profileType) string {
+	var mask profileType
+	sb := bytes.Buffer{}
+	for i := uint8(0); i < 8; i++ {
+		mask = 1 << i
+		if mask&profileTyp != 0 {
+			if sb.Len() != 0 {
+				sb.WriteByte(' ')
+			}
+			sb.WriteString(mp.profiles[i])
+		}
+	}
+	return sb.String()
+}
+
+func (mp *MysqlProtocolImpl) MakeProfile() {
+	mp.m.Lock()
+	defer mp.m.Unlock()
+	mp.makeProfile(profileTypeAll)
+}
+
+func (mp *MysqlProtocolImpl) GetConciseProfile() string {
+	mp.m.Lock()
+	defer mp.m.Unlock()
+	return mp.getProfile(profileTypeConcise)
+}
+
+func (mp *MysqlProtocolImpl) GetSalt() []byte {
+	mp.m.Lock()
+	defer mp.m.Unlock()
+	return mp.salt
+}
+
+func (mp *MysqlProtocolImpl) IsEstablished() bool {
+	return mp.established.Load()
+}
+
+func (mp *MysqlProtocolImpl) SetEstablished() {
+	logDebugf(mp.GetConciseProfile(), "SWITCH ESTABLISHED to true")
+	mp.established.Store(true)
+}
+
+func (mp *MysqlProtocolImpl) IsTlsEstablished() bool {
+	return mp.tlsEstablished.Load()
+}
+
+func (mp *MysqlProtocolImpl) SetTlsEstablished() {
+	logutil.Debugf("SWITCH TLS_ESTABLISHED to true")
+	mp.tlsEstablished.Store(true)
+}
+
+func (mp *MysqlProtocolImpl) ConnectionID() uint32 {
+	mp.m.Lock()
+	defer mp.m.Unlock()
+	return mp.connectionID
+}
+
+// Quit kill tcpConn still connected.
+// before calling NewMysqlClientProtocol, tcpConn.Connected() must be true
+// please check goetty/application.go::doStart() and goetty/application.go::NewIOSession(...) for details
+func (mp *MysqlProtocolImpl) Quit() {
+	var err error
+	mp.m.Lock()
+	defer mp.m.Unlock()
+	//if it was quit, do nothing
+	//TODO: if the close failed, restore the quit ?
+	if mp.setQuit(true) {
+		return
+	}
+	if mp.tcpConn != nil {
+		err = mp.tcpConn.Disconnect()
+		if err != nil {
+			logutil.Errorf("disconnect tcp conn failed. error:%v", err)
+			return
+		}
+		err = mp.tcpConn.Close()
+		if err != nil {
+			logutil.Errorf("close tcp conn failed. error:%v", err)
+		}
+	}
+}
+
+func (mp *MysqlProtocolImpl) GetLock() sync.Locker {
+	return &mp.m
+}
+
+func (mp *MysqlProtocolImpl) GetTcpConnection() goetty.IOSession {
+	mp.m.Lock()
+	defer mp.m.Unlock()
+	return mp.tcpConn
+}
+
+func (mp *MysqlProtocolImpl) Peer() (string, string, string, string) {
+	tcp := mp.GetTcpConnection()
+	if tcp == nil {
+		return "", "", "", ""
+	}
+	addr := tcp.RemoteAddress()
+	rawConn := tcp.RawConn()
+	var local net.Addr
+	if rawConn != nil {
+		local = rawConn.LocalAddr()
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		logutil.Errorf("get peer host:port failed. error:%v ", err)
+		return "failed", "0", "", ""
+	}
+	localHost, localPort, err := net.SplitHostPort(local.String())
+	if err != nil {
+		logutil.Errorf("get peer host:port failed. error:%v ", err)
+		return "failed", "0", "failed", "0"
+	}
+	return host, port, localHost, localPort
+}
+
+func (mp *MysqlProtocolImpl) GetRequest(payload []byte) *Request {
+	req := &Request{
+		cmd:  CommandType(payload[0]),
+		data: payload[1:],
+	}
+
+	return req
+}
+
+func (mp *MysqlProtocolImpl) getAbortTransactionErrorInfo() string {
+	//update error message in Case1,Case3,Case4.
+	if mp.ses != nil && mp.ses.OptionBitsIsSet(OPTION_ATTACH_ABORT_TRANSACTION_ERROR) {
+		mp.ses.ClearOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
+		return abortTransactionErrorInfo()
+	}
+	return ""
+}
+
+func (mp *MysqlProtocolImpl) SendResponse(ctx context.Context, resp *Response) error {
+	mp.GetLock().Lock()
+	defer mp.GetLock().Unlock()
+
+	switch resp.category {
+	case OkResponse:
+		s, ok := resp.data.(string)
+		if !ok {
+			return mp.sendOKPacket(resp.affectedRows, resp.lastInsertId, uint16(resp.status), resp.warnings, "")
+		}
+		return mp.sendOKPacket(resp.affectedRows, resp.lastInsertId, uint16(resp.status), resp.warnings, s)
+	case EoFResponse:
+		return mp.sendEOFPacket(0, uint16(resp.status))
+	case ErrorResponse:
+		err := resp.data.(error)
+		if err == nil {
+			return mp.sendOKPacket(0, 0, uint16(resp.status), 0, "")
+		}
+		attachAbort := mp.getAbortTransactionErrorInfo()
+		switch myerr := err.(type) {
+		case *moerr.Error:
+			var code uint16
+			if myerr.MySQLCode() != moerr.ER_UNKNOWN_ERROR {
+				code = myerr.MySQLCode()
+			} else {
+				code = myerr.ErrorCode()
+			}
+			errMsg := myerr.Error()
+			if attachAbort != "" {
+				errMsg = fmt.Sprintf("%s\n%s", myerr.Error(), attachAbort)
+			}
+			return mp.sendErrPacket(code, myerr.SqlState(), errMsg)
+		}
+		errMsg := ""
+		if attachAbort != "" {
+			errMsg = fmt.Sprintf("%s\n%s", err, attachAbort)
+		} else {
+			errMsg = fmt.Sprintf("%v", err)
+		}
+		return mp.sendErrPacket(moerr.ER_UNKNOWN_ERROR, DefaultMySQLState, errMsg)
+	case ResultResponse:
+		mer := resp.data.(*MysqlExecutionResult)
+		if mer == nil {
+			return mp.sendOKPacket(0, 0, uint16(resp.status), 0, "")
+		}
+		if mer.Mrs() == nil {
+			return mp.sendOKPacket(mer.AffectedRows(), mer.InsertID(), uint16(resp.status), mer.Warnings(), "")
+		}
+		return mp.sendResultSet(ctx, mer.Mrs(), resp.cmd, mer.Warnings(), uint16(resp.status))
+	default:
+		return moerr.NewInternalError(ctx, "unsupported response:%d ", resp.category)
+	}
 }
 
 func (mp *MysqlProtocolImpl) GetSession() *Session {
@@ -364,10 +650,6 @@ func (mp *MysqlProtocolImpl) GetStats() string {
 func (mp *MysqlProtocolImpl) ResetStatistics() {
 	mp.ResetStats()
 	mp.resetFlushCount()
-}
-
-func (mp *MysqlProtocolImpl) Quit() {
-	mp.ProtocolImpl.Quit()
 }
 
 func (mp *MysqlProtocolImpl) SetSession(ses *Session) {
@@ -2542,12 +2824,10 @@ func NewMysqlClientProtocol(connectionID uint32, tcp goetty.IOSession, maxBytesT
 	salt := generate_salt(20)
 	tcp.Ref()
 	mysql := &MysqlProtocolImpl{
-		ProtocolImpl: ProtocolImpl{
-			io:           NewIOPackage(true),
-			tcpConn:      tcp,
-			salt:         salt,
-			connectionID: connectionID,
-		},
+		io:               NewIOPackage(true),
+		tcpConn:          tcp,
+		salt:             salt,
+		connectionID:     connectionID,
 		charset:          "utf8mb4",
 		capability:       DefaultCapability,
 		strconvBuffer:    make([]byte, 0, 16*1024),

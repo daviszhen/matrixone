@@ -97,7 +97,7 @@ type Session struct {
 	accountId uint32
 
 	//protocol layer
-	protocol Protocol
+	protocol MysqlProtocol
 
 	//cmd from the client
 	cmd CommandType
@@ -197,7 +197,7 @@ func (e *errInfo) length() int {
 	return len(e.codes)
 }
 
-func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit, gSysVars *GlobalSystemVariables, flag bool) *Session {
+func NewSession(proto MysqlProtocol, mp *mpool.MPool, pu *config.ParameterUnit, gSysVars *GlobalSystemVariables, flag bool) *Session {
 	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient)
 	ses := &Session{
 		protocol: proto,
