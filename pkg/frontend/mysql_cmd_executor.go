@@ -550,7 +550,7 @@ func handleShowTableStatus(ses *Session, stmt *tree.ShowTableStatus, proc *proce
 		mrs.AddRow(row)
 	}
 	if err := ses.GetMysqlProtocol().SendResultSetTextBatchRowSpeedup(mrs, mrs.GetRowCount()); err != nil {
-		logErrorf(ses.GetConciseProfile(), "handleShowColumns error %v", err)
+		logErrorf(ses.GetConciseProfile(), "handleShowTableStatus error %v", err)
 		return err
 	}
 	return nil
@@ -2231,7 +2231,8 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		// replace ? and @var with their values
 		resetParamRule := plan2.NewResetParamRefRule(executePlan.Args)
 		resetVarRule := plan2.NewResetVarRefRule(cwft.ses.GetTxnCompileCtx())
-		vp := plan2.NewVisitPlan(newPlan, []plan2.VisitPlanRule{resetParamRule, resetVarRule})
+		constantFoldRule := plan2.NewConstantFoldRule(cwft.ses.GetTxnCompileCtx())
+		vp := plan2.NewVisitPlan(newPlan, []plan2.VisitPlanRule{resetParamRule, resetVarRule, constantFoldRule})
 		err = vp.Visit()
 		if err != nil {
 			return nil, err
@@ -3307,7 +3308,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			ses.SetShowStmtType(ShowColumns)
 			ses.SetData(nil)
 		case *tree.ShowTableStatus:
-			ses.showStmtType = ShowTableStatus
+			ses.SetShowStmtType(ShowTableStatus)
 			ses.SetData(nil)
 		case *tree.Delete:
 			ses.GetTxnCompileCtx().SetQueryType(TXN_DELETE)
