@@ -119,8 +119,9 @@ func (txn *Transaction) getTableInfo(ctx context.Context,
 }
 
 func (txn *Transaction) getTableId(ctx context.Context, databaseId uint64,
+	dbName string,
 	name string) (uint64, error) {
-	accountId := getAccountId(ctx)
+	accountId := getAccountIdWithClusterTable(ctx, dbName, name)
 	row, err := txn.getRow(ctx, catalog.MO_CATALOG_ID, catalog.MO_TABLES_ID,
 		txn.dnStores[:1],
 		catalog.MoTablesTableDefs, []string{

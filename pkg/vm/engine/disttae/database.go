@@ -80,7 +80,7 @@ func (db *database) Relation(ctx context.Context, name string) (engine.Relation,
 func (db *database) Delete(ctx context.Context, name string) error {
 	key := genTableKey(ctx, name, db.databaseName, db.databaseId)
 	db.txn.tableMap.Delete(key)
-	id, err := db.txn.getTableId(ctx, db.databaseId, name)
+	id, err := db.txn.getTableId(ctx, db.databaseId, db.databaseName, name)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (db *database) Truncate(ctx context.Context, name string) error {
 		oldId = tbl.tableId
 		tbl.tableId = newId
 	} else {
-		if oldId, err = db.txn.getTableId(ctx, db.databaseId, name); err != nil {
+		if oldId, err = db.txn.getTableId(ctx, db.databaseId, db.databaseName, name); err != nil {
 			return err
 		}
 	}
