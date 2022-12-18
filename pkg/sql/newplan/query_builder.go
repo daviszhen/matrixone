@@ -1142,8 +1142,8 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 		groupTag := node.BindingTags[0]
 		aggregateTag := node.BindingTags[1]
 
-		for _, filter := range filters {
-			if !containsTag(filter, aggregateTag) {
+		for _, filter := range filters { //?
+			if !containsTag(filter, aggregateTag) { //push down the filter without agg function
 				canPushdown = append(canPushdown, replaceColRefs(filter, groupTag, node.GroupBy))
 			} else {
 				cantPushdown = append(cantPushdown, filter)
@@ -1175,6 +1175,7 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 			case *plan.Expr_F:
 				if exprImpl.F.Func.ObjName == "or" {
 					keys := checkDNF(filter)
+					//input :(c1=1 and c2=1) or (c1=2 and c3=2) ; return:(c1=1 or c1=2), (c2=1 or c2=2)
 					for _, key := range keys {
 						extraFilter := walkThroughDNF(filter, key)
 						if extraFilter != nil {

@@ -251,6 +251,16 @@ DNF means disjunctive normal form, for example (a and b) or (c and d) or (e and 
 if we have a DNF filter, for example (c1=1 and c2=1) or (c1=2 and c2=2)
 we can have extra filter: (c1=1 or c1=2) and (c2=1 or c2=2), which can be pushed down to optimize join
 
+(c1=1 or c1=2) and (c2=1 or c2=2)
+c1=1 and c2=1 *
+or
+c1=1 and c2=2
+or
+c1=2 and c2=1
+or
+c1=2 and c2=2 *
+
+
 checkDNF scan the expr and return all groups of cond
 for example (c1=1 and c2=1) or (c1=2 and c3=2), c1 is a group because it appears in all disjunctives
 and c2,c3 is not a group
@@ -258,16 +268,30 @@ and c2,c3 is not a group
 walkThroughDNF accept a keyword string, walk through the expr,
 and extract all the conds which contains the keyword
 */
+//(c1=1 and c2=1) or (c1=2 and c3=2)
 func checkDNF(expr *plan.Expr) []string {
 	var ret []string
 	switch exprImpl := expr.Expr.(type) {
 	case *plan.Expr_F:
 		if exprImpl.F.Func.ObjName == "or" {
+			//step1 : -> c1
+			//(c1=1 and c2=1) -> c1,c2
+			//(c1=2 and c3=2) -> c1,c3
 			left := checkDNF(exprImpl.F.Args[0])
 			right := checkDNF(exprImpl.F.Args[1])
 			return intersectSlice(left, right)
 		}
+
 		for _, arg := range exprImpl.F.Args {
+			//step2 :
+			//(c1=1 and c2=1)
+			//	step3: -> c1, c2
+			//	c1=1 -> c1
+			//	c2=1 -> c2
+			//(c1=2 and c3=2)
+			//	step3: -> c1, c3
+			//	c1=2 -> c1
+			//	c3=2 -> c3
 			ret = unionSlice(ret, checkDNF(arg))
 		}
 		return ret
@@ -280,6 +304,8 @@ func checkDNF(expr *plan.Expr) []string {
 	return ret
 }
 
+// (c1=1 and c2=1) or (c1=2 and c2=2)
+// kewords : c1
 func walkThroughDNF(expr *plan.Expr, keywords string) *plan.Expr {
 	var retExpr *plan.Expr
 	switch exprImpl := expr.Expr.(type) {
@@ -288,10 +314,13 @@ func walkThroughDNF(expr *plan.Expr, keywords string) *plan.Expr {
 			left := walkThroughDNF(exprImpl.F.Args[0], keywords)
 			right := walkThroughDNF(exprImpl.F.Args[1], keywords)
 			if left != nil && right != nil {
+				//return c1=1 or c1=2
 				retExpr, _ = bindFuncExprImplByPlanExpr("or", []*plan.Expr{left, right})
 				return retExpr
 			}
 		} else if exprImpl.F.Func.ObjName == "and" {
+			//step2: (c1=1 and c2=1) ->c1=1
+			//step2: (c1=2 and c2=2) ->c1=2
 			left := walkThroughDNF(exprImpl.F.Args[0], keywords)
 			right := walkThroughDNF(exprImpl.F.Args[1], keywords)
 			if left == nil {
@@ -303,6 +332,17 @@ func walkThroughDNF(expr *plan.Expr, keywords string) *plan.Expr {
 				return retExpr
 			}
 		} else {
+			//step3:
+			//c1=1 : -> c1=1
+			//	c1 -> c1
+			//	1 -> 1
+			//c2=1: nil
+			//	c2 -> nil
+			//c1=2: c1=2
+			//	c1 -> c1
+			//	2 -> 2
+			//c2=2: nil
+			//	c2->nil
 			for _, arg := range exprImpl.F.Args {
 				if walkThroughDNF(arg, keywords) == nil {
 					return nil
