@@ -555,15 +555,15 @@ type ColRefRemapping struct {
 	localToGlobal [][2]int32
 }
 
-func (m *ColRefRemapping) addColRef(colRef [2]int32) {
-	m.globalToLocal[colRef] = [2]int32{0, int32(len(m.localToGlobal))}
+func (m *ColRefRemapping) addColRef(colRef [2]int32) { //globalRef
+	m.globalToLocal[colRef] = [2]int32{0, int32(len(m.localToGlobal))} // global colRef -> [0, index of the localToGlobal] = global colRef
 	m.localToGlobal = append(m.localToGlobal, colRef)
 }
 
 func (qb *QueryBuilder) remapExpr(expr *plan.Expr, colMap map[[2]int32][2]int32) error {
 	switch ne := expr.Expr.(type) {
 	case *plan.Expr_Col:
-		mapId := [2]int32{ne.Col.RelPos, ne.Col.ColPos}
+		mapId := [2]int32{ne.Col.RelPos, ne.Col.ColPos} //global colRef
 		if ids, ok := colMap[mapId]; ok {
 			ne.Col.RelPos = ids[0]
 			ne.Col.ColPos = ids[1]
@@ -633,7 +633,7 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 				continue
 			}
 
-			internalRemapping.addColRef(globalRef)
+			internalRemapping.addColRef(globalRef) //need globalRef
 			newTableDef.Cols = append(newTableDef.Cols, col)
 		}
 
@@ -644,7 +644,7 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 
 		node.TableDef = newTableDef
 
-		for _, expr := range node.FilterList {
+		for _, expr := range node.FilterList { //colRef in filter do not be transmitted up.
 			decreaseRefCnt(expr, colRefCnt)
 			err := qb.remapExpr(expr, internalRemapping.globalToLocal)
 			if err != nil {
@@ -653,17 +653,17 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 		}
 
 		for i, col := range node.TableDef.Cols {
-			if colRefCnt[internalRemapping.localToGlobal[i]] == 0 {
+			if colRefCnt[internalRemapping.localToGlobal[i]] == 0 { //colRef of filters were removed.
 				continue
 			}
 
-			remapping.addColRef(internalRemapping.localToGlobal[i])
+			remapping.addColRef(internalRemapping.localToGlobal[i]) //reserve needed colRef
 
 			node.ProjectList = append(node.ProjectList, &plan.Expr{
 				Typ: col.Typ,
 				Expr: &plan.Expr_Col{
 					Col: &plan.ColRef{
-						RelPos: 0,
+						RelPos: 0, //0
 						ColPos: int32(i),
 						Name:   qb.nameByColRef[internalRemapping.localToGlobal[i]],
 					},
@@ -730,7 +730,7 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 		groupTag := node.BindingTags[0]
 		aggregateTag := node.BindingTags[1]
 
-		for idx, expr := range node.GroupBy {
+		for idx, expr := range node.GroupBy { //colRef in groupby do not be transmitted up
 			decreaseRefCnt(expr, colRefCnt)
 			err := qb.remapExpr(expr, childRemapping.globalToLocal)
 			if err != nil {
@@ -756,7 +756,7 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 			})
 		}
 
-		for idx, expr := range node.AggList {
+		for idx, expr := range node.AggList { //colRef in groupby do not be transmitted up
 			decreaseRefCnt(expr, colRefCnt)
 			err := qb.remapExpr(expr, childRemapping.globalToLocal)
 			if err != nil {
@@ -925,7 +925,7 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 
 	case plan.Node_PROJECT, plan.Node_MATERIAL:
 		projectTag := node.BindingTags[0]
-		var neededProj []int32
+		var neededProj []int32 //needed project expr
 		for i, expr := range node.ProjectList {
 			globalRef := [2]int32{projectTag, int32(i)}
 			if colRefCnt[globalRef] == 0 {
@@ -982,7 +982,7 @@ func (qb *QueryBuilder) createQuery() (*plan.Query, error) {
 		rootId = qb.pushdownSemiAntiJoins(rootId)
 		qb.qry.Steps[i] = rootId
 
-		colRefCnt := make(map[[2]int32]int)
+		colRefCnt := make(map[[2]int32]int) //relPos,colPos -> counter
 		rootNode := qb.qry.Nodes[rootId]
 		resultTag := rootNode.BindingTags[0]
 		for i := range rootNode.ProjectList {
