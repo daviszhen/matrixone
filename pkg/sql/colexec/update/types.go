@@ -50,4 +50,5 @@ type UpdateCtx struct {
 	SecondaryIndexTables []engine.Relation
 	UniqueIndexDef       *plan.UniqueIndexDef
 	SecondaryIndexDef    *plan.SecondaryIndexDef
+	ClusterTable         *plan.ClusterTable
 }

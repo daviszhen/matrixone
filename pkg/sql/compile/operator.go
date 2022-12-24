@@ -347,11 +347,15 @@ func constructDeletion(n *plan.Node, eg engine.Engine, proc *process.Process) (*
 	count := len(n.DeleteTablesCtx)
 	ds := make([]*deletion.DeleteCtx, count)
 	for i := 0; i < count; i++ {
-		dbSource, err := eg.Database(proc.Ctx, n.DeleteTablesCtx[i].DbName, proc.TxnOperator)
+		ctx := proc.Ctx
+		if n.DeleteTablesCtx[i].GetClusterTable().GetIsClusterTable() {
+			ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+		}
+		dbSource, err := eg.Database(ctx, n.DeleteTablesCtx[i].DbName, proc.TxnOperator)
 		if err != nil {
 			return nil, err
 		}
-		relation, err := dbSource.Relation(proc.Ctx, n.DeleteTablesCtx[i].TblName)
+		relation, err := dbSource.Relation(ctx, n.DeleteTablesCtx[i].TblName)
 		if err != nil {
 			return nil, err
 		}
@@ -363,7 +367,7 @@ func constructDeletion(n *plan.Node, eg engine.Engine, proc *process.Process) (*
 		if uDef != nil {
 			for i := range uDef.TableNames {
 				if uDef.TableExists[i] {
-					indexTable, err := dbSource.Relation(proc.Ctx, uDef.TableNames[i])
+					indexTable, err := dbSource.Relation(ctx, uDef.TableNames[i])
 					if err != nil {
 						return nil, err
 					}
@@ -374,7 +378,7 @@ func constructDeletion(n *plan.Node, eg engine.Engine, proc *process.Process) (*
 		if sDef != nil {
 			for i := range sDef.TableNames {
 				if sDef.TableExists[i] {
-					indexTable, err := dbSource.Relation(proc.Ctx, sDef.TableNames[i])
+					indexTable, err := dbSource.Relation(ctx, sDef.TableNames[i])
 					if err != nil {
 						return nil, err
 					}
@@ -395,6 +399,7 @@ func constructDeletion(n *plan.Node, eg engine.Engine, proc *process.Process) (*
 			UniqueIndexTables:    uniqueIndexTables,
 			SecondaryIndexTables: secondaryIndexTables,
 			IndexAttrs:           n.DeleteTablesCtx[i].IndexAttrs,
+			ClusterTable:         n.DeleteTablesCtx[i].GetClusterTable(),
 		}
 	}
 
@@ -465,17 +470,21 @@ func constructUpdate(n *plan.Node, eg engine.Engine, proc *process.Process) (*up
 	dbName := make([]string, len(n.UpdateCtxs))
 	tblName := make([]string, len(n.UpdateCtxs))
 	for i, updateCtx := range n.UpdateCtxs {
-		dbSource, err := eg.Database(proc.Ctx, updateCtx.DbName, proc.TxnOperator)
+		ctx := proc.Ctx
+		if updateCtx.GetClusterTable().GetIsClusterTable() {
+			ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+		}
+		dbSource, err := eg.Database(ctx, updateCtx.DbName, proc.TxnOperator)
 		if err != nil {
 			return nil, err
 		}
 		db[i] = dbSource
-		relation, err := dbSource.Relation(proc.Ctx, updateCtx.TblName)
+		relation, err := dbSource.Relation(ctx, updateCtx.TblName)
 		if err != nil {
 			return nil, err
 		}
 
-		tableID[i] = relation.GetTableID(proc.Ctx)
+		tableID[i] = relation.GetTableID(ctx)
 		dbName[i] = updateCtx.DbName
 		tblName[i] = updateCtx.TblName
 		colNames := make([]string, 0, len(updateCtx.UpdateCols))
@@ -495,7 +504,7 @@ func constructUpdate(n *plan.Node, eg engine.Engine, proc *process.Process) (*up
 		if uDef != nil {
 			for i := range uDef.TableNames {
 				if uDef.TableExists[i] {
-					indexTable, err := dbSource.Relation(proc.Ctx, uDef.TableNames[i])
+					indexTable, err := dbSource.Relation(ctx, uDef.TableNames[i])
 					if err != nil {
 						return nil, err
 					}
@@ -506,7 +515,7 @@ func constructUpdate(n *plan.Node, eg engine.Engine, proc *process.Process) (*up
 		if sDef != nil {
 			for i := range sDef.TableNames {
 				if sDef.TableExists[i] {
-					indexTable, err := dbSource.Relation(proc.Ctx, sDef.TableNames[i])
+					indexTable, err := dbSource.Relation(ctx, sDef.TableNames[i])
 					if err != nil {
 						return nil, err
 					}
@@ -530,6 +539,7 @@ func constructUpdate(n *plan.Node, eg engine.Engine, proc *process.Process) (*up
 			IndexAttrs:           updateCtx.IndexAttrs,
 			UniqueIndexTables:    uniqueIndexTables,
 			SecondaryIndexTables: secondaryIndexTables,
+			ClusterTable:         updateCtx.GetClusterTable(),
 		}
 	}
 	return &update.Argument{

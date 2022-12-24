@@ -16,6 +16,7 @@ package compile
 
 import (
 	"context"
+	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/sql/util"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -330,31 +331,35 @@ func makeNewCreateConstraint(oldCt *engine.ConstraintDef, c engine.Constraint) (
 // Truncation operations cannot be performed if the session holds an active table lock.
 func (s *Scope) TruncateTable(c *Compile) error {
 	tqry := s.Plan.GetDdl().GetTruncateTable()
+	ctx := c.ctx
+	if tqry.GetClusterTable().GetIsClusterTable() {
+		ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+	}
 	dbName := tqry.GetDatabase()
-	dbSource, err := c.e.Database(c.ctx, dbName, c.proc.TxnOperator)
+	dbSource, err := c.e.Database(ctx, dbName, c.proc.TxnOperator)
 	if err != nil {
 		return err
 	}
 	tblName := tqry.GetTable()
 	var rel engine.Relation
-	if rel, err = dbSource.Relation(c.ctx, tblName); err != nil {
+	if rel, err = dbSource.Relation(ctx, tblName); err != nil {
 		return err
 	}
-	id := rel.GetTableID(c.ctx)
-	err = dbSource.Truncate(c.ctx, tblName)
+	id := rel.GetTableID(ctx)
+	err = dbSource.Truncate(ctx, tblName)
 	if err != nil {
 		return err
 	}
 
 	// Truncate Index Tables if needed
 	for _, name := range tqry.IndexTableNames {
-		err := dbSource.Truncate(c.ctx, name)
+		err := dbSource.Truncate(ctx, name)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = colexec.ResetAutoInsrCol(c.e, c.ctx, tblName, dbSource, c.proc, id, dbName)
+	err = colexec.ResetAutoInsrCol(c.e, ctx, tblName, dbSource, c.proc, id, dbName)
 	if err != nil {
 		return err
 	}
@@ -364,8 +369,13 @@ func (s *Scope) TruncateTable(c *Compile) error {
 func (s *Scope) DropTable(c *Compile) error {
 	qry := s.Plan.GetDdl().GetDropTable()
 
+	ctx := c.ctx
+	if qry.GetClusterTable().GetIsClusterTable() {
+		ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+	}
+
 	dbName := qry.GetDatabase()
-	dbSource, err := c.e.Database(c.ctx, dbName, c.proc.TxnOperator)
+	dbSource, err := c.e.Database(ctx, dbName, c.proc.TxnOperator)
 	if err != nil {
 		if qry.GetIfExists() {
 			return nil
@@ -374,21 +384,21 @@ func (s *Scope) DropTable(c *Compile) error {
 	}
 	tblName := qry.GetTable()
 	var rel engine.Relation
-	if rel, err = dbSource.Relation(c.ctx, tblName); err != nil {
+	if rel, err = dbSource.Relation(ctx, tblName); err != nil {
 		if qry.GetIfExists() {
 			return nil
 		}
 		return err
 	}
-	if err := dbSource.Delete(c.ctx, tblName); err != nil {
+	if err := dbSource.Delete(ctx, tblName); err != nil {
 		return err
 	}
 	for _, name := range qry.IndexTableNames {
-		if err := dbSource.Delete(c.ctx, name); err != nil {
+		if err := dbSource.Delete(ctx, name); err != nil {
 			return err
 		}
 	}
-	return colexec.DeleteAutoIncrCol(c.e, c.ctx, rel, c.proc, dbName, rel.GetTableID(c.ctx))
+	return colexec.DeleteAutoIncrCol(c.e, ctx, rel, c.proc, dbName, rel.GetTableID(ctx))
 }
 
 func planDefsToExeDefs(tableDef *plan.TableDef) ([]engine.TableDef, error) {

@@ -16,7 +16,10 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/catalog"
+	"github.com/matrixorigin/matrixone/pkg/defines"
 	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -66,6 +69,10 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 
 	// do null check
 	for i, updateCtx := range p.UpdateCtxs {
+		ctx := proc.Ctx
+		if updateCtx.ClusterTable.GetIsClusterTable() {
+			ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+		}
 		tmpBat := &batch.Batch{}
 		idx := updateCtx.HideKeyIdx
 		tmpBat.Vecs = bat.Vecs[int(idx) : int(idx)+len(updateCtx.OrderAttrs)+1]
@@ -84,7 +91,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 			if (p.TableDefVec[i].Cols[j].Primary && !p.TableDefVec[i].Cols[j].Typ.AutoIncr) || (p.TableDefVec[i].Cols[j].Default != nil && !p.TableDefVec[i].Cols[j].Default.NullAbility) {
 				if nulls.Any(tmpBat.Vecs[j].Nsp) {
 					tmpBat.Clean(proc.Mp())
-					return false, moerr.NewConstraintViolation(proc.Ctx, fmt.Sprintf("Column '%s' cannot be null", tmpBat.Attrs[j]))
+					return false, moerr.NewConstraintViolation(ctx, fmt.Sprintf("Column '%s' cannot be null", tmpBat.Attrs[j]))
 				}
 			}
 		}
@@ -96,7 +103,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 					if tmpBat.Attrs[i] == name {
 						if nulls.Any(tmpBat.Vecs[i].Nsp) {
 							tmpBat.Clean(proc.Mp())
-							return false, moerr.NewConstraintViolation(proc.Ctx, fmt.Sprintf("Column '%s' cannot be null", updateCtx.OrderAttrs[i]))
+							return false, moerr.NewConstraintViolation(ctx, fmt.Sprintf("Column '%s' cannot be null", updateCtx.OrderAttrs[i]))
 						}
 					}
 				}
@@ -108,6 +115,10 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 
 	// write data
 	for i, updateCtx := range p.UpdateCtxs {
+		ctx := proc.Ctx
+		if updateCtx.ClusterTable.GetIsClusterTable() {
+			ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+		}
 		tmpBat := &batch.Batch{}
 		idx := updateCtx.HideKeyIdx
 		tmpBat.Vecs = bat.Vecs[int(idx) : int(idx)+len(updateCtx.OrderAttrs)+1]
@@ -141,7 +152,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 					attrs = append(attrs, updateCtx.IndexAttrs...)
 					oldBatch, rowNum := util.BuildUniqueKeyBatch(bat.Vecs[int(idx)+1:], attrs, updateCtx.UniqueIndexDef.Fields[num].Cols, proc)
 					if rowNum != 0 {
-						err := rel.Delete(proc.Ctx, oldBatch, updateCtx.UniqueIndexDef.Fields[num].Cols[0].Name)
+						err := rel.Delete(ctx, oldBatch, updateCtx.UniqueIndexDef.Fields[num].Cols[0].Name)
 						if err != nil {
 							delBat.Clean(proc.Mp())
 							tmpBat.Clean(proc.Mp())
@@ -156,7 +167,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 		}
 
 		// delete old rows
-		err := updateCtx.TableSource.Delete(proc.Ctx, delBat, updateCtx.HideKey)
+		err := updateCtx.TableSource.Delete(ctx, delBat, updateCtx.HideKey)
 		if err != nil {
 			delBat.Clean(proc.Mp())
 			tmpBat.Clean(proc.Mp())
@@ -164,7 +175,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 		}
 		delBat.Clean(proc.Mp())
 
-		if err := colexec.UpdateInsertBatch(p.Engine, proc.Ctx, proc, p.TableDefVec[i].Cols, tmpBat, p.TableID[i], p.DBName[i], p.TblName[i]); err != nil {
+		if err := colexec.UpdateInsertBatch(p.Engine, ctx, proc, p.TableDefVec[i].Cols, tmpBat, p.TableID[i], p.DBName[i], p.TblName[i]); err != nil {
 			tmpBat.Clean(proc.Mp())
 			return false, err
 		}
@@ -176,7 +187,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 					rel := updateCtx.UniqueIndexTables[relIdx]
 					b, rowNum := util.BuildUniqueKeyBatch(tmpBat.Vecs, tmpBat.Attrs, updateCtx.UniqueIndexDef.Fields[num].Cols, proc)
 					if rowNum != 0 {
-						err = rel.Write(proc.Ctx, b)
+						err = rel.Write(ctx, b)
 						if err != nil {
 							b.Clean(proc.Mp())
 							tmpBat.Clean(proc.Mp())
@@ -198,7 +209,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 		}
 		tmpBat.SetZs(tmpBat.GetVector(0).Length(), proc.Mp())
 
-		err = updateCtx.TableSource.Write(proc.Ctx, tmpBat)
+		err = updateCtx.TableSource.Write(ctx, tmpBat)
 		if err != nil {
 			tmpBat.Clean(proc.Mp())
 			return false, err

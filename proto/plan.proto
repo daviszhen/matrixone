@@ -499,6 +499,7 @@ message UpdateCtx {
 	repeated string order_attrs = 9;
 	ColDef composite_pkey = 10;
 	repeated string index_attrs = 11;
+	ClusterTable cluster_table = 12;
 }
 
 message AnalyzeInfo {
@@ -637,6 +638,7 @@ message DeleteTableCtx {
 	UniqueIndexDef unique_index_def = 6;
 	SecondaryIndexDef secondary_index_def = 7;
 	repeated string index_attrs = 8;
+	ClusterTable cluster_table = 9;
 }
 
 message Query {

@@ -44,30 +44,34 @@ func (s *Scope) Delete(c *Compile) (uint64, error) {
 
 	var tableID string
 	if arg.DeleteCtxs[0].CanTruncate {
-		dbSource, err := c.e.Database(c.ctx, arg.DeleteCtxs[0].DbName, c.proc.TxnOperator)
+		ctx := c.ctx
+		if arg.DeleteCtxs[0].ClusterTable.GetIsClusterTable() {
+			ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+		}
+		dbSource, err := c.e.Database(ctx, arg.DeleteCtxs[0].DbName, c.proc.TxnOperator)
 		if err != nil {
 			return 0, err
 		}
 
 		var rel engine.Relation
-		if rel, err = dbSource.Relation(c.ctx, arg.DeleteCtxs[0].TableName); err != nil {
+		if rel, err = dbSource.Relation(ctx, arg.DeleteCtxs[0].TableName); err != nil {
 			return 0, err
 		}
-		_, err = rel.Ranges(c.ctx, nil)
+		_, err = rel.Ranges(ctx, nil)
 		if err != nil {
 			return 0, err
 		}
-		affectRows, err := rel.Rows(s.Proc.Ctx)
+		affectRows, err := rel.Rows(ctx)
 		if err != nil {
 			return 0, err
 		}
 
-		tableID = rel.GetTableID(c.ctx)
+		tableID = rel.GetTableID(ctx)
 
 		if arg.DeleteCtxs[0].UniqueIndexDef != nil {
 			for i := range arg.DeleteCtxs[0].UniqueIndexDef.TableNames {
 				if arg.DeleteCtxs[0].UniqueIndexDef.TableExists[i] {
-					err = dbSource.Truncate(c.ctx, arg.DeleteCtxs[0].UniqueIndexDef.TableNames[i])
+					err = dbSource.Truncate(ctx, arg.DeleteCtxs[0].UniqueIndexDef.TableNames[i])
 					if err != nil {
 						return 0, err
 					}
@@ -75,12 +79,12 @@ func (s *Scope) Delete(c *Compile) (uint64, error) {
 			}
 		}
 
-		err = dbSource.Truncate(c.ctx, arg.DeleteCtxs[0].TableName)
+		err = dbSource.Truncate(ctx, arg.DeleteCtxs[0].TableName)
 		if err != nil {
 			return 0, err
 		}
 
-		err = colexec.MoveAutoIncrCol(c.e, c.ctx, arg.DeleteCtxs[0].TableName, dbSource, c.proc, tableID, arg.DeleteCtxs[0].DbName)
+		err = colexec.MoveAutoIncrCol(c.e, ctx, arg.DeleteCtxs[0].TableName, dbSource, c.proc, tableID, arg.DeleteCtxs[0].DbName)
 		if err != nil {
 			return 0, err
 		}

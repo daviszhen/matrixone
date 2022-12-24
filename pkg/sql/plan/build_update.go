@@ -324,15 +324,16 @@ func buildCtxAndProjection(updateColsArray [][]updateCol, updateExprsArray []tre
 		offset += int32(len(orderAttrs)) + 1
 
 		ct := &plan.UpdateCtx{
-			DbName:     updateCols[0].dbName,
-			TblName:    updateCols[0].tblName,
-			PriKey:     priKey,
-			PriKeyIdx:  priKeyIdx,
-			HideKey:    hideKey,
-			HideKeyIdx: hideKeyIdx,
-			OtherAttrs: otherAttrs,
-			OrderAttrs: orderAttrs,
-			IndexAttrs: indexAttrs,
+			DbName:       updateCols[0].dbName,
+			TblName:      updateCols[0].tblName,
+			PriKey:       priKey,
+			PriKeyIdx:    priKeyIdx,
+			HideKey:      hideKey,
+			HideKeyIdx:   hideKeyIdx,
+			OtherAttrs:   otherAttrs,
+			OrderAttrs:   orderAttrs,
+			IndexAttrs:   indexAttrs,
+			ClusterTable: &plan.ClusterTable{IsClusterTable: util.TableIsClusterTable(tblRefs[k].TableType)},
 		}
 		for _, u := range updateCols {
 			ct.UpdateCols = append(ct.UpdateCols, u.colDef)

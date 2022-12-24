@@ -16,6 +16,9 @@ package deletion
 
 import (
 	"bytes"
+	"context"
+	"github.com/matrixorigin/matrixone/pkg/catalog"
+	"github.com/matrixorigin/matrixone/pkg/defines"
 	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/util"
@@ -56,7 +59,10 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 
 	for i := range p.DeleteCtxs {
 		filterColIndex := p.DeleteCtxs[i].ColIndex
-
+		ctx := proc.Ctx
+		if p.DeleteCtxs[i].ClusterTable.GetIsClusterTable() {
+			ctx = context.WithValue(ctx, defines.TenantIDKey{}, catalog.System_Account)
+		}
 		var cnt uint64
 		tmpBat := &batch.Batch{}
 		tmpBat.Vecs = []*vector.Vector{bat.Vecs[filterColIndex]}
@@ -65,7 +71,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 		length := tmpBat.GetVector(0).Length()
 		if length > 0 {
 			tmpBat.SetZs(length, proc.Mp())
-			err := p.DeleteCtxs[i].TableSource.Delete(proc.Ctx, tmpBat, p.DeleteCtxs[i].UseDeleteKey)
+			err := p.DeleteCtxs[i].TableSource.Delete(ctx, tmpBat, p.DeleteCtxs[i].UseDeleteKey)
 			if err != nil {
 				tmpBat.Clean(proc.Mp())
 				return false, err
@@ -81,7 +87,7 @@ func Call(_ int, proc *process.Process, arg any) (bool, error) {
 					rel := p.DeleteCtxs[i].UniqueIndexTables[idx]
 					oldBatch, rowNum := util.BuildUniqueKeyBatch(bat.Vecs[filterColIndex+1:filterColIndex+1+int32(len(p.DeleteCtxs[i].IndexAttrs))], p.DeleteCtxs[i].IndexAttrs, p.DeleteCtxs[i].UniqueIndexDef.Fields[num].Cols, proc)
 					if rowNum != 0 {
-						err := rel.Delete(proc.Ctx, oldBatch, p.DeleteCtxs[i].UniqueIndexDef.Fields[num].Cols[0].Name)
+						err := rel.Delete(ctx, oldBatch, p.DeleteCtxs[i].UniqueIndexDef.Fields[num].Cols[0].Name)
 						if err != nil {
 							return false, err
 						}

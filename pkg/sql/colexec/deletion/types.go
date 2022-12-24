@@ -38,6 +38,7 @@ type DeleteCtx struct {
 	SecondaryIndexTables []engine.Relation
 	SecondaryIndexDef    *plan.SecondaryIndexDef
 	IndexAttrs           []string
+	ClusterTable         *plan.ClusterTable
 }
 
 func (arg *Argument) Free(proc *process.Process, pipelineFailed bool) {

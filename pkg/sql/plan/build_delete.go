@@ -114,6 +114,7 @@ func buildDeleteSingleTable(stmt *tree.Delete, ctx CompilerContext) (*Plan, erro
 		UniqueIndexDef:    uDef,
 		SecondaryIndexDef: sDef,
 		IndexAttrs:        attrs,
+		ClusterTable:      &plan.ClusterTable{IsClusterTable: util.TableIsClusterTable(tableDef.TableType)},
 	}
 	node := &Node{
 		NodeType:        plan.Node_DELETE,
@@ -138,6 +139,7 @@ func buildDelete2Truncate(objRef *ObjectRef, tblDef *TableDef) (*Plan, error) {
 		CanTruncate:       true,
 		UniqueIndexDef:    uDef,
 		SecondaryIndexDef: sDef,
+		ClusterTable:      &plan.ClusterTable{IsClusterTable: util.TableIsClusterTable(tblDef.TableType)},
 	}
 	node := &Node{
 		NodeType:        plan.Node_DELETE,
@@ -241,6 +243,7 @@ func buildDeleteMultipleTable(stmt *tree.Delete, ctx CompilerContext) (*Plan, er
 			CanTruncate:  false,
 			ColIndex:     colIndex[i],
 			IndexAttrs:   attrsArr[i],
+			ClusterTable: &plan.ClusterTable{IsClusterTable: util.TableIsClusterTable(tblDefs[i].TableType)},
 		}
 	}
 	node := &Node{
