@@ -427,3 +427,7 @@ func BuildQueryResultMetaPath(accountName, statementId string) string {
 func BuildQueryResultMetaName(accountName, statementId string) string {
 	return fmt.Sprintf(QueryResultMetaName, accountName, statementId)
 }
+
+func BuildQueryResultName(accountName, statementId string) string {
+	return fmt.Sprintf(QueryResultName, accountName, statementId)
+}

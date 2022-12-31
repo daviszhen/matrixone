@@ -589,6 +589,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	}
 
 	if openSaveQueryResult(ses) {
+		ses.lastQueryId = types.Uuid(ses.tStmt.StatementID).ToString()
 		if err := saveQueryResult(ses, bat); err != nil {
 			return err
 		}
@@ -3167,6 +3168,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		proc.SessionInfo.RoleId = moAdminRoleID
 		proc.SessionInfo.UserId = rootID
 	}
+	proc.SessionInfo.QueryId = ses.lastQueryId
 	ses.txnCompileCtx.SetProcess(proc)
 	cws, err := GetComputationWrapper(ses.GetDatabaseName(),
 		sql,
@@ -3531,6 +3533,9 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			if err != nil {
 				logErrorf(ses.GetConciseProfile(), "GetColumns from Computation handler failed. error: %v", err)
 				goto handleFailed
+			}
+			if c, ok := cw.(*TxnComputationWrapper); ok {
+				ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
 			}
 			/*
 				Step 1 : send column count and column definition.

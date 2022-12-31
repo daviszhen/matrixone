@@ -15,7 +15,6 @@
 package frontend
 
 import (
-	"fmt"
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
@@ -27,14 +26,20 @@ import (
 )
 
 func openSaveQueryResult(ses *Session) bool {
+	// TODO: Graceful judgment
+	sql := strings.ToLower(ses.sql)
+	if strings.Contains(sql, "meta_scan") || strings.Contains(sql, "result_scan") || ses.tStmt.SqlSourceType == "internal_sql" {
+		return false
+	}
 	if strings.ToLower(ses.GetParameterUnit().SV.SaveQueryResult) == "on" {
 		return true
 	}
+	// TODO: Increase priority
 	val, err := ses.GetGlobalVar("save_query_result")
 	if err != nil {
 		return false
 	}
-	if v, _ := val.(uint64); v > 0 {
+	if v, _ := val.(int8); v > 0 {
 		return true
 	}
 	return false
@@ -57,9 +62,9 @@ func saveQueryResult(ses *Session, bat *batch.Batch) error {
 		return err
 	}
 	// write query result meta
-	var cols string
-	for _, attr := range bat.Attrs {
-		cols += fmt.Sprintf("`%s`", attr)
+	b, err := ses.rs.Marshal()
+	if err != nil {
+		return err
 	}
 	m := &catalog.Meta{
 		QueryId:    ses.tStmt.StatementID,
@@ -69,7 +74,7 @@ func saveQueryResult(ses *Session, bat *batch.Batch) error {
 		ResultPath: path,
 		CreateTime: types.CurrentTimestamp(),
 		ResultSize: 100, // TODO: implement
-		Columns:    cols,
+		Columns:    string(b),
 	}
 	metaBat, err := buildQueryResultMetaBatch(m, ses.mp)
 	if err != nil {
