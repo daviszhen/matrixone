@@ -954,6 +954,19 @@ func bindFuncExprImplByPlanExpr(ctx context.Context, name string, args []*Expr) 
 				return nil, err
 			}
 		}
+	case "ceil", "floor":
+		if len(args) == 0 {
+			return nil, moerr.NewInvalidArg(ctx, name+" function have invalid input args length", len(args))
+		}
+		tp := types.T(args[0].Typ.Id)
+		switch {
+		case types.IsString(tp):
+			targetTp := types.T_float64.ToType()
+			args[0], err = appendCastBeforeExpr(ctx, args[0], makePlan2Type(&targetTp), false)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// get args(exprs) & types

@@ -180,3 +180,5 @@ select floor(123.342, null);
 select floor(null, 1);
 
 select floor(null, null);
+
+select floor(format(9.444,4));

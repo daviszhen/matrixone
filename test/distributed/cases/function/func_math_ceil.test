@@ -104,3 +104,5 @@ select ceil(-123.342124124214, -100);
 select ceil(123.342, null);
 select ceil(null, 1);
 select ceil(null, null);
+
+select ceil(format(2.1,3));
