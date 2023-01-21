@@ -1,8 +1,13 @@
 package newplan
 
 import (
+	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"github.com/matrixorigin/matrixone/pkg/container/nulls"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
+	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec"
+	"github.com/matrixorigin/matrixone/pkg/sql/plan/function"
 	"math"
 )
 
@@ -383,4 +388,223 @@ func splitPlanConjunction(expr *plan.Expr) []*plan.Expr {
 	}
 
 	return exprs
+}
+
+func getJoinSide(expr *plan.Expr, leftTags, rightTags map[int32]*Binding) (side int8) {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_F:
+		for _, arg := range exprImpl.F.Args {
+			side |= getJoinSide(arg, leftTags, rightTags)
+		}
+
+	case *plan.Expr_Col:
+		if _, ok := leftTags[exprImpl.Col.RelPos]; ok {
+			side = JoinSideLeft
+		} else if _, ok := rightTags[exprImpl.Col.RelPos]; ok {
+			side = JoinSideRight
+		}
+
+	case *plan.Expr_Corr:
+		side = JoinSideCorrelated
+	}
+
+	return
+}
+
+func replaceColRefWithNull(expr *plan.Expr) *plan.Expr {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_Col:
+		expr = &plan.Expr{
+			Typ: expr.Typ,
+			Expr: &plan.Expr_C{
+				C: &plan.Const{
+					Isnull: true,
+				},
+			},
+		}
+
+	case *plan.Expr_F:
+		for i, arg := range exprImpl.F.Args {
+			exprImpl.F.Args[i] = replaceColRefWithNull(arg)
+		}
+	}
+
+	return expr
+}
+
+func rejectsNull(filter *plan.Expr) bool {
+	filter = replaceColRefWithNull(DeepCopyExpr(filter))
+
+	bat := batch.NewWithSize(0)
+	bat.Zs = []int64{1}
+	filter, err := ConstantFold(bat, filter)
+	if err != nil {
+		return false
+	}
+
+	if f, ok := filter.Expr.(*plan.Expr_C); ok {
+		if f.C.Isnull {
+			return true
+		}
+
+		if fbool, ok := f.C.Value.(*plan.Const_Bval); ok {
+			return !fbool.Bval
+		}
+	}
+
+	return false
+}
+
+func ConstantFold(bat *batch.Batch, e *plan.Expr) (*plan.Expr, error) {
+	var err error
+
+	ef, ok := e.Expr.(*plan.Expr_F)
+	if !ok {
+		return e, nil
+	}
+	overloadID := ef.F.Func.GetObj()
+	f, err := function.GetFunctionByID(overloadID)
+	if err != nil {
+		return nil, err
+	}
+	if f.Volatile { // function cannot be fold
+		return e, nil
+	}
+	for i := range ef.F.Args {
+		ef.F.Args[i], err = ConstantFold(bat, ef.F.Args[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !isConstant(e) {
+		return e, nil
+	}
+	// XXX MPOOL
+	// This is a bug -- colexec EvalExpr need to eval, therefore, could potentially need
+	// a mpool.  proc is passed in a nil, where do I get a mpool?   Session?
+	vec, err := colexec.EvalExpr(bat, nil, e)
+	if err != nil {
+		return nil, err
+	}
+	c := getConstantValue(vec)
+	if c == nil {
+		return e, nil
+	}
+	ec := &plan.Expr_C{
+		C: c,
+	}
+	e.Expr = ec
+	return e, nil
+}
+
+func getConstantValue(vec *vector.Vector) *plan.Const {
+	if nulls.Any(vec.Nsp) {
+		return &plan.Const{Isnull: true}
+	}
+	switch vec.Typ.Oid {
+	case types.T_bool:
+		return &plan.Const{
+			Value: &plan.Const_Bval{
+				Bval: vec.Col.([]bool)[0],
+			},
+		}
+	case types.T_int8:
+		return &plan.Const{
+			Value: &plan.Const_I8Val{
+				I8Val: int32(vec.Col.([]int8)[0]),
+			},
+		}
+	case types.T_int16:
+		return &plan.Const{
+			Value: &plan.Const_I16Val{
+				I16Val: int32(vec.Col.([]int16)[0]),
+			},
+		}
+	case types.T_int32:
+		return &plan.Const{
+			Value: &plan.Const_I32Val{
+				I32Val: vec.Col.([]int32)[0],
+			},
+		}
+	case types.T_int64:
+		return &plan.Const{
+			Value: &plan.Const_I64Val{
+				I64Val: vec.Col.([]int64)[0],
+			},
+		}
+	case types.T_uint8:
+		return &plan.Const{
+			Value: &plan.Const_U8Val{
+				U8Val: uint32(vec.Col.([]uint8)[0]),
+			},
+		}
+	case types.T_uint16:
+		return &plan.Const{
+			Value: &plan.Const_U16Val{
+				U16Val: uint32(vec.Col.([]uint16)[0]),
+			},
+		}
+	case types.T_uint32:
+		return &plan.Const{
+			Value: &plan.Const_U32Val{
+				U32Val: vec.Col.([]uint32)[0],
+			},
+		}
+	case types.T_uint64:
+		return &plan.Const{
+			Value: &plan.Const_U64Val{
+				U64Val: vec.Col.([]uint64)[0],
+			},
+		}
+	case types.T_float64:
+		return &plan.Const{
+			Value: &plan.Const_Dval{
+				Dval: vec.Col.([]float64)[0],
+			},
+		}
+	case types.T_varchar:
+		return &plan.Const{
+			Value: &plan.Const_Sval{
+				Sval: vec.GetString(0),
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func isConstant(e *plan.Expr) bool {
+	switch ef := e.Expr.(type) {
+	case *plan.Expr_C, *plan.Expr_T:
+		return true
+	case *plan.Expr_F:
+		overloadID := ef.F.Func.GetObj()
+		f, err := function.GetFunctionByID(overloadID)
+		if err != nil {
+			return false
+		}
+		if f.Volatile { // function cannot be fold
+			return false
+		}
+		for i := range ef.F.Args {
+			if !isConstant(ef.F.Args[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func getHyperEdgeFromExpr(expr *plan.Expr, leafByTag map[int32]int32, hyperEdge map[int32]any) {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_Col:
+		hyperEdge[leafByTag[exprImpl.Col.RelPos]] = nil
+
+	case *plan.Expr_F:
+		for _, arg := range exprImpl.F.Args {
+			getHyperEdgeFromExpr(arg, leafByTag, hyperEdge)
+		}
+	}
 }

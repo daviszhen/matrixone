@@ -712,7 +712,119 @@ func (qb *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int32]int
 		plan.Node_MINUS_ALL:
 		return nil, moerr.NewInternalError("not implement qb 2")
 	case plan.Node_JOIN:
-		return nil, moerr.NewInternalError("not implement qb 3")
+		for _, expr := range node.OnList {
+			increaseRefCnt(expr, colRefCnt)
+		}
+
+		internalMap := make(map[[2]int32][2]int32)
+
+		leftID := node.Children[0]
+		leftRemapping, err := qb.remapAllColRefs(leftID, colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+
+		for k, v := range leftRemapping.globalToLocal {
+			internalMap[k] = v
+		}
+
+		rightID := node.Children[1]
+		rightRemapping, err := qb.remapAllColRefs(rightID, colRefCnt)
+		if err != nil {
+			return nil, err
+		}
+
+		for k, v := range rightRemapping.globalToLocal {
+			internalMap[k] = [2]int32{1, v[1]}
+		}
+
+		for _, expr := range node.OnList {
+			decreaseRefCnt(expr, colRefCnt)
+			err := qb.remapExpr(expr, internalMap)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		childProjList := qb.qry.Nodes[leftID].ProjectList
+		for i, globalRef := range leftRemapping.localToGlobal {
+			if colRefCnt[globalRef] == 0 {
+				continue
+			}
+
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: childProjList[i].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: 0,
+						ColPos: int32(i),
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+		}
+
+		if node.JoinType == plan.Node_MARK {
+			globalRef := [2]int32{node.BindingTags[0], 0}
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: &plan.Type{
+					Id:          int32(types.T_bool),
+					NotNullable: false,
+					Size:        1,
+				},
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: -1,
+						ColPos: 0,
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+
+			break
+		}
+
+		if node.JoinType != plan.Node_SEMI && node.JoinType != plan.Node_ANTI {
+			childProjList = qb.qry.Nodes[rightID].ProjectList
+			for i, globalRef := range rightRemapping.localToGlobal {
+				if colRefCnt[globalRef] == 0 {
+					continue
+				}
+
+				remapping.addColRef(globalRef)
+
+				node.ProjectList = append(node.ProjectList, &plan.Expr{
+					Typ: childProjList[i].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: 1,
+							ColPos: int32(i),
+							Name:   qb.nameByColRef[globalRef],
+						},
+					},
+				})
+			}
+		}
+
+		if len(node.ProjectList) == 0 && len(leftRemapping.localToGlobal) > 0 {
+			globalRef := leftRemapping.localToGlobal[0]
+			remapping.addColRef(globalRef)
+
+			node.ProjectList = append(node.ProjectList, &plan.Expr{
+				Typ: qb.qry.Nodes[leftID].ProjectList[0].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: 0,
+						ColPos: 0,
+						Name:   qb.nameByColRef[globalRef],
+					},
+				},
+			})
+		}
 	case plan.Node_AGG:
 		for _, expr := range node.GroupBy {
 			increaseRefCnt(expr, colRefCnt)
@@ -1005,7 +1117,22 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 
 	switch node.NodeType {
 	case plan.Node_JOIN:
-		panic("appendNode node join not implement 1")
+		leftCost := qb.qry.Nodes[node.Children[0]].Cost
+		rightCost := qb.qry.Nodes[node.Children[1]].Cost
+
+		switch node.JoinType {
+		case plan.Node_INNER:
+			card := leftCost.Card * rightCost.Card
+			if len(node.OnList) > 0 {
+				card *= 0.1
+			}
+			node.Cost = &plan.Cost{
+				Card: card,
+			}
+
+		default:
+			panic("not implement appendNode")
+		}
 	case plan.Node_AGG:
 		if len(node.GroupBy) > 0 {
 			childCost := qb.qry.Nodes[node.Children[0]].Cost
@@ -1033,42 +1160,62 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 }
 
 func (qb *QueryBuilder) buildJoinTable(tbl *tree.JoinTableExpr, ctx *BindContext) (int32, error) {
-	//var joinType plan.Node_JoinFlag
-	//switch tbl.JoinType {
-	//case tree.JOIN_TYPE_CROSS, tree.JOIN_TYPE_INNER, tree.JOIN_TYPE_NATURAL:
-	//	joinType = plan.Node_INNER
-	//case tree.JOIN_TYPE_LEFT, tree.JOIN_TYPE_NATURAL_LEFT:
-	//	joinType = plan.Node_LEFT
-	//case tree.JOIN_TYPE_RIGHT, tree.JOIN_TYPE_NATURAL_RIGHT:
-	//	joinType = plan.Node_RIGHT
-	//case tree.JOIN_TYPE_FULL:
-	//	joinType = plan.Node_OUTER
-	//}
-	//
-	//leftCtx := NewBindContext(ctx)
-	//rightCtx := NewBindContext(ctx)
-	//
-	//leftChildID, err := qb.buildTable(tbl.Left, leftCtx)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//
-	//rightChildID, err := qb.buildTable(tbl.Right, rightCtx)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//
-	//err = ctx.mergeContexts(leftCtx, rightCtx)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//
-	//nodeID := qb.appendNode(&plan.Node{NodeType: plan.Node_JOIN, Children: []int32{leftChildID, rightChildID}, JoinType: joinType}, ctx)
-	//node := qb.qry.Nodes[nodeID]
-	//
-	//ctx.binder = NewTableBinder(qb, ctx)
+	var joinType plan.Node_JoinFlag
 
-	panic("TODO")
+	switch tbl.JoinType {
+	case tree.JOIN_TYPE_CROSS, tree.JOIN_TYPE_INNER, tree.JOIN_TYPE_NATURAL:
+		joinType = plan.Node_INNER
+	case tree.JOIN_TYPE_LEFT, tree.JOIN_TYPE_NATURAL_LEFT:
+		joinType = plan.Node_LEFT
+	case tree.JOIN_TYPE_RIGHT, tree.JOIN_TYPE_NATURAL_RIGHT:
+		joinType = plan.Node_RIGHT
+	case tree.JOIN_TYPE_FULL:
+		joinType = plan.Node_OUTER
+	}
+
+	leftCtx := NewBindContext(ctx)
+	rightCtx := NewBindContext(ctx)
+
+	leftChildID, err := qb.buildTable(tbl.Left, leftCtx)
+	if err != nil {
+		return 0, err
+	}
+
+	rightChildID, err := qb.buildTable(tbl.Right, rightCtx)
+	if err != nil {
+		return 0, err
+	}
+
+	err = ctx.mergeContexts(leftCtx, rightCtx)
+	if err != nil {
+		return 0, err
+	}
+
+	nodeID := qb.appendNode(&plan.Node{
+		NodeType: plan.Node_JOIN,
+		Children: []int32{leftChildID, rightChildID},
+		JoinType: joinType,
+	}, ctx)
+	//node := qb.qry.Nodes[nodeID]
+
+	ctx.binder = NewTableBinder(qb, ctx)
+
+	switch tbl.Cond.(type) {
+	case *tree.OnJoinCond:
+		panic("buildJoinTable not implement 1")
+
+	case *tree.UsingJoinCond:
+		panic("buildJoinTable not implement 2")
+
+	default:
+		if tbl.JoinType == tree.JOIN_TYPE_NATURAL ||
+			tbl.JoinType == tree.JOIN_TYPE_NATURAL_LEFT ||
+			tbl.JoinType == tree.JOIN_TYPE_NATURAL_RIGHT {
+			panic("buildJoinTable not implement 3")
+		}
+	}
+
+	return nodeID, nil
 }
 
 func splitAndBindCondition(astExpr tree.Expr, ctx *BindContext) ([]*plan.Expr, error) {
@@ -1194,7 +1341,133 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 			nodeID = childID
 		}
 	case plan.Node_JOIN:
-		panic("pushdownFilter not implement 3")
+		leftTags := make(map[int32]*Binding)
+		for _, tag := range qb.enumerateTags(node.Children[0]) {
+			leftTags[tag] = nil
+		}
+
+		rightTags := make(map[int32]*Binding)
+		for _, tag := range qb.enumerateTags(node.Children[1]) {
+			rightTags[tag] = nil
+		}
+
+		if node.JoinType == plan.Node_INNER {
+			for _, cond := range node.OnList {
+				filters = append(filters, splitPlanConjunction(applyDistributivity(cond))...)
+			}
+
+			node.OnList = nil
+		}
+
+		var leftPushdown, rightPushdown []*plan.Expr
+		var turnInner bool
+
+		joinSides := make([]int8, len(filters))
+
+		for i, filter := range filters {
+			canTurnInner := true
+
+			joinSides[i] = getJoinSide(filter, leftTags, rightTags)
+			if f, ok := filter.Expr.(*plan.Expr_F); ok {
+				for _, arg := range f.F.Args {
+					if getJoinSide(arg, leftTags, rightTags) == JoinSideBoth {
+						canTurnInner = false
+						break
+					}
+				}
+			}
+
+			if joinSides[i]&JoinSideRight != 0 && canTurnInner && node.JoinType == plan.Node_LEFT && rejectsNull(filter) {
+				panic("pushdownFilters not implement 1")
+			}
+
+			// TODO: FULL OUTER join should be handled here. However we don't have FULL OUTER join now.
+		}
+
+		if turnInner {
+			panic("pushdownFilters not implement 2")
+		} else if node.JoinType == plan.Node_LEFT {
+			panic("pushdownFilters not implement 3")
+		}
+
+		for i, filter := range filters {
+			switch joinSides[i] {
+			case JoinSideNone:
+				if c, ok := filter.Expr.(*plan.Expr_C); ok {
+					if c, ok := c.C.Value.(*plan.Const_Bval); ok {
+						if c.Bval {
+							break
+						}
+					}
+				}
+
+				switch node.JoinType {
+				case plan.Node_INNER:
+					leftPushdown = append(leftPushdown, DeepCopyExpr(filter))
+					rightPushdown = append(rightPushdown, filter)
+
+				case plan.Node_LEFT, plan.Node_SEMI, plan.Node_ANTI, plan.Node_SINGLE:
+					leftPushdown = append(leftPushdown, filter)
+
+				default:
+					cantPushdown = append(cantPushdown, filter)
+				}
+
+			case JoinSideLeft:
+				if node.JoinType != plan.Node_OUTER {
+					leftPushdown = append(leftPushdown, filter)
+				} else {
+					cantPushdown = append(cantPushdown, filter)
+				}
+
+			case JoinSideRight:
+				if node.JoinType == plan.Node_INNER {
+					rightPushdown = append(rightPushdown, filter)
+				} else {
+					cantPushdown = append(cantPushdown, filter)
+				}
+
+			case JoinSideBoth:
+				if node.JoinType == plan.Node_INNER {
+					if f, ok := filter.Expr.(*plan.Expr_F); ok {
+						if f.F.Func.ObjName == "=" {
+							if getJoinSide(f.F.Args[0], leftTags, rightTags) != JoinSideBoth {
+								if getJoinSide(f.F.Args[1], leftTags, rightTags) != JoinSideBoth {
+									node.OnList = append(node.OnList, filter)
+									break
+								}
+							}
+						}
+					}
+				}
+
+				cantPushdown = append(cantPushdown, filter)
+			}
+		}
+
+		childID, cantPushdownChild := qb.pushdownFilters(node.Children[0], leftPushdown)
+
+		if len(cantPushdownChild) > 0 {
+			childID = qb.appendNode(&plan.Node{
+				NodeType:   plan.Node_FILTER,
+				Children:   []int32{node.Children[0]},
+				FilterList: cantPushdownChild,
+			}, nil)
+		}
+
+		node.Children[0] = childID
+
+		childID, cantPushdownChild = qb.pushdownFilters(node.Children[1], rightPushdown)
+
+		if len(cantPushdownChild) > 0 {
+			childID = qb.appendNode(&plan.Node{
+				NodeType:   plan.Node_FILTER,
+				Children:   []int32{node.Children[1]},
+				FilterList: cantPushdownChild,
+			}, nil)
+		}
+
+		node.Children[1] = childID
 	case plan.Node_UNION, plan.Node_UNION_ALL, plan.Node_MINUS, plan.Node_MINUS_ALL, plan.Node_INTERSECT, plan.Node_INTERSECT_ALL:
 		panic("pushdownFilter not implement 4")
 	case plan.Node_PROJECT:
@@ -1241,10 +1514,6 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 		}
 	}
 	return nodeID, cantPushdown
-}
-
-func (qb *QueryBuilder) determineJoinOrder(nodeID int32) int32 {
-	return nodeID
 }
 
 func (qb *QueryBuilder) pushdownSemiAntiJoins(nodeID int32) int32 {

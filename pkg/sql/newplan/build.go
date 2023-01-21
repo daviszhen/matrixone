@@ -1,6 +1,7 @@
 package newplan
 
 import (
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"math"
 
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
@@ -118,6 +119,9 @@ type BindContext struct {
 	results []*plan.Expr //projects or results with Virtual ColRef
 
 	resultTag int32 //project tag
+
+	leftChild  *BindContext
+	rightChild *BindContext
 }
 
 type NameTuple struct {
@@ -216,5 +220,100 @@ func BuildPlan(ctx plan2.CompilerContext, stmt tree.Statement) (*plan.Plan, erro
 }
 
 func (bc *BindContext) mergeContexts(left, right *BindContext) error {
-	panic("TODO")
+	left.parent = bc
+	right.parent = bc
+	bc.leftChild = left
+	bc.rightChild = right
+
+	for _, binding := range left.bindings {
+		bc.bindings = append(bc.bindings, binding)
+		bc.bindingByTag[binding.tag] = binding
+		bc.bindingByTable[binding.table] = binding
+	}
+
+	for _, binding := range right.bindings {
+		if _, ok := bc.bindingByTable[binding.table]; ok {
+			return moerr.NewInvalidInput("table '%s' specified more than once", binding.table)
+		}
+
+		bc.bindings = append(bc.bindings, binding)
+		bc.bindingByTag[binding.tag] = binding
+		bc.bindingByTable[binding.table] = binding
+	}
+
+	for col, binding := range left.bindingByCol {
+		bc.bindingByCol[col] = binding
+	}
+
+	for col, binding := range right.bindingByCol {
+		if _, ok := bc.bindingByCol[col]; ok {
+			bc.bindingByCol[col] = nil
+		} else {
+			bc.bindingByCol[col] = binding
+		}
+	}
+
+	bc.bindingTree = &BindingTreeNode{
+		left:  left.bindingTree,
+		right: right.bindingTree,
+	}
+
+	return nil
+}
+
+func (bc *BindContext) addUsingCol(col string, typ plan.Node_JoinFlag, left, right *BindContext) (*plan.Expr, error) {
+	leftBinding, ok := left.bindingByCol[col]
+	if !ok {
+		return nil, moerr.NewInvalidInput("column '%s' specified in USING clause does not exist in left table", col)
+	}
+	if leftBinding == nil {
+		return nil, moerr.NewInvalidInput("common column '%s' appears more than once in left table", col)
+	}
+
+	rightBinding, ok := right.bindingByCol[col]
+	if !ok {
+		return nil, moerr.NewInvalidInput("column '%s' specified in USING clause does not exist in right table", col)
+	}
+	if rightBinding == nil {
+		return nil, moerr.NewInvalidInput("common column '%s' appears more than once in right table", col)
+	}
+
+	if typ != plan.Node_RIGHT {
+		bc.bindingByCol[col] = leftBinding
+		bc.bindingTree.using = append(bc.bindingTree.using, NameTuple{
+			table: leftBinding.table,
+			col:   col,
+		})
+	} else {
+		bc.bindingByCol[col] = rightBinding
+		bc.bindingTree.using = append(bc.bindingTree.using, NameTuple{
+			table: rightBinding.table,
+			col:   col,
+		})
+	}
+
+	leftPos := leftBinding.colIdByName[col]
+	rightPos := rightBinding.colIdByName[col]
+	expr, err := bindFuncExprImplByPlanExpr("=", []*plan.Expr{
+		{
+			Typ: leftBinding.types[leftPos],
+			Expr: &plan.Expr_Col{
+				Col: &plan.ColRef{
+					RelPos: leftBinding.tag,
+					ColPos: leftPos,
+				},
+			},
+		},
+		{
+			Typ: rightBinding.types[rightPos],
+			Expr: &plan.Expr_Col{
+				Col: &plan.ColRef{
+					RelPos: rightBinding.tag,
+					ColPos: rightPos,
+				},
+			},
+		},
+	})
+
+	return expr, err
 }

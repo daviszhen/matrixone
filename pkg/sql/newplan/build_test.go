@@ -198,29 +198,106 @@ func Test_build9(t *testing.T) {
 	})
 }
 
+func Test_build10(t *testing.T) {
+	convey.Convey("tpch-q3", t, func() {
+		sql := `select
+				l_orderkey,
+				sum(l_extendedprice * (1 - l_discount)) as revenue,
+				o_orderdate,
+				o_shippriority
+			from
+				customer,
+				orders,
+				lineitem
+			where
+				c_mktsegment = 'HOUSEHOLD'
+				and c_custkey = o_custkey
+				and l_orderkey = o_orderkey
+				and o_orderdate < date '1995-03-29'
+				and l_shipdate > date '1995-03-29'
+			group by
+				l_orderkey,
+				o_orderdate,
+				o_shippriority
+			order by
+				revenue desc,
+				o_orderdate
+			limit 10
+			;`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build12(t *testing.T) {
+	convey.Convey("tpch-q10", t, func() {
+		sql := `select
+	c_custkey,
+	c_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	c_acctbal,
+	n_name,
+	c_address,
+	c_phone,
+	c_comment
+from
+	customer,
+	orders,
+	lineitem,
+	nation
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate >= date '1993-03-01'
+	and o_orderdate < date '1993-03-01' + interval '3' month
+	and l_returnflag = 'R'
+	and c_nationkey = n_nationkey
+group by
+	c_custkey,
+	c_name,
+	c_acctbal,
+	c_phone,
+	n_name,
+	c_address,
+	c_comment
+order by
+	revenue desc
+limit 20
+;
+
+`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select
-				l_returnflag,
-				l_linestatus,
-				sum(l_quantity) as sum_qty,
-				sum(l_extendedprice) as sum_base_price,
-				sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
-				sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
-				avg(l_quantity) as avg_qty,
-				avg(l_extendedprice) as avg_price,
-				avg(l_discount) as avg_disc,
-				count(*) as count_order
+				l_orderkey,
+				sum(l_extendedprice * (1 - l_discount)) as revenue,
+				o_orderdate,
+				o_shippriority
 			from
+				customer,
+				orders,
 				lineitem
 			where
-				l_shipdate <= date '1998-12-01' - interval 112 day
+				c_mktsegment = 'HOUSEHOLD'
+				and c_custkey = o_custkey
+				and l_orderkey = o_orderkey
+				and o_orderdate < date '1995-03-29'
+				and l_shipdate > date '1995-03-29'
 			group by
-				l_returnflag,
-				l_linestatus
+				l_orderkey,
+				o_orderdate,
+				o_shippriority
 			order by
-				l_returnflag,
-				l_linestatus
+				revenue desc,
+				o_orderdate
+			limit 10
 			;`
 	var one tree.Statement
 	var err error
