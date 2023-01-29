@@ -41,8 +41,8 @@ func runCase(sql string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	fmt.Println("plan1", plan1.String())
-	err = os.WriteFile("plan1.json", getJSON(plan1), 0777)
+	fmt.Println("newplan1", plan1.String())
+	err = os.WriteFile("newplan1.json", getJSON(plan1), 0777)
 	if err != nil {
 		return false, err
 	}
@@ -57,8 +57,8 @@ func runCase(sql string) (bool, error) {
 		return false, err
 	}
 	fmt.Println()
-	fmt.Println("plan2", plan2.String())
-	err = os.WriteFile("plan2.json", getJSON(plan2), 0777)
+	fmt.Println("oldplan2", plan2.String())
+	err = os.WriteFile("oldplan2.json", getJSON(plan2), 0777)
 	if err != nil {
 		return false, err
 	}
@@ -230,6 +230,40 @@ func Test_build10(t *testing.T) {
 	})
 }
 
+func Test_build11(t *testing.T) {
+	convey.Convey("tpch-q5", t, func() {
+		sql := `select
+					n_name,
+					sum(l_extendedprice * (1 - l_discount)) as revenue
+				from
+					customer,
+					orders,
+					lineitem,
+					supplier,
+					nation,
+					region
+				where
+					c_custkey = o_custkey
+					and l_orderkey = o_orderkey
+					and l_suppkey = s_suppkey
+					and c_nationkey = s_nationkey
+					and s_nationkey = n_nationkey
+					and n_regionkey = r_regionkey
+					and r_name = 'AMERICA'
+					and o_orderdate >= date '1994-01-01'
+					and o_orderdate < date '1994-01-01' + interval '1' year
+				group by
+					n_name
+				order by
+					revenue desc
+				;
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_build12(t *testing.T) {
 	convey.Convey("tpch-q10", t, func() {
 		sql := `select
@@ -276,29 +310,31 @@ limit 20
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select
-				l_orderkey,
-				sum(l_extendedprice * (1 - l_discount)) as revenue,
-				o_orderdate,
-				o_shippriority
+				n_name,
+				sum(l_extendedprice * (1 - l_discount)) as revenue
 			from
 				customer,
 				orders,
-				lineitem
+				lineitem,
+				supplier,
+				nation,
+				region
 			where
-				c_mktsegment = 'HOUSEHOLD'
-				and c_custkey = o_custkey
+				c_custkey = o_custkey
 				and l_orderkey = o_orderkey
-				and o_orderdate < date '1995-03-29'
-				and l_shipdate > date '1995-03-29'
+				and l_suppkey = s_suppkey
+				and c_nationkey = s_nationkey
+				and s_nationkey = n_nationkey
+				and n_regionkey = r_regionkey
+				and r_name = 'AMERICA'
+				and o_orderdate >= date '1994-01-01'
+				and o_orderdate < date '1994-01-01' + interval '1' year
 			group by
-				l_orderkey,
-				o_orderdate,
-				o_shippriority
+				n_name
 			order by
-				revenue desc,
-				o_orderdate
-			limit 10
-			;`
+				revenue desc
+			;
+			`
 	var one tree.Statement
 	var err error
 	var plan3 *plan.Plan
@@ -310,8 +346,8 @@ func Test_Debug(t *testing.T) {
 	if err != nil {
 		return
 	}
-	fmt.Println("plan3", plan3.String())
-	err = os.WriteFile("plan3.json", getJSON(plan3), 0777)
+	fmt.Println("oldplan3", plan3.String())
+	err = os.WriteFile("oldplan3.json", getJSON(plan3), 0777)
 	if err != nil {
 		return
 	}
