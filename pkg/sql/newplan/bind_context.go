@@ -110,3 +110,11 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 
 	return astExpr, err
 }
+
+func (bc *BindContext) rootTag() int32 {
+	if bc.resultTag > 0 {
+		return bc.resultTag
+	} else {
+		return bc.projectTag
+	}
+}

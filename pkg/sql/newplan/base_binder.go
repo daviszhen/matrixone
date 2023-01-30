@@ -57,7 +57,13 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.XorExpr:
 		err = moerr.NewInternalError("not implement 17")
 	case *tree.Subquery:
-		err = moerr.NewInternalError("not implement 18")
+		if !isRoot && exprImpl.Exists {
+			// TODO: implement MARK join to better support non-scalar subqueries
+			return nil, moerr.NewNYI("EXISTS subquery as non-root expression")
+		}
+
+		expr, err = b.impl.BindSubquery(exprImpl, isRoot)
+
 	case *tree.DefaultVal:
 		err = moerr.NewInternalError("not implement 19")
 	case *tree.MaxValue:
@@ -176,7 +182,50 @@ func (b *baseBinder) baseBindColRef(astExpr *tree.UnresolvedName, depth int32, i
 }
 
 func (b *baseBinder) baseBindSubquery(astExpr *tree.Subquery, isRoot bool) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 28")
+	if b.ctx == nil {
+		return nil, moerr.NewInvalidInput("field reference doesn't support SUBQUERY")
+	}
+	subCtx := NewBindContext(b.ctx)
+
+	var nodeID int32
+	var err error
+	switch subquery := astExpr.Select.(type) {
+	case *tree.ParenSelect:
+		nodeID, err = b.builder.buildSelect(subquery.Select, subCtx, false)
+		if err != nil {
+			return nil, err
+		}
+
+	default:
+		return nil, moerr.NewNYI("unsupported select statement: %s", tree.String(astExpr, dialect.MYSQL))
+	}
+
+	rowSize := int32(len(subCtx.results))
+
+	returnExpr := &plan.Expr{
+		Typ: &plan.Type{
+			Id: int32(types.T_tuple),
+		},
+		Expr: &plan.Expr_Sub{
+			Sub: &plan.SubqueryRef{
+				NodeId:  nodeID,
+				RowSize: rowSize,
+			},
+		},
+	}
+
+	if astExpr.Exists {
+		returnExpr.Typ = &plan.Type{
+			Id:          int32(types.T_bool),
+			NotNullable: true,
+			Size:        1,
+		}
+		returnExpr.Expr.(*plan.Expr_Sub).Sub.Typ = plan.SubqueryRef_EXISTS
+	} else if rowSize == 1 {
+		returnExpr.Typ = subCtx.results[0].Typ
+	}
+
+	return returnExpr, nil
 }
 
 func (b *baseBinder) bindCaseExpr(astExpr *tree.CaseExpr, depth int32, isRoot bool) (*plan.Expr, error) {
@@ -417,7 +466,16 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 	case "oct", "bit_and", "bit_or", "bit_xor":
 		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 9")
 	case "like":
-		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 10")
+		// sql 'select * from t where col like ?'  the ? Expr's type will be T_any
+		if len(args) != 2 {
+			return nil, moerr.NewInvalidArg(name+" function have invalid input args length", len(args))
+		}
+		if args[0].Typ.Id == int32(types.T_any) {
+			args[0].Typ.Id = int32(types.T_varchar)
+		}
+		if args[1].Typ.Id == int32(types.T_any) {
+			args[1].Typ.Id = int32(types.T_varchar)
+		}
 	case "timediff":
 		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 11")
 	case "str_to_date", "to_date":

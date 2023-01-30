@@ -1130,6 +1130,16 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 				Card: card,
 			}
 
+		case plan.Node_LEFT:
+			card := leftCost.Card * rightCost.Card
+			if len(node.OnList) > 0 {
+				card *= 0.1
+				card += leftCost.Card
+			}
+			node.Cost = &plan.Cost{
+				Card: card,
+			}
+
 		default:
 			panic("not implement appendNode")
 		}
@@ -1261,26 +1271,6 @@ func splitAstConjunction(astExpr tree.Expr) []tree.Expr {
 	return exprs
 }
 
-func (qb *QueryBuilder) flattenSubqueries(nodeID int32, expr *plan.Expr, ctx *BindContext) (int32, *plan.Expr, error) {
-	var err error
-	switch exprImpl := expr.Expr.(type) {
-	case *plan.Expr_F:
-		for i, arg := range exprImpl.F.Args {
-			nodeID, exprImpl.F.Args[i], err = qb.flattenSubqueries(nodeID, arg, ctx)
-			if err != nil {
-				return 0, nil, err
-			}
-		}
-	case *plan.Expr_Sub:
-		nodeID, expr, err = qb.flattenSubquery(nodeID, exprImpl.Sub, ctx)
-	}
-	return nodeID, expr, err
-}
-
-func (qb *QueryBuilder) flattenSubquery(nodeID int32, subquery *plan.SubqueryRef, ctx *BindContext) (int32, *plan.Expr, error) {
-	return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented")
-}
-
 func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int32, []*plan.Expr) {
 	node := qb.qry.Nodes[nodeID]
 	var canPushdown, cantPushdown []*plan.Expr
@@ -1378,14 +1368,26 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 			}
 
 			if joinSides[i]&JoinSideRight != 0 && canTurnInner && node.JoinType == plan.Node_LEFT && rejectsNull(filter) {
-				panic("pushdownFilters not implement 1")
+				for _, cond := range node.OnList {
+					filters = append(filters, splitPlanConjunction(applyDistributivity(cond))...)
+				}
+
+				node.JoinType = plan.Node_INNER
+				node.OnList = nil
+				turnInner = true
+
+				break
 			}
 
 			// TODO: FULL OUTER join should be handled here. However we don't have FULL OUTER join now.
 		}
 
 		if turnInner {
-			panic("pushdownFilters not implement 2")
+			joinSides = make([]int8, len(filters))
+
+			for i, filter := range filters {
+				joinSides[i] = getJoinSide(filter, leftTags, rightTags)
+			}
 		} else if node.JoinType == plan.Node_LEFT {
 			panic("pushdownFilters not implement 3")
 		}

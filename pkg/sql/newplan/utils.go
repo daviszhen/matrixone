@@ -608,3 +608,64 @@ func getHyperEdgeFromExpr(expr *plan.Expr, leafByTag map[int32]int32, hyperEdge 
 		}
 	}
 }
+
+func hasCorrCol(expr *plan.Expr) bool {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_Corr:
+		return true
+
+	case *plan.Expr_F:
+		ret := false
+		for _, arg := range exprImpl.F.Args {
+			ret = ret || hasCorrCol(arg)
+		}
+		return ret
+
+	default:
+		return false
+	}
+}
+
+func decreaseDepthAndDispatch(preds []*plan.Expr) ([]*plan.Expr, []*plan.Expr) {
+	filterPreds := make([]*plan.Expr, 0, len(preds))
+	joinPreds := make([]*plan.Expr, 0, len(preds))
+
+	for _, pred := range preds {
+		newPred, correlated := decreaseDepth(pred)
+		if !correlated {
+			joinPreds = append(joinPreds, newPred)
+			continue
+		}
+		filterPreds = append(filterPreds, newPred)
+	}
+
+	return filterPreds, joinPreds
+}
+
+func decreaseDepth(expr *plan.Expr) (*plan.Expr, bool) {
+	var correlated bool
+
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_Corr:
+		if exprImpl.Corr.Depth > 1 {
+			exprImpl.Corr.Depth--
+			correlated = true
+		} else {
+			expr.Expr = &plan.Expr_Col{
+				Col: &plan.ColRef{
+					RelPos: exprImpl.Corr.RelPos,
+					ColPos: exprImpl.Corr.ColPos,
+				},
+			}
+		}
+
+	case *plan.Expr_F:
+		var tmp bool
+		for i, arg := range exprImpl.F.Args {
+			exprImpl.F.Args[i], tmp = decreaseDepth(arg)
+			correlated = correlated || tmp
+		}
+	}
+
+	return expr, correlated
+}

@@ -168,7 +168,7 @@ func Test_build8(t *testing.T) {
 	})
 }
 
-func Test_build9(t *testing.T) {
+func Test_build9_q1(t *testing.T) {
 	convey.Convey("tpch-q1", t, func() {
 		sql := `select
 					l_returnflag,
@@ -198,7 +198,7 @@ func Test_build9(t *testing.T) {
 	})
 }
 
-func Test_build10(t *testing.T) {
+func Test_build10_q3(t *testing.T) {
 	convey.Convey("tpch-q3", t, func() {
 		sql := `select
 				l_orderkey,
@@ -230,7 +230,7 @@ func Test_build10(t *testing.T) {
 	})
 }
 
-func Test_build11(t *testing.T) {
+func Test_build11_q5(t *testing.T) {
 	convey.Convey("tpch-q5", t, func() {
 		sql := `select
 					n_name,
@@ -264,7 +264,7 @@ func Test_build11(t *testing.T) {
 	})
 }
 
-func Test_build12(t *testing.T) {
+func Test_build12_q10(t *testing.T) {
 	convey.Convey("tpch-q10", t, func() {
 		sql := `select
 	c_custkey,
@@ -301,6 +301,60 @@ limit 20
 ;
 
 `
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build13_q2(t *testing.T) {
+	convey.Convey("tpch-q2", t, func() {
+		sql := `select
+					s_acctbal,
+					s_name,
+					n_name,
+					p_partkey,
+					p_mfgr,
+					s_address,
+					s_phone,
+					s_comment
+				from
+					part,
+					supplier,
+					partsupp,
+					nation,
+					region
+				where
+					p_partkey = ps_partkey
+					and s_suppkey = ps_suppkey
+					and p_size = 48
+					and p_type like '%TIN'
+					and s_nationkey = n_nationkey
+					and n_regionkey = r_regionkey
+					and r_name = 'MIDDLE EAST'
+					and ps_supplycost = (
+						select
+							min(ps_supplycost)
+						from
+							partsupp,
+							supplier,
+							nation,
+							region
+						where
+							p_partkey = ps_partkey
+							and s_suppkey = ps_suppkey
+							and s_nationkey = n_nationkey
+							and n_regionkey = r_regionkey
+							and r_name = 'MIDDLE EAST'
+					)
+				order by
+					s_acctbal desc,
+					n_name,
+					s_name,
+					p_partkey
+				limit 100
+				;
+				`
 		ret, err := runCase(sql)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(ret, convey.ShouldBeTrue)
