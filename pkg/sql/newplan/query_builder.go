@@ -45,7 +45,12 @@ func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot 
 	for _, selectExpr := range clause.Exprs {
 		switch expr := selectExpr.Expr.(type) {
 		case tree.UnqualifiedStar:
-			panic("do not implement")
+			cols, names, err := ctx.unfoldStar("")
+			if err != nil {
+				return 0, err
+			}
+			selectList = append(selectList, cols...)
+			ctx.headings = append(ctx.headings, names...)
 		case *tree.UnresolvedName:
 			if expr.Star {
 				panic("do not implement")
@@ -1140,6 +1145,10 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 				Card: card,
 			}
 
+		case plan.Node_SEMI:
+			node.Cost = &plan.Cost{
+				Card: leftCost.Card * .7,
+			}
 		default:
 			panic("not implement appendNode")
 		}

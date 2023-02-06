@@ -118,3 +118,69 @@ func (bc *BindContext) rootTag() int32 {
 		return bc.projectTag
 	}
 }
+
+func (bc *BindContext) unfoldStar(table string) ([]tree.SelectExpr, []string, error) {
+	if len(table) == 0 {
+		// unfold *
+		var exprs []tree.SelectExpr
+		var names []string
+
+		bc.doUnfoldStar(bc.bindingTree, make(map[string]any), &exprs, &names)
+
+		return exprs, names, nil
+	} else {
+		// unfold tbl.*
+		binding, ok := bc.bindingByTable[table]
+		if !ok {
+			return nil, nil, moerr.NewInvalidInput("missing FROM-clause entry for table '%s'", table)
+		}
+
+		exprs := make([]tree.SelectExpr, len(binding.cols))
+		names := make([]string, len(binding.cols))
+
+		for i, col := range binding.cols {
+			expr, _ := tree.NewUnresolvedName(table, col)
+			exprs[i] = tree.SelectExpr{Expr: expr}
+			names[i] = col
+		}
+
+		return exprs, names, nil
+	}
+}
+
+func (bc *BindContext) doUnfoldStar(root *BindingTreeNode, visitedUsingCols map[string]any, exprs *[]tree.SelectExpr, names *[]string) {
+	if root == nil {
+		return
+	}
+	if root.binding != nil {
+		for _, col := range root.binding.cols {
+			if _, ok := visitedUsingCols[col]; !ok {
+				expr, _ := tree.NewUnresolvedName(root.binding.table, col)
+				*exprs = append(*exprs, tree.SelectExpr{Expr: expr})
+				*names = append(*names, col)
+			}
+		}
+
+		return
+	}
+
+	var handledUsingCols []string
+
+	for _, using := range root.using {
+		if _, ok := visitedUsingCols[using.col]; !ok {
+			handledUsingCols = append(handledUsingCols, using.col)
+			visitedUsingCols[using.col] = nil
+
+			expr, _ := tree.NewUnresolvedName(using.table, using.col)
+			*exprs = append(*exprs, tree.SelectExpr{Expr: expr})
+			*names = append(*names, using.col)
+		}
+	}
+
+	bc.doUnfoldStar(root.left, visitedUsingCols, exprs, names)
+	bc.doUnfoldStar(root.right, visitedUsingCols, exprs, names)
+
+	for _, col := range handledUsingCols {
+		delete(visitedUsingCols, col)
+	}
+}
