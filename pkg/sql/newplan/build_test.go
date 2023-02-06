@@ -392,6 +392,24 @@ func Test_build14_q4(t *testing.T) {
 	})
 }
 
+func Test_build15_q6(t *testing.T) {
+	convey.Convey("tpch-q6", t, func() {
+		sql := `select
+					sum(l_extendedprice * l_discount) as revenue
+				from
+					lineitem
+				where
+					l_shipdate >= date '1994-01-01'
+					and l_shipdate < date '1994-01-01' + interval '1' year
+					and l_discount between 0.03 - 0.01 and 0.03 + 0.01
+					and l_quantity < 24;
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select

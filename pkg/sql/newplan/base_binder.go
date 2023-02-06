@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan/function"
 	"go/constant"
+	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -39,7 +40,7 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.FuncExpr:
 		expr, err = b.bindFuncExpr(exprImpl, depth, isRoot)
 	case *tree.RangeCond:
-		err = moerr.NewInternalError("not implement 9")
+		expr, err = b.bindRangeCond(exprImpl, depth, isRoot)
 	case *tree.UnresolvedName:
 		expr, err = b.impl.BindColRef(exprImpl, depth, isRoot)
 	case *tree.CastExpr:
@@ -233,7 +234,17 @@ func (b *baseBinder) bindCaseExpr(astExpr *tree.CaseExpr, depth int32, isRoot bo
 }
 
 func (b *baseBinder) bindRangeCond(astExpr *tree.RangeCond, depth int32, isRoot bool) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 30")
+	if astExpr.Not {
+		// rewrite 'col not between 1, 20' to 'col < 1 or col > 20'
+		newLefExpr := tree.NewComparisonExpr(tree.LESS_THAN, astExpr.Left, astExpr.From)
+		newRightExpr := tree.NewComparisonExpr(tree.GREAT_THAN, astExpr.Left, astExpr.To)
+		return b.bindFuncExprImplByAstExpr("or", []tree.Expr{newLefExpr, newRightExpr}, depth)
+	} else {
+		// rewrite 'col between 1, 20 ' to ' col >= 1 and col <= 2'
+		newLefExpr := tree.NewComparisonExpr(tree.GREAT_THAN_EQUAL, astExpr.Left, astExpr.From)
+		newRightExpr := tree.NewComparisonExpr(tree.LESS_THAN_EQUAL, astExpr.Left, astExpr.To)
+		return b.bindFuncExprImplByAstExpr("and", []tree.Expr{newLefExpr, newRightExpr}, depth)
+	}
 }
 
 func (b *baseBinder) bindUnaryExpr(astExpr *tree.UnaryExpr, depth int32, isRoot bool) (*plan.Expr, error) {
@@ -383,7 +394,9 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 			},
 		}, nil
 	case "and", "or", "not", "xor":
-		return nil, moerr.NewInternalError("not implement bindFuncExprImplByPlanExpr 3")
+		if err := convertValueIntoBool(name, args, true); err != nil {
+			return nil, err
+		}
 	case "=", "<", "<=", ">", ">=", "<>":
 		// why not append cast function?
 		if err := convertValueIntoBool(name, args, false); err != nil {
@@ -567,6 +580,12 @@ func bindFuncExprImplByPlanExpr(name string, args []*plan.Expr) (*plan.Expr, err
 }
 
 func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Expr, error) {
+	returnDecimalExpr := func(val string) (*plan.Expr, error) {
+		if typ != nil {
+			return appendCastBeforeExpr(makePlan2StringConstExprWithType(val), typ)
+		}
+		return makePlan2DecimalExprWithType(val)
+	}
 	switch astExpr.ValType {
 	case tree.P_null:
 		return &plan.Expr{
@@ -612,7 +631,21 @@ func (b *baseBinder) bindNumVal(astExpr *tree.NumVal, typ *plan.Type) (*plan.Exp
 	case tree.P_decimal:
 		return nil, moerr.NewInvalidInput("unsupport value 2 '%s'", astExpr.String())
 	case tree.P_float64:
-		return nil, moerr.NewInvalidInput("unsupport value 3 '%s'", astExpr.String())
+		originString := astExpr.String()
+		if typ != nil && (typ.Id == int32(types.T_decimal64) || typ.Id == int32(types.T_decimal128)) {
+			return returnDecimalExpr(originString)
+		}
+		if !strings.Contains(originString, "e") {
+			expr, err := returnDecimalExpr(originString)
+			if err == nil {
+				return expr, nil
+			}
+		}
+		floatValue, ok := constant.Float64Val(astExpr.Value)
+		if !ok {
+			return returnDecimalExpr(originString)
+		}
+		return makePlan2Float64ConstExprWithType(floatValue), nil
 	case tree.P_hexnum:
 		return nil, moerr.NewInvalidInput("unsupport value 4 '%s'", astExpr.String())
 	case tree.P_ScoreBinary:

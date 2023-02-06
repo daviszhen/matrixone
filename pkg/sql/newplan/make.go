@@ -128,3 +128,38 @@ func makePlan2CastExpr(expr *plan.Expr, targetType *plan.Type) (*plan.Expr, erro
 		Typ: targetType,
 	}, nil
 }
+
+func makePlan2DecimalExprWithType(v string, isBin ...bool) (*plan.Expr, error) {
+	_, scale, err := types.ParseStringToDecimal128WithoutTable(v, isBin...)
+	if err != nil {
+		return nil, err
+	}
+	typ := &plan.Type{
+		Id:          int32(types.T_decimal128),
+		Width:       34,
+		Scale:       scale,
+		Precision:   34,
+		NotNullable: true,
+	}
+	return appendCastBeforeExpr(makePlan2StringConstExprWithType(v, isBin...), typ)
+}
+
+func makePlan2Float64ConstExpr(v float64) *plan.Expr_C {
+	return &plan.Expr_C{C: &plan.Const{
+		Isnull: false,
+		Value: &plan.Const_Dval{
+			Dval: v,
+		},
+	}}
+}
+
+func makePlan2Float64ConstExprWithType(v float64) *plan.Expr {
+	return &plan.Expr{
+		Expr: makePlan2Float64ConstExpr(v),
+		Typ: &plan.Type{
+			Id:          int32(types.T_float64),
+			NotNullable: true,
+			Size:        8,
+		},
+	}
+}
