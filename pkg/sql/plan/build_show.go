@@ -733,7 +733,8 @@ func buildShowIndex(stmt *tree.ShowIndex, ctx CompilerContext) (*Plan, error) {
 		return returnByWhereAndBaseSQL(ctx, sql, stmt.Where, ddlType)
 	}
 
-	return returnByRewriteSQL(ctx, sql, ddlType)
+	p, err := returnByRewriteSQL(ctx, sql, ddlType)
+	return p, err
 }
 
 // TODO: Improve SQL. Currently, Lack of the mata of grants

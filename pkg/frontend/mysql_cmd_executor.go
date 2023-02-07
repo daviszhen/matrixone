@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fagongzi/goetty/v2"
@@ -2329,6 +2330,23 @@ func (cwft *TxnComputationWrapper) GetAffectedRows() uint64 {
 	return cwft.compile.GetAffectedRows()
 }
 
+func getJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	var out bytes.Buffer
+	err = json.Indent(&out, b, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	return out.Bytes()
+}
+
+var (
+	showIndexId atomic.Uint32
+)
+
 func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
 	var err error
 	defer RecordStatementTxnID(requestCtx, cwft.ses)
@@ -2348,6 +2366,13 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		return nil, err
 	}
 	cwft.ses.p = cwft.plan
+	if strings.HasPrefix(cwft.ses.GetSql(),
+		"show indexes from t") {
+		err = os.WriteFile(fmt.Sprintf("showIndex_%d.json", showIndexId.Add(1)), getJSON(cwft.plan), 0777)
+		if err != nil {
+			return false, err
+		}
+	}
 	if ids := isResultQuery(cwft.plan); ids != nil {
 		if err = checkPrivilege(ids, requestCtx, cwft.ses); err != nil {
 			return nil, err
