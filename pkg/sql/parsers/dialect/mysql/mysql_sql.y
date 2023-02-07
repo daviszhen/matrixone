@@ -383,7 +383,7 @@ import (
 %type <statement> explain_stmt explainable_stmt
 %type <statement> set_stmt set_variable_stmt set_password_stmt set_role_stmt set_default_role_stmt
 %type <statement> revoke_stmt grant_stmt
-%type <statement> load_data_stmt import_data_stmt
+%type <statement> load_data_stmt
 %type <statement> analyze_stmt
 %type <statement> prepare_stmt prepareable_stmt deallocate_stmt execute_stmt reset_stmt
 %type <statement> replace_stmt
@@ -653,7 +653,6 @@ stmt:
 |   revoke_stmt
 |   grant_stmt
 |   load_data_stmt
-|   import_data_stmt
 |   load_extension_stmt
 |   do_stmt
 |   declare_stmt
@@ -764,17 +763,6 @@ mo_dump_stmt:
 
 
 
-import_data_stmt:
-    IMPORT DATA local_opt load_param_opt duplicate_opt INTO TABLE table_name tail_param_opt
-    {
-        $$ = &tree.Import{
-            Local: $3,
-            Param: $4,
-            DuplicateHandling: $5,
-            Table: $8,
-        }
-        $$.(*tree.Import).Param.Tail = $9
-    }
 
 load_data_stmt:
     LOAD DATA local_opt load_param_opt duplicate_opt INTO TABLE table_name accounts_opt tail_param_opt parallel_opt
