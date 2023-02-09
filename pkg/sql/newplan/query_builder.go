@@ -400,6 +400,16 @@ func (qb *QueryBuilder) buildFrom(stmt tree.TableExprs, ctx *BindContext) (int32
 
 func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeID int32, err error) {
 	switch tbl := stmt.(type) {
+	case *tree.Select:
+		subCtx := NewBindContext(ctx)
+		nodeID, err = qb.buildSelect(tbl, subCtx, false)
+		if subCtx.isCorrelated {
+			return 0, moerr.NewNYI("correlated subquery in FROM clause")
+		}
+
+		if subCtx.hasSingleRow {
+			ctx.hasSingleRow = true
+		}
 	case *tree.TableName:
 		schema := string(tbl.SchemaName)
 		table := string(tbl.ObjectName)
