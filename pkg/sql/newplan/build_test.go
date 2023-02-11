@@ -587,6 +587,45 @@ func Test_build16_q11(t *testing.T) {
 	})
 }
 
+func Test_build16_q12(t *testing.T) {
+	convey.Convey("tpch-q12", t, func() {
+		sql := `select
+					l_shipmode,
+					sum(case
+						when o_orderpriority = '1-URGENT'
+							or o_orderpriority = '2-HIGH'
+							then 1
+						else 0
+					end) as high_line_count,
+					sum(case
+						when o_orderpriority <> '1-URGENT'
+							and o_orderpriority <> '2-HIGH'
+							then 1
+						else 0
+					end) as low_line_count
+				from
+					orders,
+					lineitem
+				where
+					o_orderkey = l_orderkey
+					and l_shipmode in ('FOB', 'TRUCK')
+					and l_commitdate < l_receiptdate
+					and l_shipdate < l_commitdate
+					and l_receiptdate >= date '1996-01-01'
+					and l_receiptdate < date '1996-01-01' + interval '1' year
+				group by
+					l_shipmode
+				order by
+					l_shipmode
+				;
+
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select

@@ -121,7 +121,12 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 	case *tree.IsNotNullExpr:
 		return nil, moerr.NewInternalError("not implement qualifyColumnNames 9")
 	case *tree.Tuple:
-		return nil, moerr.NewInternalError("not implement qualifyColumnNames 10")
+		for i := range exprImpl.Exprs {
+			exprImpl.Exprs[i], err = bc.qualifyColumnNames(exprImpl.Exprs[i], selectList, expandAlias)
+			if err != nil {
+				return nil, err
+			}
+		}
 	case *tree.CaseExpr:
 		exprImpl.Expr, err = bc.qualifyColumnNames(exprImpl.Expr, selectList, expandAlias)
 		if err != nil {

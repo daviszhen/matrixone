@@ -331,6 +331,54 @@ func (b *baseBinder) bindComparisonExpr(astExpr *tree.ComparisonExpr, depth int3
 		op = "reg_match"
 	case tree.NOT_REG_MATCH:
 		op = "not_reg_match"
+	case tree.IN:
+		switch list := astExpr.Right.(type) {
+		case *tree.Tuple:
+			var newExpr tree.Expr
+			for _, expr := range list.Exprs {
+				if newExpr == nil {
+					newExpr = tree.NewComparisonExpr(tree.EQUAL, astExpr.Left, expr)
+				} else {
+					equalExpr := tree.NewComparisonExpr(tree.EQUAL, astExpr.Left, expr)
+					newExpr = tree.NewOrExpr(newExpr, equalExpr)
+				}
+			}
+			return b.impl.BindExpr(newExpr, depth, false)
+
+		default:
+			leftArg, err := b.impl.BindExpr(astExpr.Left, depth, false)
+			if err != nil {
+				return nil, err
+			}
+
+			rightArg, err := b.impl.BindExpr(astExpr.Right, depth, false)
+			if err != nil {
+				return nil, err
+			}
+
+			if subquery, ok := rightArg.Expr.(*plan.Expr_Sub); ok {
+				if !isRoot {
+					// TODO: implement MARK join to better support non-scalar subqueries
+					return nil, moerr.NewNYI("IN subquery as non-root expression")
+				}
+
+				if list, ok := leftArg.Expr.(*plan.Expr_List); ok {
+					if len(list.List.List) != int(subquery.Sub.RowSize) {
+						return nil, moerr.NewNYI("subquery should return %d columns", len(list.List.List))
+					}
+				} else {
+					if subquery.Sub.RowSize > 1 {
+						return nil, moerr.NewInvalidInput("subquery returns more than 1 column")
+					}
+				}
+
+				subquery.Sub.Typ = plan.SubqueryRef_IN
+				subquery.Sub.Child = leftArg
+				return rightArg, nil
+			} else {
+				return bindFuncExprImplByPlanExpr("in", []*plan.Expr{leftArg, rightArg})
+			}
+		}
 	default:
 		return nil, moerr.NewNYI("'%v'", astExpr)
 	}
