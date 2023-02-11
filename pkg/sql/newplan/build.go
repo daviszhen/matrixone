@@ -122,6 +122,15 @@ type BindContext struct {
 
 	leftChild  *BindContext
 	rightChild *BindContext
+	cteName    string
+	cteByName  map[string]*CTERef
+	maskedCTEs map[string]any
+}
+
+type CTERef struct {
+	defaultDatabase string
+	ast             *tree.CTE
+	maskedCTEs      map[string]any
 }
 
 type NameTuple struct {
@@ -172,7 +181,7 @@ func (b *Binding) FindColumn(col string) int32 {
 	return NotFound
 }
 
-func NewBind(tag, nodeID int32, table string, cols []string, types []*plan.Type) *Binding {
+func NewBinding(tag, nodeID int32, table string, cols []string, types []*plan.Type) *Binding {
 	binding := &Binding{
 		tag:     tag,
 		nodeId:  nodeID,

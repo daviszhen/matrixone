@@ -26,11 +26,12 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.ParenExpr:
 		expr, err = b.impl.BindExpr(exprImpl.Expr, depth, isRoot)
 	case *tree.OrExpr:
-		err = moerr.NewInternalError("not implement 2")
+		expr, err = b.bindFuncExprImplByAstExpr("or", []tree.Expr{exprImpl.Left, exprImpl.Right}, depth)
 	case *tree.NotExpr:
 		err = moerr.NewInternalError("not implement 3")
 	case *tree.AndExpr:
-		err = moerr.NewInternalError("not implement 4")
+		expr, err = b.bindFuncExprImplByAstExpr("and", []tree.Expr{exprImpl.Left, exprImpl.Right}, depth)
+
 	case *tree.UnaryExpr:
 		err = moerr.NewInternalError("not implement 5")
 	case *tree.BinaryExpr:

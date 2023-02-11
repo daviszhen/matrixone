@@ -420,6 +420,47 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 		}
 
 		if len(schema) == 0 {
+			//cteRef := ctx.findCTE(table)
+			//if cteRef != nil {
+			//	subCtx := NewBindContext(ctx)
+			//	subCtx.maskedCTEs = cteRef.maskedCTEs
+			//	subCtx.cteName = table
+			//	//reset defaultDatabase
+			//	if len(cteRef.defaultDatabase) > 0 {
+			//		subCtx.defaultDatabase = cteRef.defaultDatabase
+			//	}
+			//
+			//	switch stmt := cteRef.ast.Stmt.(type) {
+			//	case *tree.Select:
+			//		nodeID, err = qb.buildSelect(stmt, subCtx, false)
+			//
+			//	case *tree.ParenSelect:
+			//		nodeID, err = qb.buildSelect(stmt.Select, subCtx, false)
+			//
+			//	default:
+			//		err = moerr.NewParseError("unexpected statement: '%v'", tree.String(stmt, dialect.MYSQL))
+			//	}
+			//
+			//	if err != nil {
+			//		return
+			//	}
+			//
+			//	if subCtx.hasSingleRow {
+			//		ctx.hasSingleRow = true
+			//	}
+			//
+			//	cols := cteRef.ast.Name.Cols
+			//
+			//	if len(cols) > len(subCtx.headings) {
+			//		return 0, moerr.NewSyntaxError("table %q has %d columns available but %d columns specified", table, len(subCtx.headings), len(cols))
+			//	}
+			//
+			//	for i, col := range cols {
+			//		subCtx.headings[i] = string(col)
+			//	}
+			//
+			//	break
+			//}
 			schema = ctx.defaultDatabase
 		}
 
@@ -538,9 +579,45 @@ func (qb *QueryBuilder) addBinding(nodeID int32, alias tree.AliasClause, ctx *Bi
 			qb.nameByColRef[[2]int32{tag, int32(i)}] = name
 		}
 
-		binding = NewBind(tag, nodeID, table, cols, types)
+		binding = NewBinding(tag, nodeID, table, cols, types)
 	} else {
-		panic("TODO")
+		// Subquery
+		subCtx := qb.ctxByNode[nodeID]
+		tag := subCtx.rootTag()
+		headings := subCtx.headings
+		projects := subCtx.projects
+
+		if len(alias.Cols) > len(headings) {
+			return moerr.NewSyntaxError("table %q has %d columns available but %d columns specified", alias.Alias, len(headings), len(alias.Cols))
+		}
+
+		table := subCtx.cteName
+		if len(alias.Alias) > 0 {
+			table = string(alias.Alias)
+		}
+		if len(table) == 0 {
+			table = fmt.Sprintf("mo_table_subquery_alias_%d", tag)
+		}
+		if _, ok := ctx.bindingByTable[table]; ok {
+			return moerr.NewSyntaxError("table name %q specified more than once", table)
+		}
+
+		cols = make([]string, len(headings))
+		types = make([]*plan.Type, len(headings))
+
+		for i, col := range headings {
+			if i < len(alias.Cols) {
+				cols[i] = string(alias.Cols[i])
+			} else {
+				cols[i] = col
+			}
+			types[i] = projects[i].Typ
+
+			name := table + "." + cols[i]
+			qb.nameByColRef[[2]int32{tag, int32(i)}] = name
+		}
+
+		binding = NewBinding(tag, nodeID, table, cols, types)
 	}
 
 	ctx.bindings = append(ctx.bindings, binding)

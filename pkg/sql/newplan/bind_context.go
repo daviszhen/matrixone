@@ -44,11 +44,21 @@ func (bc *BindContext) qualifyColumnNames(astExpr tree.Expr, selectList tree.Sel
 		astExpr, err = bc.qualifyColumnNames(exprImpl.Expr, selectList, expandAlias)
 
 	case *tree.OrExpr:
-		return nil, moerr.NewInternalError("not implement qualifyColumnNames 1")
+		exprImpl.Left, err = bc.qualifyColumnNames(exprImpl.Left, selectList, expandAlias)
+		if err != nil {
+			return nil, err
+		}
+
+		exprImpl.Right, err = bc.qualifyColumnNames(exprImpl.Right, selectList, expandAlias)
 	case *tree.NotExpr:
 		return nil, moerr.NewInternalError("not implement qualifyColumnNames 2")
 	case *tree.AndExpr:
-		return nil, moerr.NewInternalError("not implement qualifyColumnNames 3")
+		exprImpl.Left, err = bc.qualifyColumnNames(exprImpl.Left, selectList, expandAlias)
+		if err != nil {
+			return nil, err
+		}
+
+		exprImpl.Right, err = bc.qualifyColumnNames(exprImpl.Right, selectList, expandAlias)
 	case *tree.UnaryExpr:
 		return nil, moerr.NewInternalError("not implement qualifyColumnNames 4")
 	case *tree.ComparisonExpr:
@@ -193,4 +203,24 @@ func (bc *BindContext) doUnfoldStar(root *BindingTreeNode, visitedUsingCols map[
 	for _, col := range handledUsingCols {
 		delete(visitedUsingCols, col)
 	}
+}
+
+func (bc *BindContext) findCTE(name string) *CTERef {
+	if cte, ok := bc.cteByName[name]; ok {
+		return cte
+	}
+
+	parent := bc.parent
+	for parent != nil && name != parent.cteName {
+		if cte, ok := parent.cteByName[name]; ok {
+			if _, ok := bc.maskedCTEs[name]; !ok {
+				return cte
+			}
+		}
+
+		bc = parent
+		parent = bc.parent
+	}
+
+	return nil
 }
