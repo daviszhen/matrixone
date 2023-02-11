@@ -656,6 +656,29 @@ func Test_build16_q13(t *testing.T) {
 	})
 }
 
+func Test_build16_q14(t *testing.T) {
+	convey.Convey("tpch-q14", t, func() {
+		sql := `select
+					100.00 * sum(
+					    case
+						when p_type like 'PROMO%'
+							then l_extendedprice * (1 - l_discount)
+						else 0
+						end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue
+				from
+					lineitem,
+					part
+				where
+					l_partkey = p_partkey
+					and l_shipdate >= date '1996-04-01'
+					and l_shipdate < date '1996-04-01' + interval '1' month;
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select
