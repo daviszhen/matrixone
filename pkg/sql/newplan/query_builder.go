@@ -1302,13 +1302,18 @@ func (qb *QueryBuilder) buildJoinTable(tbl *tree.JoinTableExpr, ctx *BindContext
 		Children: []int32{leftChildID, rightChildID},
 		JoinType: joinType,
 	}, ctx)
-	//node := qb.qry.Nodes[nodeID]
+	node := qb.qry.Nodes[nodeID]
 
 	ctx.binder = NewTableBinder(qb, ctx)
 
-	switch tbl.Cond.(type) {
+	switch cond := tbl.Cond.(type) {
 	case *tree.OnJoinCond:
-		panic("buildJoinTable not implement 1")
+		joinConds, err := splitAndBindCondition(cond.Expr, ctx)
+		if err != nil {
+			return 0, err
+		}
+
+		node.OnList = joinConds
 
 	case *tree.UsingJoinCond:
 		panic("buildJoinTable not implement 2")
@@ -1485,7 +1490,20 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 				joinSides[i] = getJoinSide(filter, leftTags, rightTags)
 			}
 		} else if node.JoinType == plan.Node_LEFT {
-			panic("pushdownFilters not implement 3")
+			var newOnList []*plan.Expr
+			for _, cond := range node.OnList {
+				conj := splitPlanConjunction(applyDistributivity(cond))
+				for _, conjElem := range conj {
+					side := getJoinSide(conjElem, leftTags, rightTags)
+					if side&JoinSideLeft == 0 {
+						rightPushdown = append(rightPushdown, conjElem)
+					} else {
+						newOnList = append(newOnList, conjElem)
+					}
+				}
+			}
+
+			node.OnList = newOnList
 		}
 
 		for i, filter := range filters {

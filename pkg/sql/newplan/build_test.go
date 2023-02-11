@@ -626,6 +626,36 @@ func Test_build16_q12(t *testing.T) {
 	})
 }
 
+func Test_build16_q13(t *testing.T) {
+	convey.Convey("tpch-q13", t, func() {
+		sql := `select
+					c_count,
+					count(*) as custdist
+				from
+					(
+						select
+							c_custkey,
+							count(o_orderkey)
+						from
+							customer left outer join orders on
+								c_custkey = o_custkey
+								and o_comment not like '%pending%accounts%'
+						group by
+							c_custkey
+					) as c_orders (c_custkey, c_count)
+				group by
+					c_count
+				order by
+					custdist desc,
+					c_count desc
+				;
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select

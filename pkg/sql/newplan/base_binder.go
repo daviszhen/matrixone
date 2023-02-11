@@ -324,7 +324,8 @@ func (b *baseBinder) bindComparisonExpr(astExpr *tree.ComparisonExpr, depth int3
 		op = "like"
 
 	case tree.NOT_LIKE:
-		return nil, moerr.NewInternalError("not implement bindComparisonExpr 1")
+		newExpr := tree.NewComparisonExpr(tree.LIKE, astExpr.Left, astExpr.Right)
+		return b.bindFuncExprImplByAstExpr("not", []tree.Expr{newExpr}, depth)
 	case tree.NOT_IN:
 		return nil, moerr.NewInternalError("not implement bindComparisonExpr 2")
 	case tree.REG_MATCH:
