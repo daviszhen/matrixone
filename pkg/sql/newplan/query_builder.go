@@ -24,6 +24,58 @@ func NewQueryBuilder(queryType plan.Query_StatementType, ctx plan2.CompilerConte
 }
 
 func (qb *QueryBuilder) buildSelect(stmt *tree.Select, ctx *BindContext, isRoot bool) (int32, error) {
+	if stmt.With != nil {
+		ctx.cteByName = make(map[string]*CTERef)
+		maskedNames := make([]string, len(stmt.With.CTEs))
+
+		for i := range stmt.With.CTEs {
+			idx := len(stmt.With.CTEs) - i - 1
+			cte := stmt.With.CTEs[idx]
+
+			name := string(cte.Name.Alias)
+			if _, ok := ctx.cteByName[name]; ok {
+				return 0, moerr.NewSyntaxError("WITH query name %q specified more than once", name)
+			}
+
+			var maskedCTEs map[string]any
+			if len(maskedNames) > 0 {
+				maskedCTEs = make(map[string]any)
+				for _, mask := range maskedNames {
+					maskedCTEs[mask] = nil
+				}
+			}
+
+			maskedNames = append(maskedNames, name)
+
+			ctx.cteByName[name] = &CTERef{
+				ast:        cte,
+				maskedCTEs: maskedCTEs,
+			}
+		}
+
+		// Try to do binding for CTE at declaration
+		for _, cte := range stmt.With.CTEs {
+			subCtx := NewBindContext(ctx)
+			subCtx.maskedCTEs = ctx.cteByName[string(cte.Name.Alias)].maskedCTEs
+
+			var err error
+			switch stmt := cte.Stmt.(type) {
+			case *tree.Select:
+				_, err = qb.buildSelect(stmt, subCtx, false)
+
+			case *tree.ParenSelect:
+				_, err = qb.buildSelect(stmt.Select, subCtx, false)
+
+			default:
+				err = moerr.NewParseError("unexpected statement: '%v'", tree.String(stmt, dialect.MYSQL))
+			}
+
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+
 	astOrderBy := stmt.OrderBy
 	astLimit := stmt.Limit
 
@@ -420,47 +472,47 @@ func (qb *QueryBuilder) buildTable(stmt tree.TableExpr, ctx *BindContext) (nodeI
 		}
 
 		if len(schema) == 0 {
-			//cteRef := ctx.findCTE(table)
-			//if cteRef != nil {
-			//	subCtx := NewBindContext(ctx)
-			//	subCtx.maskedCTEs = cteRef.maskedCTEs
-			//	subCtx.cteName = table
-			//	//reset defaultDatabase
-			//	if len(cteRef.defaultDatabase) > 0 {
-			//		subCtx.defaultDatabase = cteRef.defaultDatabase
-			//	}
-			//
-			//	switch stmt := cteRef.ast.Stmt.(type) {
-			//	case *tree.Select:
-			//		nodeID, err = qb.buildSelect(stmt, subCtx, false)
-			//
-			//	case *tree.ParenSelect:
-			//		nodeID, err = qb.buildSelect(stmt.Select, subCtx, false)
-			//
-			//	default:
-			//		err = moerr.NewParseError("unexpected statement: '%v'", tree.String(stmt, dialect.MYSQL))
-			//	}
-			//
-			//	if err != nil {
-			//		return
-			//	}
-			//
-			//	if subCtx.hasSingleRow {
-			//		ctx.hasSingleRow = true
-			//	}
-			//
-			//	cols := cteRef.ast.Name.Cols
-			//
-			//	if len(cols) > len(subCtx.headings) {
-			//		return 0, moerr.NewSyntaxError("table %q has %d columns available but %d columns specified", table, len(subCtx.headings), len(cols))
-			//	}
-			//
-			//	for i, col := range cols {
-			//		subCtx.headings[i] = string(col)
-			//	}
-			//
-			//	break
-			//}
+			cteRef := ctx.findCTE(table)
+			if cteRef != nil {
+				subCtx := NewBindContext(ctx)
+				subCtx.maskedCTEs = cteRef.maskedCTEs
+				subCtx.cteName = table
+				//reset defaultDatabase
+				if len(cteRef.defaultDatabase) > 0 {
+					subCtx.defaultDatabase = cteRef.defaultDatabase
+				}
+
+				switch stmt := cteRef.ast.Stmt.(type) {
+				case *tree.Select:
+					nodeID, err = qb.buildSelect(stmt, subCtx, false)
+
+				case *tree.ParenSelect:
+					nodeID, err = qb.buildSelect(stmt.Select, subCtx, false)
+
+				default:
+					err = moerr.NewParseError("unexpected statement: '%v'", tree.String(stmt, dialect.MYSQL))
+				}
+
+				if err != nil {
+					return
+				}
+
+				if subCtx.hasSingleRow {
+					ctx.hasSingleRow = true
+				}
+
+				cols := cteRef.ast.Name.Cols
+
+				if len(cols) > len(subCtx.headings) {
+					return 0, moerr.NewSyntaxError("table %q has %d columns available but %d columns specified", table, len(subCtx.headings), len(cols))
+				}
+
+				for i, col := range cols {
+					subCtx.headings[i] = string(col)
+				}
+
+				break
+			}
 			schema = ctx.defaultDatabase
 		}
 
