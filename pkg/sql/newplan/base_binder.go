@@ -53,7 +53,7 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.Tuple:
 		err = moerr.NewInternalError("not implement 14")
 	case *tree.CaseExpr:
-		err = moerr.NewInternalError("not implement 15")
+		expr, err = b.bindCaseExpr(exprImpl, depth, isRoot)
 	case *tree.IntervalExpr:
 		err = moerr.NewInternalError("not implement 16")
 	case *tree.XorExpr:
@@ -231,7 +231,26 @@ func (b *baseBinder) baseBindSubquery(astExpr *tree.Subquery, isRoot bool) (*pla
 }
 
 func (b *baseBinder) bindCaseExpr(astExpr *tree.CaseExpr, depth int32, isRoot bool) (*plan.Expr, error) {
-	return nil, moerr.NewInternalError("not implement 29")
+	args := make([]tree.Expr, 0, len(astExpr.Whens)+1)
+	caseExist := astExpr.Expr != nil
+
+	for _, whenExpr := range astExpr.Whens {
+		if caseExist {
+			newCandExpr := tree.NewComparisonExpr(tree.EQUAL, astExpr.Expr, whenExpr.Cond)
+			args = append(args, newCandExpr)
+		} else {
+			args = append(args, whenExpr.Cond)
+		}
+		args = append(args, whenExpr.Val)
+	}
+
+	if astExpr.Else != nil {
+		args = append(args, astExpr.Else)
+	} else {
+		args = append(args, tree.NewNumValWithType(constant.MakeUnknown(), "", false, tree.P_null))
+	}
+
+	return b.bindFuncExprImplByAstExpr("case", args, depth)
 }
 
 func (b *baseBinder) bindRangeCond(astExpr *tree.RangeCond, depth int32, isRoot bool) (*plan.Expr, error) {
