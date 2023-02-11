@@ -123,7 +123,6 @@ func (hb *HavingBinder) BindWinFunc(s string, expr *tree.FuncExpr, i int32, b bo
 	panic("implement me")
 }
 
-func (hb *HavingBinder) BindSubquery(subquery *tree.Subquery, b bool) (*plan.Expr, error) {
-	//TODO implement me
-	panic("implement me")
+func (hb *HavingBinder) BindSubquery(subquery *tree.Subquery, isRoot bool) (*plan.Expr, error) {
+	return hb.baseBindSubquery(subquery, isRoot)
 }

@@ -201,29 +201,29 @@ func Test_build9_q1(t *testing.T) {
 func Test_build10_q3(t *testing.T) {
 	convey.Convey("tpch-q3", t, func() {
 		sql := `select
-				l_orderkey,
-				sum(l_extendedprice * (1 - l_discount)) as revenue,
-				o_orderdate,
-				o_shippriority
-			from
-				customer,
-				orders,
-				lineitem
-			where
-				c_mktsegment = 'HOUSEHOLD'
-				and c_custkey = o_custkey
-				and l_orderkey = o_orderkey
-				and o_orderdate < date '1995-03-29'
-				and l_shipdate > date '1995-03-29'
-			group by
-				l_orderkey,
-				o_orderdate,
-				o_shippriority
-			order by
-				revenue desc,
-				o_orderdate
-			limit 10
-			;`
+					l_orderkey,
+					sum(l_extendedprice * (1 - l_discount)) as revenue,
+					o_orderdate,
+					o_shippriority
+				from
+					customer,
+					orders,
+					lineitem
+				where
+					c_mktsegment = 'HOUSEHOLD'
+					and c_custkey = o_custkey
+					and l_orderkey = o_orderkey
+					and o_orderdate < date '1995-03-29'
+					and l_shipdate > date '1995-03-29'
+				group by
+					l_orderkey,
+					o_orderdate,
+					o_shippriority
+				order by
+					revenue desc,
+					o_orderdate
+				limit 10
+				;`
 		ret, err := runCase(sql)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(ret, convey.ShouldBeTrue)
@@ -267,38 +267,38 @@ func Test_build11_q5(t *testing.T) {
 func Test_build12_q10(t *testing.T) {
 	convey.Convey("tpch-q10", t, func() {
 		sql := `select
-	c_custkey,
-	c_name,
-	sum(l_extendedprice * (1 - l_discount)) as revenue,
-	c_acctbal,
-	n_name,
-	c_address,
-	c_phone,
-	c_comment
-from
-	customer,
-	orders,
-	lineitem,
-	nation
-where
-	c_custkey = o_custkey
-	and l_orderkey = o_orderkey
-	and o_orderdate >= date '1993-03-01'
-	and o_orderdate < date '1993-03-01' + interval '3' month
-	and l_returnflag = 'R'
-	and c_nationkey = n_nationkey
-group by
-	c_custkey,
-	c_name,
-	c_acctbal,
-	c_phone,
-	n_name,
-	c_address,
-	c_comment
-order by
-	revenue desc
-limit 20
-;
+					c_custkey,
+					c_name,
+					sum(l_extendedprice * (1 - l_discount)) as revenue,
+					c_acctbal,
+					n_name,
+					c_address,
+					c_phone,
+					c_comment
+				from
+					customer,
+					orders,
+					lineitem,
+					nation
+				where
+					c_custkey = o_custkey
+					and l_orderkey = o_orderkey
+					and o_orderdate >= date '1993-03-01'
+					and o_orderdate < date '1993-03-01' + interval '3' month
+					and l_returnflag = 'R'
+					and c_nationkey = n_nationkey
+				group by
+					c_custkey,
+					c_name,
+					c_acctbal,
+					c_phone,
+					n_name,
+					c_address,
+					c_comment
+				order by
+					revenue desc
+				limit 20
+				;
 
 `
 		ret, err := runCase(sql)
@@ -542,6 +542,44 @@ func Test_build16_q9(t *testing.T) {
 					nation,
 					o_year desc
 				;
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build16_q11(t *testing.T) {
+	convey.Convey("tpch-q11", t, func() {
+		sql := `select
+					ps_partkey,
+					sum(ps_supplycost * ps_availqty) as value
+				from
+					partsupp,
+					supplier,
+					nation
+				where
+					ps_suppkey = s_suppkey
+					and s_nationkey = n_nationkey
+					and n_name = 'JAPAN'
+				group by
+					ps_partkey 
+				having sum(ps_supplycost * ps_availqty) > (
+							select
+								sum(ps_supplycost * ps_availqty) * 0.0001000000
+							from
+								partsupp,
+								supplier,
+								nation
+							where
+								ps_suppkey = s_suppkey
+								and s_nationkey = n_nationkey
+								and n_name = 'JAPAN'
+						)
+				order by
+					value desc
+				;
+
 				`
 		ret, err := runCase(sql)
 		convey.So(err, convey.ShouldBeNil)
