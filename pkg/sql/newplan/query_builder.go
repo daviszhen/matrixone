@@ -1284,7 +1284,7 @@ func (qb *QueryBuilder) appendNode(node *plan.Node, ctx *BindContext) int32 {
 				Card: card,
 			}
 
-		case plan.Node_SEMI:
+		case plan.Node_SEMI, plan.Node_ANTI:
 			node.Cost = &plan.Cost{
 				Card: leftCost.Card * .7,
 			}
@@ -1685,5 +1685,76 @@ func (qb *QueryBuilder) pushdownFilters(nodeID int32, filters []*plan.Expr) (int
 }
 
 func (qb *QueryBuilder) pushdownSemiAntiJoins(nodeID int32) int32 {
+	// TODO: handle SEMI/ANTI joins in join order
+	node := qb.qry.Nodes[nodeID]
+
+	for i, childID := range node.Children {
+		node.Children[i] = qb.pushdownSemiAntiJoins(childID)
+	}
+
+	if node.NodeType != plan.Node_JOIN {
+		return nodeID
+	}
+
+	if node.JoinType != plan.Node_SEMI && node.JoinType != plan.Node_ANTI {
+		return nodeID
+	}
+
+	for _, filter := range node.OnList {
+		if f, ok := filter.Expr.(*plan.Expr_F); ok {
+			if f.F.Func.ObjName != "=" {
+				return nodeID
+			}
+		}
+	}
+
+	var targetNode *plan.Node
+	var targetSide int32
+
+	joinNode := qb.qry.Nodes[node.Children[0]]
+
+	for {
+		if joinNode.NodeType != plan.Node_JOIN {
+			break
+		}
+
+		if joinNode.JoinType != plan.Node_INNER && joinNode.JoinType != plan.Node_LEFT {
+			break
+		}
+
+		leftTags := make(map[int32]*Binding)
+		for _, tag := range qb.enumerateTags(joinNode.Children[0]) {
+			leftTags[tag] = nil
+		}
+
+		rightTags := make(map[int32]*Binding)
+		for _, tag := range qb.enumerateTags(joinNode.Children[1]) {
+			rightTags[tag] = nil
+		}
+
+		var joinSide int8
+		for _, cond := range node.OnList {
+			joinSide |= getJoinSide(cond, leftTags, rightTags)
+		}
+
+		if joinSide == JoinSideLeft {
+			targetNode = joinNode
+			targetSide = 0
+			joinNode = qb.qry.Nodes[joinNode.Children[0]]
+		} else if joinNode.JoinType == plan.Node_INNER && joinSide == JoinSideRight {
+			targetNode = joinNode
+			targetSide = 1
+			joinNode = qb.qry.Nodes[joinNode.Children[1]]
+		} else {
+			break
+		}
+	}
+
+	if targetNode != nil {
+		nodeID = node.Children[0]
+		node.Children[0] = targetNode.Children[targetSide]
+		targetNode.Children[targetSide] = node.NodeId
+	}
+
 	return nodeID
 }

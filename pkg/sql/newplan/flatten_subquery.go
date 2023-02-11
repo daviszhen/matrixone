@@ -312,7 +312,21 @@ func (qb *QueryBuilder) flattenSubquery(nodeID int32, subquery *plan.SubqueryRef
 		return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented 4")
 
 	case plan.SubqueryRef_NOT_IN:
-		return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented 5")
+		expr, err := qb.generateComparison("=", subquery.Child, subCtx)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		joinPreds = append(joinPreds, expr)
+
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType: plan.Node_JOIN,
+			Children: []int32{nodeID, subID},
+			JoinType: plan.Node_ANTI,
+			OnList:   joinPreds,
+		}, ctx)
+
+		return nodeID, nil, nil
 
 	case plan.SubqueryRef_ANY:
 		return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented 6")
@@ -323,4 +337,130 @@ func (qb *QueryBuilder) flattenSubquery(nodeID int32, subquery *plan.SubqueryRef
 		return 0, nil, moerr.NewNotSupported("%s subquery not supported", subquery.Typ.String())
 	}
 	return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented")
+}
+
+func (qb *QueryBuilder) generateComparison(op string, child *plan.Expr, ctx *BindContext) (*plan.Expr, error) {
+	switch childImpl := child.Expr.(type) {
+	case *plan.Expr_List:
+		childList := childImpl.List.List
+		switch op {
+		case "=":
+			leftExpr, err := bindFuncExprImplByPlanExpr(op, []*plan.Expr{
+				childList[0],
+				{
+					Typ: ctx.results[0].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: ctx.rootTag(),
+							ColPos: 0,
+						},
+					},
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			for i := 1; i < len(childList); i++ {
+				rightExpr, err := bindFuncExprImplByPlanExpr(op, []*plan.Expr{
+					childList[i],
+					{
+						Typ: ctx.results[i].Typ,
+						Expr: &plan.Expr_Col{
+							Col: &plan.ColRef{
+								RelPos: ctx.rootTag(),
+								ColPos: int32(i),
+							},
+						},
+					},
+				})
+				if err != nil {
+					return nil, err
+				}
+
+				leftExpr, err = bindFuncExprImplByPlanExpr("and", []*plan.Expr{leftExpr, rightExpr})
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			return leftExpr, nil
+
+		case "<>":
+			leftExpr, err := bindFuncExprImplByPlanExpr(op, []*plan.Expr{
+				childList[0],
+				{
+					Typ: ctx.results[0].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: ctx.rootTag(),
+							ColPos: 0,
+						},
+					},
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			for i := 1; i < len(childList); i++ {
+				rightExpr, err := bindFuncExprImplByPlanExpr(op, []*plan.Expr{
+					childList[i],
+					{
+						Typ: ctx.results[i].Typ,
+						Expr: &plan.Expr_Col{
+							Col: &plan.ColRef{
+								RelPos: ctx.rootTag(),
+								ColPos: int32(i),
+							},
+						},
+					},
+				})
+				if err != nil {
+					return nil, err
+				}
+
+				leftExpr, err = bindFuncExprImplByPlanExpr("or", []*plan.Expr{leftExpr, rightExpr})
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			return leftExpr, nil
+
+		case "<", "<=", ">", ">=":
+			projList := make([]*plan.Expr, len(childList))
+			for i := range projList {
+				projList[i] = &plan.Expr{
+					Typ: ctx.results[i].Typ,
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							RelPos: ctx.rootTag(),
+							ColPos: int32(i),
+						},
+					},
+				}
+			}
+
+			nonEqOp := op[:1] // <= -> <, >= -> >
+			return unwindTupleComparison(nonEqOp, op, childList, projList, 0)
+
+		default:
+			return nil, moerr.NewNotSupported("row constructor only support comparison operators")
+		}
+
+	default:
+		return bindFuncExprImplByPlanExpr(op, []*plan.Expr{
+			child,
+			{
+				Typ: ctx.results[0].Typ,
+				Expr: &plan.Expr_Col{
+					Col: &plan.ColRef{
+						RelPos: ctx.rootTag(),
+						ColPos: 0,
+					},
+				},
+			},
+		})
+	}
 }
