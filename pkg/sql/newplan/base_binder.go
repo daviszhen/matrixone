@@ -28,7 +28,24 @@ func (b *baseBinder) baseBindExpr(astExpr tree.Expr, depth int32, isRoot bool) (
 	case *tree.OrExpr:
 		expr, err = b.bindFuncExprImplByAstExpr("or", []tree.Expr{exprImpl.Left, exprImpl.Right}, depth)
 	case *tree.NotExpr:
-		err = moerr.NewInternalError("not implement 3")
+		if subqueryAst, ok := exprImpl.Expr.(*tree.Subquery); ok {
+			expr, err = b.impl.BindSubquery(subqueryAst, isRoot)
+			if err != nil {
+				return
+			}
+
+			subquery := expr.Expr.(*plan.Expr_Sub)
+			if subquery.Sub.Typ == plan.SubqueryRef_EXISTS {
+				subquery.Sub.Typ = plan.SubqueryRef_NOT_EXISTS
+			}
+		} else {
+			expr, err = b.impl.BindExpr(exprImpl.Expr, depth, false)
+			if err != nil {
+				return
+			}
+
+			expr, err = bindFuncExprImplByPlanExpr("not", []*plan.Expr{expr})
+		}
 	case *tree.AndExpr:
 		expr, err = b.bindFuncExprImplByAstExpr("and", []tree.Expr{exprImpl.Left, exprImpl.Right}, depth)
 

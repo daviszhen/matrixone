@@ -306,11 +306,36 @@ func (qb *QueryBuilder) flattenSubquery(nodeID int32, subquery *plan.SubqueryRef
 		return nodeID, nil, nil
 
 	case plan.SubqueryRef_NOT_EXISTS:
-		return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented 3")
+		// Uncorrelated subquery
+		if len(joinPreds) == 0 {
+			joinPreds = append(joinPreds, constTrue)
+		}
+
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType: plan.Node_JOIN,
+			Children: []int32{nodeID, subID},
+			JoinType: plan.Node_ANTI,
+			OnList:   joinPreds,
+		}, ctx)
+
+		return nodeID, nil, nil
 
 	case plan.SubqueryRef_IN:
-		return 0, nil, moerr.NewInternalError("flattenSubquery is not implemented 4")
+		expr, err := qb.generateComparison("=", subquery.Child, subCtx)
+		if err != nil {
+			return 0, nil, err
+		}
 
+		joinPreds = append(joinPreds, expr)
+
+		nodeID = qb.appendNode(&plan.Node{
+			NodeType: plan.Node_JOIN,
+			Children: []int32{nodeID, subID},
+			JoinType: plan.Node_SEMI,
+			OnList:   joinPreds,
+		}, ctx)
+
+		return nodeID, nil, nil
 	case plan.SubqueryRef_NOT_IN:
 		expr, err := qb.generateComparison("=", subquery.Child, subCtx)
 		if err != nil {

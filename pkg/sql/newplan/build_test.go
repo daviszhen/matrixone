@@ -761,6 +761,218 @@ func Test_build16_q16(t *testing.T) {
 	})
 }
 
+func Test_build16_q17(t *testing.T) {
+	convey.Convey("tpch-q17", t, func() {
+		sql := `select
+					sum(l_extendedprice) / 7.0 as avg_yearly
+				from
+					lineitem,
+					part
+				where
+					p_partkey = l_partkey
+					and p_brand = 'Brand#54'
+					and p_container = 'LG BAG'
+					and l_quantity < (
+						select
+							0.2 * avg(l_quantity)
+						from
+							lineitem
+						where
+							l_partkey = p_partkey
+					);
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build16_q18(t *testing.T) {
+	convey.Convey("tpch-q18", t, func() {
+		sql := `select
+					c_name,
+					c_custkey,
+					o_orderkey,
+					o_orderdate,
+					o_totalprice,
+					sum(l_quantity)
+				from
+					customer,
+					orders,
+					lineitem
+				where
+					o_orderkey in (
+						select
+							l_orderkey
+						from
+							lineitem
+						group by
+							l_orderkey having
+								sum(l_quantity) > 314
+					)
+					and c_custkey = o_custkey
+					and o_orderkey = l_orderkey
+				group by
+					c_name,
+					c_custkey,
+					o_orderkey,
+					o_orderdate,
+					o_totalprice
+				order by
+					o_totalprice desc,
+					o_orderdate
+				limit 100
+				;
+
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build16_q19(t *testing.T) {
+	convey.Convey("tpch-q19", t, func() {
+		sql := `select
+					sum(l_extendedprice* (1 - l_discount)) as revenue
+				from
+					lineitem,
+					part
+				where
+					(
+						p_partkey = l_partkey
+						and p_brand = 'Brand#23'
+						and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')
+						and l_quantity >= 5 and l_quantity <= 5 + 10
+						and p_size between 1 and 5
+						and l_shipmode in ('AIR', 'AIR REG')
+						and l_shipinstruct = 'DELIVER IN PERSON'
+					)
+					or
+					(
+						p_partkey = l_partkey
+						and p_brand = 'Brand#15'
+						and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')
+						and l_quantity >= 14 and l_quantity <= 14 + 10
+						and p_size between 1 and 10
+						and l_shipmode in ('AIR', 'AIR REG')
+						and l_shipinstruct = 'DELIVER IN PERSON'
+					)
+					or
+					(
+						p_partkey = l_partkey
+						and p_brand = 'Brand#44'
+						and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')
+						and l_quantity >= 28 and l_quantity <= 28 + 10
+						and p_size between 1 and 15
+						and l_shipmode in ('AIR', 'AIR REG')
+						and l_shipinstruct = 'DELIVER IN PERSON'
+					);
+
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build16_q20(t *testing.T) {
+	convey.Convey("tpch-q20", t, func() {
+		sql := `select
+					s_name,
+					s_address
+				from
+					supplier,
+					nation
+				where
+					s_suppkey in (
+						select
+							ps_suppkey
+						from
+							partsupp
+						where
+							ps_partkey in (
+								select
+									p_partkey
+								from
+									part
+								where
+									p_name like 'lime%'
+							)
+							and ps_availqty > (
+								select
+									0.5 * sum(l_quantity)
+								from
+									lineitem
+								where
+									l_partkey = ps_partkey
+									and l_suppkey = ps_suppkey
+									and l_shipdate >= date '1993-01-01'
+									and l_shipdate < date '1993-01-01' + interval '1' year
+							)
+					)
+					and s_nationkey = n_nationkey
+					and n_name = 'VIETNAM'
+				order by s_name
+				;
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
+func Test_build16_q21(t *testing.T) {
+	convey.Convey("tpch-q21", t, func() {
+		sql := `select
+					s_name,
+					count(*) as numwait
+				from
+					supplier,
+					lineitem l1,
+					orders,
+					nation
+				where
+					s_suppkey = l1.l_suppkey
+					and o_orderkey = l1.l_orderkey
+					and o_orderstatus = 'F'
+					and l1.l_receiptdate > l1.l_commitdate
+					and exists (
+						select
+							*
+						from
+							lineitem l2
+						where
+							l2.l_orderkey = l1.l_orderkey
+							and l2.l_suppkey <> l1.l_suppkey
+					)
+					and not exists (
+						select
+							*
+						from
+							lineitem l3
+						where
+							l3.l_orderkey = l1.l_orderkey
+							and l3.l_suppkey <> l1.l_suppkey
+							and l3.l_receiptdate > l3.l_commitdate
+					)
+					and s_nationkey = n_nationkey
+					and n_name = 'BRAZIL'
+				group by
+					s_name
+				order by
+					numwait desc,
+					s_name
+				limit 100
+				;
+
+				`
+		ret, err := runCase(sql)
+		convey.So(err, convey.ShouldBeNil)
+		convey.So(ret, convey.ShouldBeTrue)
+	})
+}
+
 func Test_Debug(t *testing.T) {
 	cc := sqlplan.NewMockCompilerContext()
 	sql := `select
