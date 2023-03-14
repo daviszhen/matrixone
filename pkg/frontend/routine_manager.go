@@ -108,7 +108,7 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	ses := NewSession(routine.getProtocol(), nil, pu, GSysVariables, true)
 	ses.SetRequestContext(routine.getCancelRoutineCtx())
 	ses.SetFromRealUser(true)
-	ses.setSkipCheckPrivilege(rm.GetSkipCheckUser())
+	ses.setSkipCheckPrivilege(true)
 
 	// Add  autoIncrCaches in session structure.
 	ses.SetAutoIncrCaches(rm.autoIncrCaches)

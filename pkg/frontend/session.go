@@ -1526,11 +1526,23 @@ func (th *TxnHandler) TxnClientNew() error {
 	return err
 }
 
+func printCtx(ctx context.Context, tips string) {
+	d, o := ctx.Deadline()
+	select {
+	case <-ctx.Done():
+		logutil.Errorf("%s err %v \n", tips, ctx.Err())
+	default:
+	}
+
+	logutil.Errorf("%s ctx %p %v \n deadline %v \n ok %v \n err %v \n", tips, ctx, ctx, d, o, ctx.Err())
+}
+
 // NewTxn commits the old transaction if it existed.
 // Then it creates the new transaction.
 func (th *TxnHandler) NewTxn() error {
 	var err error
 	ctx := th.GetSession().GetRequestContext()
+	printCtx(ctx, "==>TxnHandler.NewTxn")
 	if th.IsValidTxn() {
 		err = th.CommitTxn()
 		if err != nil {
@@ -1598,6 +1610,7 @@ func (th *TxnHandler) CommitTxn() error {
 	ses := th.GetSession()
 	sessionProfile := ses.GetConciseProfile()
 	ctx := ses.GetRequestContext()
+	printCtx(ctx, "==>TxnHandler.CommitTxn")
 	if ctx == nil {
 		panic("context should not be nil")
 	}
@@ -1660,6 +1673,7 @@ func (th *TxnHandler) RollbackTxn() error {
 	ses := th.GetSession()
 	sessionProfile := ses.GetConciseProfile()
 	ctx := ses.GetRequestContext()
+	printCtx(ctx, "==>TxnHandler.RollbackTxn")
 	if ctx == nil {
 		panic("context should not be nil")
 	}

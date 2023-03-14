@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -674,4 +675,19 @@ func TestSetTempTableStorage(t *testing.T) {
 	dnStore, _ := ses.SetTempTableStorage(ck)
 
 	assert.Equal(t, defines.TEMPORARY_TABLE_DN_ADDR, dnStore.TxnServiceAddress)
+}
+
+func TestCtx(t *testing.T) {
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	time.Sleep(time.Second)
+	cancel1()
+	d, o := ctx1.Deadline()
+
+	select {
+	case <-ctx1.Done():
+		fmt.Printf("err %v \n", ctx1.Err())
+	default:
+	}
+
+	fmt.Printf("ctx %v \n deadline %v \n ok %v \n err %v \n", ctx1, d, o, ctx1.Err())
 }
