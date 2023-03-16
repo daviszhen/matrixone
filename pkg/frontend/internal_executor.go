@@ -41,7 +41,7 @@ func applyOverride(sess *Session, opts ie.SessionOverrideOptions) {
 	}
 
 	if opts.IsInternal != nil {
-		sess.isInternal = *opts.IsInternal
+		sess.SetIsInternal(*opts.IsInternal)
 	}
 }
 
@@ -149,7 +149,7 @@ func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.Sessi
 	defer sess.Dispose()
 	ie.executor.SetSession(sess)
 	ie.proto.stashResult = true
-	logutil.Info("internalExecutor new session", trace.ContextField(ctx), zap.String("session uuid", sess.uuid.String()))
+	logutil.Info("internalExecutor new session", trace.ContextField(ctx), zap.String("session uuid", sess.GetUUIDString()))
 	err := ie.executor.doComQuery(ctx, sql)
 	res := ie.proto.swapOutResult()
 	res.err = err

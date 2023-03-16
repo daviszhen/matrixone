@@ -45,10 +45,11 @@ func getPathOfQueryResultFile(fileName string) string {
 }
 
 func openSaveQueryResult(ses *Session) bool {
-	if ses.ast == nil || ses.tStmt == nil {
+	tStmt := ses.GetTraceStmt()
+	if ses.GetAst() == nil || tStmt == nil {
 		return false
 	}
-	if ses.tStmt.SqlSourceType == "internal_sql" || isSimpleResultQuery(ses.ast) {
+	if tStmt.SqlSourceType == "internal_sql" || isSimpleResultQuery(ses.GetAst()) {
 		return false
 	}
 	val, err := ses.GetGlobalVar("save_query_result")
@@ -56,7 +57,7 @@ func openSaveQueryResult(ses *Session) bool {
 		return false
 	}
 	if v, _ := val.(int8); v > 0 {
-		if ses.blockIdx == 0 {
+		if ses.GetBlockIdx() == 0 {
 			if err = initQueryResulConfig(ses); err != nil {
 				return false
 			}
@@ -73,9 +74,9 @@ func initQueryResulConfig(ses *Session) error {
 	}
 	switch v := val.(type) {
 	case uint64:
-		ses.limitResultSize = float64(v)
+		ses.SetLimitResultSize(float64(v))
 	case float64:
-		ses.limitResultSize = v
+		ses.SetLimitResultSize(v)
 	}
 	var p uint64
 	val, err = ses.GetGlobalVar("query_result_timeout")
@@ -88,8 +89,8 @@ func initQueryResulConfig(ses *Session) error {
 	case float64:
 		p = uint64(v)
 	}
-	ses.createdTime = time.Now()
-	ses.expiredTime = ses.createdTime.Add(time.Hour * time.Duration(p))
+	ses.SetCreatedTime(time.Now())
+	ses.SetExpiredTime(ses.GetCreatedTime().Add(time.Hour * time.Duration(p)))
 	return nil
 }
 
@@ -141,13 +142,13 @@ func isSimpleResultQuery(ast tree.Statement) bool {
 }
 
 func saveQueryResult(ses *Session, bat *batch.Batch) error {
-	s := ses.curResultSize + float64(bat.Size())/(1024*1024)
-	if s > ses.limitResultSize {
+	s := ses.GetCurResultSize() + float64(bat.Size())/(1024*1024)
+	if s > ses.GetLimitResultSize() {
 		return nil
 	}
 	fs := ses.GetParameterUnit().FileService
 	// write query result
-	path := catalog.BuildQueryResultPath(ses.GetTenantInfo().GetTenant(), uuid.UUID(ses.tStmt.StatementID).String(), ses.GetIncBlockIdx())
+	path := catalog.BuildQueryResultPath(ses.GetTenantInfo().GetTenant(), uuid.UUID(ses.GetTraceStmt().StatementID).String(), ses.GetIncBlockIdx())
 	writer, err := objectio.NewObjectWriter(path, fs)
 	if err != nil {
 		return err
@@ -158,68 +159,68 @@ func saveQueryResult(ses *Session, bat *batch.Batch) error {
 	}
 	option := objectio.WriteOptions{
 		Type: objectio.WriteTS,
-		Val:  ses.expiredTime,
+		Val:  ses.GetExpiredTime(),
 	}
-	_, err = writer.WriteEnd(ses.requestCtx, option)
+	_, err = writer.WriteEnd(ses.GetRequestContext(), option)
 	if err != nil {
 		return err
 	}
-	ses.curResultSize = s
+	ses.SetCurResultSize(s)
 	return nil
 }
 
 func saveQueryResultMeta(ses *Session) error {
 	defer func() {
 		ses.ResetBlockIdx()
-		ses.p = nil
-		ses.tStmt = nil
-		ses.curResultSize = 0
+		ses.SetPlan(nil)
+		ses.SetTraceStmt(nil)
+		ses.SetCurResultSize(0)
 	}()
 	fs := ses.GetParameterUnit().FileService
 	// write query result meta
-	colMap := buildColumnMap(ses.rs)
-	b, err := ses.rs.Marshal()
+	colMap := buildColumnMap(ses.GetResultColDef())
+	b, err := ses.GetResultColDef().Marshal()
 	if err != nil {
 		return err
 	}
 	buf := new(strings.Builder)
 	prefix := ",\n"
-	for i := 1; i <= ses.blockIdx; i++ {
+	for i := 1; i <= ses.GetBlockIdx(); i++ {
 		if i > 1 {
 			buf.WriteString(prefix)
 		}
-		buf.WriteString(catalog.BuildQueryResultPath(ses.GetTenantInfo().GetTenant(), uuid.UUID(ses.tStmt.StatementID).String(), i))
+		buf.WriteString(catalog.BuildQueryResultPath(ses.GetTenantInfo().GetTenant(), uuid.UUID(ses.GetTraceStmt().StatementID).String(), i))
 	}
 
-	sp, err := ses.p.Marshal()
+	sp, err := ses.GetPlan().Marshal()
 	if err != nil {
 		return err
 	}
-	st, err := simpleAstMarshal(ses.ast)
+	st, err := simpleAstMarshal(ses.GetAst())
 	if err != nil {
 		return nil
 	}
 	m := &catalog.Meta{
-		QueryId:     ses.tStmt.StatementID,
-		Statement:   ses.tStmt.Statement,
+		QueryId:     ses.GetTraceStmt().StatementID,
+		Statement:   ses.GetTraceStmt().Statement,
 		AccountId:   ses.GetTenantInfo().GetTenantID(),
-		RoleId:      ses.tStmt.RoleId,
+		RoleId:      ses.GetTraceStmt().RoleId,
 		ResultPath:  buf.String(),
-		CreateTime:  types.UnixToTimestamp(ses.createdTime.Unix()),
-		ResultSize:  ses.curResultSize,
+		CreateTime:  types.UnixToTimestamp(ses.GetCreatedTime().Unix()),
+		ResultSize:  ses.GetCurResultSize(),
 		Columns:     string(b),
-		Tables:      getTablesFromPlan(ses.p),
+		Tables:      getTablesFromPlan(ses.GetPlan()),
 		UserId:      ses.GetTenantInfo().GetUserID(),
-		ExpiredTime: types.UnixToTimestamp(ses.expiredTime.Unix()),
+		ExpiredTime: types.UnixToTimestamp(ses.GetExpiredTime().Unix()),
 		Plan:        string(sp),
 		Ast:         string(st),
 		ColumnMap:   colMap,
 	}
-	metaBat, err := buildQueryResultMetaBatch(m, ses.mp)
+	metaBat, err := buildQueryResultMetaBatch(m, ses.GetMemPool())
 	if err != nil {
 		return err
 	}
-	metaPath := catalog.BuildQueryResultMetaPath(ses.GetTenantInfo().GetTenant(), uuid.UUID(ses.tStmt.StatementID).String())
+	metaPath := catalog.BuildQueryResultMetaPath(ses.GetTenantInfo().GetTenant(), uuid.UUID(ses.GetTraceStmt().StatementID).String())
 	metaWriter, err := objectio.NewObjectWriter(metaPath, fs)
 	if err != nil {
 		return err
@@ -230,9 +231,9 @@ func saveQueryResultMeta(ses *Session) error {
 	}
 	option := objectio.WriteOptions{
 		Type: objectio.WriteTS,
-		Val:  ses.expiredTime,
+		Val:  ses.GetExpiredTime(),
 	}
-	_, err = metaWriter.WriteEnd(ses.requestCtx, option)
+	_, err = metaWriter.WriteEnd(ses.GetRequestContext(), option)
 	if err != nil {
 		return err
 	}

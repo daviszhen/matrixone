@@ -133,9 +133,9 @@ func Test_saveQueryResultMeta(t *testing.T) {
 		}
 	}
 
-	ses.rs = &plan.ResultColDef{
+	ses.SetResultColDef(&plan.ResultColDef{
 		ResultCols: colDefs,
-	}
+	})
 
 	testUUID := uuid.NullUUID{}.UUID
 	ses.tStmt = &motrace.StatementInfo{

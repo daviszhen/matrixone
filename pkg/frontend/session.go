@@ -182,7 +182,7 @@ type Session struct {
 
 	sqlSourceType []string
 
-	InitTempEngine bool
+	initTempEngine bool
 
 	tempTablestorage *memorystorage.Storage
 
@@ -192,9 +192,9 @@ type Session struct {
 
 	ast tree.Statement
 
-	rs *plan.ResultColDef
+	resultColDef *plan.ResultColDef
 
-	QueryId []string
+	queryIds []string
 
 	blockIdx int
 
@@ -213,6 +213,158 @@ type Session struct {
 	planCache *planCache
 
 	autoIncrCaches defines.AutoIncrCaches
+
+	// it is for the transaction and different from the requestCtx.
+	// it is created before the transaction is started and
+	// released after the transaction is commit or rollback.
+	// the lifetime of txnCtx is longer than the requestCtx.
+	// the timeout of txnCtx is from the FrontendParameters.SessionTimeout with
+	// default 24 hours.
+	txnCtx context.Context
+}
+
+func (ses *Session) SetAccountId(id uint32) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.accountId = id
+}
+
+func (ses *Session) GetAccountId() uint32 {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.accountId
+}
+
+func (ses *Session) GetSqlSourceType() []string {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.sqlSourceType
+}
+
+func (ses *Session) SetTraceStmt(si *motrace.StatementInfo) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.tStmt = si
+}
+
+func (ses *Session) GetTraceStmt() *motrace.StatementInfo {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.tStmt
+}
+
+func (ses *Session) SetAst(stmt tree.Statement) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.ast = stmt
+}
+
+func (ses *Session) GetAst() tree.Statement {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.ast
+}
+
+func (ses *Session) GetResultColDef() *plan.ResultColDef {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.resultColDef
+}
+
+func (ses *Session) SetResultColDef(rcd *plan.ResultColDef) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.resultColDef = rcd
+}
+
+func (ses *Session) GetQueryIds() []string {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.queryIds
+}
+
+func (ses *Session) ClearQueryIds() {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.queryIds = ses.queryIds[:0]
+}
+
+func (ses *Session) GetBlockIdx() int {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.blockIdx
+}
+
+func (ses *Session) SetPlan(p *plan.Plan) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.p = p
+}
+
+func (ses *Session) GetPlan() *plan.Plan {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.p
+}
+
+func (ses *Session) GetLimitResultSize() float64 {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.limitResultSize
+}
+
+func (ses *Session) SetLimitResultSize(size float64) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.limitResultSize = size
+}
+
+func (ses *Session) SetCurResultSize(size float64) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.curResultSize = size
+}
+
+func (ses *Session) GetCurResultSize() float64 {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.curResultSize
+}
+
+func (ses *Session) AddSentRows(n int) {
+	ses.sentRows.Add(int64(n))
+}
+
+func (ses *Session) CleanSentRows() {
+	ses.sentRows.Store(int64(0))
+}
+
+func (ses *Session) GetSentRows() int64 {
+	return ses.sentRows.Load()
+}
+
+func (ses *Session) SetCreatedTime(t time.Time) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.createdTime = t
+}
+
+func (ses *Session) GetCreatedTime() time.Time {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.createdTime
+}
+
+func (ses *Session) SetExpiredTime(t time.Time) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.expiredTime = t
+}
+
+func (ses *Session) GetExpiredTime() time.Time {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.expiredTime
 }
 
 // The update version. Four function.
@@ -231,20 +383,34 @@ func (ses *Session) GetAutoIncrCaches() defines.AutoIncrCaches {
 const saveQueryIdCnt = 10
 
 func (ses *Session) pushQueryId(uuid string) {
-	if len(ses.QueryId) > saveQueryIdCnt {
-		ses.QueryId = ses.QueryId[1:]
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	if len(ses.queryIds) > saveQueryIdCnt {
+		ses.queryIds = ses.queryIds[1:]
 	}
-	ses.QueryId = append(ses.QueryId, uuid)
+	ses.queryIds = append(ses.queryIds, uuid)
 }
 
 // Clean up all resources hold by the session.  As of now, the mpool
 func (ses *Session) Dispose() {
-	if ses.flag {
+	if ses.GetFlag() {
 		mp := ses.GetMemPool()
 		mpool.DeleteMPool(mp)
 		ses.SetMemPool(mp)
 	}
 	ses.cleanCache()
+}
+
+func (ses *Session) SetFlag(f bool) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.flag = f
+}
+
+func (ses *Session) GetFlag() bool {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.flag
 }
 
 type errInfo struct {
@@ -300,18 +466,19 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit, gSysV
 		planCache: newPlanCache(100),
 	}
 	if flag {
-		ses.sysVars = gSysVars.CopySysVarsToSession()
-		ses.userDefinedVars = make(map[string]interface{})
-		ses.prepareStmts = make(map[string]*PrepareStmt)
+		ses.InitSysVarsMap(gSysVars.CopySysVarsToSession())
+		ses.InitUserDefinedVarsMap()
+		ses.InitPrepareStmtMap()
 	}
-	ses.flag = flag
-	ses.uuid, _ = uuid.NewUUID()
+	ses.SetFlag(flag)
+	uuid, _ := uuid.NewUUID()
+	ses.SetUUID(uuid)
 	ses.SetOptionBits(OPTION_AUTOCOMMIT)
 	ses.GetTxnCompileCtx().SetSession(ses)
 	ses.GetTxnHandler().SetSession(ses)
 
 	var err error
-	if ses.mp == nil {
+	if ses.GetMemPool() == nil {
 		// If no mp, we create one for session.  Use GuestMmuLimitation as cap.
 		// fixed pool size can be another param, or should be computed from cap,
 		// but here, too lazy, just use Mid.
@@ -319,7 +486,9 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit, gSysV
 		// XXX MPOOL
 		// We don't have a way to close a session, so the only sane way of creating
 		// a mpool is to use NoFixed
-		ses.mp, err = mpool.NewMPool("pipeline-"+ses.GetUUIDString(), pu.SV.GuestMmuLimitation, mpool.NoFixed)
+		var mp2 *mpool.MPool
+		mp2, err = mpool.NewMPool("pipeline-"+ses.GetUUIDString(), pu.SV.GuestMmuLimitation, mpool.NoFixed)
+		ses.SetMemPool(mp2)
 		if err != nil {
 			panic(err)
 		}
@@ -350,7 +519,7 @@ func NewBackgroundSession(ctx context.Context, mp *mpool.MPool, PU *config.Param
 	ses.SetOutputCallback(fakeDataSetFetcher)
 	ses.SetAutoIncrCaches(autoincrcaches)
 	if stmt := motrace.StatementFromContext(ctx); stmt != nil {
-		logutil.Infof("session uuid: %s -> background session uuid: %s", uuid.UUID(stmt.SessionID).String(), ses.uuid.String())
+		logutil.Infof("session uuid: %s -> background session uuid: %s", uuid.UUID(stmt.SessionID).String(), ses.GetUUIDString())
 	}
 	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(ctx)
 	ses.SetRequestContext(cancelBackgroundCtx)
@@ -363,6 +532,8 @@ func NewBackgroundSession(ctx context.Context, mp *mpool.MPool, PU *config.Param
 }
 
 func (bgs *BackgroundSession) Close() {
+	bgs.mu.Lock()
+	defer bgs.mu.Unlock()
 	if bgs.cancel != nil {
 		bgs.cancel()
 	}
@@ -382,11 +553,15 @@ func (bgs *BackgroundSession) Close() {
 }
 
 func (ses *Session) GetIncBlockIdx() int {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
 	ses.blockIdx++
 	return ses.blockIdx
 }
 
 func (ses *Session) ResetBlockIdx() {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
 	ses.blockIdx = 0
 }
 
@@ -502,16 +677,21 @@ func (ses *Session) GetCompleteProfile() string {
 	return ses.getProfile(profileTypeAll)
 }
 
+func (ses *Session) SetInitTempEngine(t bool) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.initTempEngine = t
+}
+
 func (ses *Session) IfInitedTempEngine() bool {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	return ses.InitTempEngine
+	return ses.initTempEngine
 }
 
 func (ses *Session) GetTempTableStorage() *memorystorage.Storage {
-	if ses.tempTablestorage == nil {
-		panic("temp table storage is not initialized")
-	}
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
 	return ses.tempTablestorage
 }
 
@@ -542,7 +722,9 @@ func (ses *Session) SetTempTableStorage(ck clock.Clock) (*metadata.DNService, er
 	if err != nil {
 		return nil, err
 	}
+	ses.mu.Lock()
 	ses.tempTablestorage = ms
+	ses.mu.Unlock()
 	return &dnStore, nil
 }
 
@@ -560,7 +742,13 @@ func (ses *Session) InvalidatePrivilegeCache() {
 
 // GetBackgroundExec generates a background executor
 func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
-	return NewBackgroundHandler(ctx, ses.GetMemPool(), ses.GetParameterUnit(), ses.autoIncrCaches)
+	return NewBackgroundHandler(ctx, ses.GetMemPool(), ses.GetParameterUnit(), ses.GetAutoIncrCaches())
+}
+
+func (ses *Session) SetIsInternal(b bool) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.isInternal = b
 }
 
 func (ses *Session) GetIsInternal() bool {
@@ -678,6 +866,18 @@ func (ses *Session) GetRequestContext() context.Context {
 	return ses.requestCtx
 }
 
+func (ses *Session) SetTxnCtx(ctx context.Context) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.txnCtx = ctx
+}
+
+func (ses *Session) GetTxnCtx() context.Context {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.txnCtx
+}
+
 func (ses *Session) SetTimeZone(loc *time.Location) {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
@@ -751,7 +951,19 @@ func (ses *Session) GetTenantName(stmt tree.Statement) string {
 	return tenant
 }
 
-func (ses *Session) GetUUID() []byte {
+func (ses *Session) SetUUID(uuid uuid.UUID) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.uuid = uuid
+}
+
+func (ses *Session) GetUUID() uuid.UUID {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.uuid
+}
+
+func (ses *Session) GetUUIDSlice() []byte {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	return ses.uuid[:]
@@ -769,12 +981,17 @@ func (ses *Session) SetTenantInfo(ti *TenantInfo) {
 	ses.tenant = ti
 }
 
+func (ses *Session) InitPrepareStmtMap() {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.prepareStmts = make(map[string]*PrepareStmt)
+}
 func (ses *Session) SetPrepareStmt(name string, prepareStmt *PrepareStmt) error {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	if _, ok := ses.prepareStmts[name]; !ok {
 		if len(ses.prepareStmts) >= MaxPrepareNumberInOneSession {
-			return moerr.NewInvalidState(ses.requestCtx, "too many prepared statement, max %d", MaxPrepareNumberInOneSession)
+			return moerr.NewInvalidState(ses.GetRequestContext(), "too many prepared statement, max %d", MaxPrepareNumberInOneSession)
 		}
 	}
 	ses.prepareStmts[name] = prepareStmt
@@ -787,13 +1004,19 @@ func (ses *Session) GetPrepareStmt(name string) (*PrepareStmt, error) {
 	if prepareStmt, ok := ses.prepareStmts[name]; ok {
 		return prepareStmt, nil
 	}
-	return nil, moerr.NewInvalidState(ses.requestCtx, "prepared statement '%s' does not exist", name)
+	return nil, moerr.NewInvalidState(ses.GetRequestContext(), "prepared statement '%s' does not exist", name)
 }
 
 func (ses *Session) RemovePrepareStmt(name string) {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	delete(ses.prepareStmts, name)
+}
+
+func (ses *Session) InitSysVarsMap(m map[string]interface{}) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.sysVars = m
 }
 
 func (ses *Session) SetSysVar(name string, value interface{}) {
@@ -896,6 +1119,12 @@ func (ses *Session) CopyAllSessionVars() map[string]interface{} {
 		cp[k] = v
 	}
 	return cp
+}
+
+func (ses *Session) InitUserDefinedVarsMap() {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.userDefinedVars = make(map[string]interface{})
 }
 
 // SetUserDefinedVar sets the user defined variable to the value in session
@@ -1259,7 +1488,7 @@ an active transaction whichever it is started by BEGIN or in 'set autocommit = 0
 */
 func (ses *Session) SetAutocommit(on bool) error {
 	if ses.InActiveTransaction() {
-		return moerr.NewInternalError(ses.requestCtx, parameterModificationInTxnErrorInfo())
+		return moerr.NewInternalError(ses.GetRequestContext(), parameterModificationInTxnErrorInfo())
 	}
 	if on {
 		ses.ClearOptionBits(OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT)
@@ -1603,8 +1832,8 @@ func (th *TxnHandler) CommitTxn() error {
 	if ctx == nil {
 		panic("context should not be nil")
 	}
-	if ses.tempTablestorage != nil {
-		ctx = context.WithValue(ctx, defines.TemporaryDN{}, ses.tempTablestorage)
+	if ses.GetTempTableStorage() != nil {
+		ctx = context.WithValue(ctx, defines.TemporaryDN{}, ses.GetTempTableStorage())
 	}
 	storage := th.GetStorage()
 	ctx, cancel := context.WithTimeout(
@@ -1665,8 +1894,8 @@ func (th *TxnHandler) RollbackTxn() error {
 	if ctx == nil {
 		panic("context should not be nil")
 	}
-	if ses.tempTablestorage != nil {
-		ctx = context.WithValue(ctx, defines.TemporaryDN{}, ses.tempTablestorage)
+	if ses.GetTempTableStorage() != nil {
+		ctx = context.WithValue(ctx, defines.TemporaryDN{}, ses.GetTempTableStorage())
 	}
 	storage := th.GetStorage()
 	ctx, cancel := context.WithTimeout(
@@ -1829,11 +2058,11 @@ func (tcc *TxnCompilerContext) GetRootSql() string {
 }
 
 func (tcc *TxnCompilerContext) GetAccountId() uint32 {
-	return tcc.ses.accountId
+	return tcc.ses.GetAccountId()
 }
 
 func (tcc *TxnCompilerContext) GetContext() context.Context {
-	return tcc.ses.requestCtx
+	return tcc.ses.GetRequestContext()
 }
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
@@ -1904,7 +2133,7 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (con
 }
 
 func (tcc *TxnCompilerContext) getTmpRelation(ctx context.Context, tableName string) (engine.Relation, error) {
-	e := tcc.ses.storage
+	e := tcc.ses.GetStorage()
 	txn, err := tcc.txnHandler.GetTxn()
 	if err != nil {
 		return nil, err

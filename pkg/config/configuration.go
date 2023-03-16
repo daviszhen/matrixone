@@ -131,7 +131,7 @@ var (
 	// defaultPathBuilder, val in [DBTable, AccountDate]
 	defaultPathBuilder = "AccountDate"
 
-	// defaultSessionTimeout default: 10 minutes
+	// defaultSessionTimeout default: 24 hours
 	defaultSessionTimeout = 24 * time.Hour
 
 	// defaultLogsExtension default: tae. Support val in [csv, tae]
@@ -268,7 +268,7 @@ type FrontendParameters struct {
 
 	EnableDoComQueryInProgress bool `toml:"comQueryInProgress"`
 
-	//timeout of the session. the default is 10minutes
+	//timeout of the session. the default is 24 hours.
 	SessionTimeout toml.Duration `toml:"sessionTimeout"`
 
 	// MaxMessageSize max size for read messages from dn. Default is 10M

@@ -609,9 +609,7 @@ func TestSession_GetTempTableStorage(t *testing.T) {
 	gSysVars := &GlobalSystemVariables{}
 
 	ses := genSession(ctrl, pu, gSysVars)
-	assert.Panics(t, func() {
-		_ = ses.GetTempTableStorage()
-	})
+	assert.Nil(t, ses.GetTempTableStorage())
 }
 
 func TestIfInitedTempEngine(t *testing.T) {

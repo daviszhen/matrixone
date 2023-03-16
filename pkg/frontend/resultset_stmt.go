@@ -151,7 +151,7 @@ func (sec *ShowTableStatusExecutor) Setup(ctx context.Context, ses *Session) err
 	if err != nil {
 		return err
 	}
-	ses.showStmtType = ShowTableStatus
+	ses.SetShowStmtType(ShowTableStatus)
 	ses.SetData(nil)
 	return nil
 }

@@ -225,7 +225,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 		}
 	}
 	var sesID uuid.UUID
-	copy(sesID[:], ses.GetUUID())
+	copy(sesID[:], ses.GetUUIDSlice())
 	requestAt := envBegin
 	if !useEnv {
 		requestAt = time.Now()
@@ -236,7 +236,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	if cw != nil {
 		copy(stmID[:], cw.GetUUID())
 		statement = cw.GetAst()
-		ses.ast = statement
+		ses.SetAst(statement)
 		fmtCtx := tree.NewFmtCtx(dialect.MYSQL, tree.WithQuoteString(true))
 		statement.Format(fmtCtx)
 		text = SubStringFromBegin(fmtCtx.String(), int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
@@ -262,7 +262,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 		QueryType:            getStatementType(statement).GetQueryType(),
 	}
 	if sqlType != "internal_sql" {
-		ses.tStmt = stm
+		ses.SetTraceStmt(stm)
 		ses.pushQueryId(types.Uuid(stmID).ToString())
 	}
 	if !stm.IsZeroTxnID() {
@@ -442,22 +442,23 @@ func (foq *fakeOutputQueue) flush() error {
 }
 
 func handleShowTableStatus(ses *Session, stmt *tree.ShowTableStatus, proc *process.Process) error {
-	db, err := ses.GetStorage().Database(ses.requestCtx, stmt.DbName, proc.TxnOperator)
+	requestCtx := ses.GetRequestContext()
+	db, err := ses.GetStorage().Database(requestCtx, stmt.DbName, proc.TxnOperator)
 	if err != nil {
 		return err
 	}
 	mrs := ses.GetMysqlResultSet()
-	for _, row := range ses.data {
+	for _, row := range ses.GetData() {
 		tableName := string(row[0].([]byte))
-		r, err := db.Relation(ses.requestCtx, tableName)
+		r, err := db.Relation(requestCtx, tableName)
 		if err != nil {
 			return err
 		}
-		_, err = r.Ranges(ses.requestCtx, nil)
+		_, err = r.Ranges(requestCtx, nil)
 		if err != nil {
 			return err
 		}
-		row[3], err = r.Rows(ses.requestCtx)
+		row[3], err = r.Rows(requestCtx)
 		if err != nil {
 			return err
 		}
@@ -532,7 +533,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 
 	procBatchTime := time.Since(procBatchBegin)
 	tTime := time.Since(begin)
-	ses.sentRows.Add(int64(n))
+	ses.AddSentRows(n)
 	logInfof(ses.GetConciseProfile(), "rowCount %v \n"+
 		"time of getDataFromPipeline : %s \n"+
 		"processBatchTime %v \n"+
@@ -653,7 +654,7 @@ func extractRowFromVector(ses *Session, vec *vector.Vector, i int, row []interfa
 		row[i] = vector.GetFixedAt[types.Rowid](vec, rowIndex)
 	default:
 		logErrorf(ses.GetConciseProfile(), "extractRowFromVector : unsupported type %d", vec.GetType().Oid)
-		return moerr.NewInternalError(ses.requestCtx, "extractRowFromVector : unsupported type %d", vec.GetType().Oid)
+		return moerr.NewInternalError(ses.GetRequestContext(), "extractRowFromVector : unsupported type %d", vec.GetType().Oid)
 	}
 	return nil
 }
@@ -803,7 +804,7 @@ func (mce *MysqlCmdExecutor) dumpData2File(requestCtx context.Context, dump *tre
 				buf.Reset()
 			}
 			if rbat != nil {
-				rbat.Clean(ses.mp)
+				rbat.Clean(ses.GetMemPool())
 			}
 			removeFile(dump.OutFile, curFileIdx)
 		}
@@ -836,7 +837,7 @@ func (mce *MysqlCmdExecutor) dumpData2File(requestCtx context.Context, dump *tre
 			return err
 		}
 		for {
-			bat, err := rds[0].Read(requestCtx, param.attrs, nil, ses.mp)
+			bat, err := rds[0].Read(requestCtx, param.attrs, nil, ses.GetMemPool())
 			if err != nil {
 				return err
 			}
@@ -847,7 +848,7 @@ func (mce *MysqlCmdExecutor) dumpData2File(requestCtx context.Context, dump *tre
 			buf.WriteString("INSERT INTO ")
 			buf.WriteString(param.name)
 			buf.WriteString(" VALUES ")
-			rbat, err = convertValueBat2Str(requestCtx, bat, ses.mp, ses.GetTimeZone())
+			rbat, err = convertValueBat2Str(requestCtx, bat, ses.GetMemPool(), ses.GetTimeZone())
 			if err != nil {
 				return err
 			}
@@ -1175,8 +1176,8 @@ func (mce *MysqlCmdExecutor) handleShowErrors(cwIndex, cwsLen int) error {
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
 
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -1311,8 +1312,8 @@ func (mce *MysqlCmdExecutor) handleShowVariables(sv *tree.ShowVariables, proc *p
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
 
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -1820,7 +1821,7 @@ func (cwft *TxnComputationWrapper) GetColumns() ([]interface{}, error) {
 		c.SetOrgTable(col.Typ.Table)
 		c.SetAutoIncr(col.Typ.AutoIncr)
 		c.SetSchema(cwft.ses.GetTxnCompileCtx().DefaultDatabase())
-		err = convertEngineTypeToMysqlType(cwft.ses.requestCtx, types.T(col.Typ.Id), c)
+		err = convertEngineTypeToMysqlType(cwft.ses.GetRequestContext(), types.T(col.Typ.Id), c)
 		if err != nil {
 			return nil, err
 		}
@@ -1861,13 +1862,13 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	if !cacheHit {
 		cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 	} else if cwft.ses != nil && cwft.ses.GetTenantInfo() != nil {
-		cwft.ses.accountId = getAccountId(requestCtx)
+		cwft.ses.SetAccountId(getAccountId(requestCtx))
 		err = authenticateCanExecuteStatementAndPlan(requestCtx, cwft.ses, cwft.stmt, cwft.plan)
 	}
 	if err != nil {
 		return nil, err
 	}
-	cwft.ses.p = cwft.plan
+	cwft.ses.SetPlan(cwft.plan)
 	if ids := isResultQuery(cwft.plan); ids != nil {
 		if err = checkPrivilege(ids, requestCtx, cwft.ses); err != nil {
 			return nil, err
@@ -1911,7 +1912,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		// reset some special stmt for execute statement
 		switch cwft.stmt.(type) {
 		case *tree.ShowTableStatus:
-			cwft.ses.showStmtType = ShowTableStatus
+			cwft.ses.SetShowStmtType(ShowTableStatus)
 			cwft.ses.SetData(nil)
 		case *tree.SetVar, *tree.ShowVariables, *tree.ShowErrors, *tree.ShowWarnings:
 			return nil, nil
@@ -1993,11 +1994,11 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		// 2. bind the temporary engine to the session and txnHandler
 		cwft.ses.SetTempEngine(requestCtx, tempEngine)
 		cwft.compile.SetTempEngine(requestCtx, tempEngine)
-		txnHandler := cwft.ses.txnCompileCtx.txnHandler
+		txnHandler := cwft.ses.GetTxnCompileCtx().txnHandler
 		txnHandler.SetTempEngine(tempEngine)
 
 		// 3. init temp-db to store temporary relations
-		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.txnHandler.txn)
+		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.GetTxnHandler().txn)
 		if err != nil {
 			return nil, err
 		}
@@ -2005,7 +2006,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		// 4. add auto_IncrementTable fortemp-db
 		colexec.CreateAutoIncrTable(cwft.ses.GetStorage(), requestCtx, cwft.proc, defines.TEMPORARY_DBNAME)
 
-		cwft.ses.InitTempEngine = true
+		cwft.ses.SetInitTempEngine(true)
 	}
 	return cwft.compile, err
 }
@@ -2084,7 +2085,7 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	var ret *plan2.Plan
 	var err error
 	if ses != nil {
-		ses.accountId = getAccountId(requestCtx)
+		ses.SetAccountId(getAccountId(requestCtx))
 	}
 	if s, ok := stmt.(*tree.Insert); ok {
 		if _, ok := s.Rows.Select.(*tree.ValuesClause); ok {
@@ -2782,9 +2783,11 @@ func (mce *MysqlCmdExecutor) canExecuteStatementInUncommittedTransaction(request
 	return nil
 }
 
-func (ses *Session) getSqlType(sql string) {
+func (ses *Session) generateSqlType(sql string) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
 	ses.sqlSourceType = nil
-	tenant := ses.GetTenantInfo()
+	tenant := ses.tenant
 	if tenant == nil || strings.HasPrefix(sql, cmdFieldListSql) {
 		ses.sqlSourceType = append(ses.sqlSourceType, intereSql)
 		return
@@ -2924,7 +2927,7 @@ func (mce *MysqlCmdExecutor) processLoadLocal(ctx context.Context, param *tree.E
 func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) (retErr error) {
 	beginInstant := time.Now()
 	ses := mce.GetSession()
-	ses.getSqlType(sql)
+	ses.generateSqlType(sql)
 	ses.SetShowStmtType(NotShowStatement)
 	proto := ses.GetMysqlProtocol()
 	ses.SetSql(sql)
@@ -2951,7 +2954,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		StorageEngine:     pu.StorageEngine,
 		LastInsertID:      ses.GetLastInsertID(),
 		AutoIncrCaches:    ses.GetAutoIncrCaches(),
-		AutoIncrCacheSize: ses.pu.SV.AutoIncrCacheSize,
+		AutoIncrCacheSize: ses.GetParameterUnit().SV.AutoIncrCacheSize,
 	}
 	if ses.GetTenantInfo() != nil {
 		proc.SessionInfo.Account = ses.GetTenantInfo().GetTenant()
@@ -2969,8 +2972,8 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		proc.SessionInfo.RoleId = moAdminRoleID
 		proc.SessionInfo.UserId = rootID
 	}
-	proc.SessionInfo.QueryId = ses.QueryId
-	ses.txnCompileCtx.SetProcess(proc)
+	proc.SessionInfo.QueryId = ses.GetQueryIds()
+	ses.GetTxnCompileCtx().SetProcess(proc)
 	cws, err := GetComputationWrapper(ses.GetDatabaseName(),
 		sql,
 		ses.GetUserName(),
@@ -2978,7 +2981,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		proc, ses)
 	if err != nil {
 		sql = removePrefixComment(sql)
-		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, sql, ses.sqlSourceType[0])
+		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, sql, ses.GetSqlSourceType()[0])
 		retErr = err
 		if _, ok := err.(*moerr.Error); !ok {
 			retErr = moerr.NewParseError(requestCtx, err.Error())
@@ -3019,11 +3022,11 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		}
 
 		ses.SetMysqlResultSet(&MysqlResultSet{})
-		ses.sentRows.Store(int64(0))
+		ses.CleanSentRows()
 		stmt := cw.GetAst()
-		sqlType := ses.sqlSourceType[0]
-		if i < len(ses.sqlSourceType) {
-			sqlType = ses.sqlSourceType[i]
+		sqlType := ses.GetSqlSourceType()[0]
+		if i < len(ses.GetSqlSourceType()) {
+			sqlType = ses.GetSqlSourceType()[i]
 		}
 		requestCtx = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sql, sqlType, singleStatement)
 		tenant := ses.GetTenantName(stmt)
@@ -3378,7 +3381,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 				goto handleFailed
 			}
 			if c, ok := cw.(*TxnComputationWrapper); ok {
-				ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+				ses.SetResultColDef(&plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)})
 			}
 			/*
 				Step 1 : send column count and column definition.
@@ -3798,7 +3801,7 @@ func (mce *MysqlCmdExecutor) doComQueryInProgress(requestCtx context.Context, sq
 		TimeZone:          ses.GetTimeZone(),
 		StorageEngine:     pu.StorageEngine,
 		AutoIncrCaches:    ses.GetAutoIncrCaches(),
-		AutoIncrCacheSize: ses.pu.SV.AutoIncrCacheSize,
+		AutoIncrCacheSize: ses.GetParameterUnit().SV.AutoIncrCacheSize,
 	}
 
 	if ses.GetTenantInfo() != nil {
@@ -4076,7 +4079,7 @@ func StatementCanBeExecutedInUncommittedTransaction(ses *Session, stmt tree.Stat
 		if err != nil {
 			return false, err
 		}
-		preStmt, err := mysql.ParseOne(ses.requestCtx, st.Sql, v.(int64))
+		preStmt, err := mysql.ParseOne(ses.GetRequestContext(), st.Sql, v.(int64))
 		if err != nil {
 			return false, err
 		}

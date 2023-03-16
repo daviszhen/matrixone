@@ -285,7 +285,7 @@ func GetSimpleExprValue(e tree.Expr, ses *Session) (interface{}, error) {
 		// set @a = 'on', type of a is bool. And mo cast rule does not fit set variable rule so delay to convert type.
 		bat := batch.NewWithSize(0)
 		bat.Zs = []int64{1}
-		vec, err := colexec.EvalExpr(bat, ses.txnCompileCtx.GetProcess(), planExpr)
+		vec, err := colexec.EvalExpr(bat, ses.GetTxnCompileCtx().GetProcess(), planExpr)
 		if err != nil {
 			return nil, err
 		}
@@ -386,10 +386,10 @@ func logStatementStatus(ctx context.Context, ses *Session, stmt tree.Statement, 
 func logStatementStringStatus(ctx context.Context, ses *Session, stmtStr string, status statementStatus, err error) {
 	str := SubStringFromBegin(stmtStr, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
 	if status == success {
-		motrace.EndStatement(ctx, nil, ses.sentRows.Load())
+		motrace.EndStatement(ctx, nil, ses.GetSentRows())
 		logInfo(ses.GetConciseProfile(), "query trace status", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.StatementField(str), logutil.StatusField(status.String()), trace.ContextField(ctx))
 	} else {
-		motrace.EndStatement(ctx, err, ses.sentRows.Load())
+		motrace.EndStatement(ctx, err, ses.GetSentRows())
 		logError(ses.GetConciseProfile(), "query trace status", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.StatementField(str), logutil.StatusField(status.String()), logutil.ErrorField(err), trace.ContextField(ctx))
 	}
 }
