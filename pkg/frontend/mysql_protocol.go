@@ -1818,7 +1818,7 @@ func (mp *MysqlProtocolImpl) sendColumns(ctx context.Context, mrs *MysqlResultSe
 func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResultSet, rowIdx uint64) ([]byte, error) {
 	data = mp.append(data, defines.OKHeader) // append OkHeader
 
-	ctx := mp.ses.GetRequestContext()
+	ctx := mp.ses.GetRequestContextUnsafe()
 
 	// get null buffer
 	buffer := mp.binaryNullBuffer[:0]
@@ -1853,7 +1853,7 @@ func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResul
 		}
 		mysqlColumn, ok := column.(*MysqlColumn)
 		if !ok {
-			return nil, moerr.NewInternalError(mp.ses.GetRequestContext(), "sendColumn need MysqlColumn")
+			return nil, moerr.NewInternalError(mp.ses.GetRequestContextUnsafe(), "sendColumn need MysqlColumn")
 		}
 
 		switch mysqlColumn.ColumnType() {
@@ -1989,7 +1989,7 @@ func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResul
 
 // the server convert every row of the result set into the format that mysql protocol needs
 func (mp *MysqlProtocolImpl) makeResultSetTextRow(data []byte, mrs *MysqlResultSet, r uint64) ([]byte, error) {
-	ctx := mp.ses.GetRequestContext()
+	ctx := mp.ses.GetRequestContextUnsafe()
 	for i := uint64(0); i < mrs.GetColumnCount(); i++ {
 		column, err := mrs.GetColumn(ctx, i)
 		if err != nil {
@@ -1997,7 +1997,7 @@ func (mp *MysqlProtocolImpl) makeResultSetTextRow(data []byte, mrs *MysqlResultS
 		}
 		mysqlColumn, ok := column.(*MysqlColumn)
 		if !ok {
-			return nil, moerr.NewInternalError(mp.ses.GetRequestContext(), "sendColumn need MysqlColumn")
+			return nil, moerr.NewInternalError(mp.ses.GetRequestContextUnsafe(), "sendColumn need MysqlColumn")
 		}
 
 		if isNil, err1 := mrs.ColumnIsNull(ctx, r, i); err1 != nil {
@@ -2122,7 +2122,7 @@ func (mp *MysqlProtocolImpl) makeResultSetTextRow(data []byte, mrs *MysqlResultS
 				data = mp.appendStringLenEnc(data, value)
 			}
 		default:
-			return nil, moerr.NewInternalError(mp.ses.GetRequestContext(), "unsupported column type %d ", mysqlColumn.ColumnType())
+			return nil, moerr.NewInternalError(mp.ses.GetRequestContextUnsafe(), "unsupported column type %d ", mysqlColumn.ColumnType())
 		}
 	}
 	return data, nil
@@ -2265,7 +2265,7 @@ func (mp *MysqlProtocolImpl) fillPacket(elems ...byte) error {
 		curLen = int(MaxPayloadSize) - hasDataLen
 		curLen = Min(curLen, n-i)
 		if curLen < 0 {
-			return moerr.NewInternalError(mp.ses.GetRequestContext(), "needLen %d < 0. hasDataLen %d n - i %d", curLen, hasDataLen, n-i)
+			return moerr.NewInternalError(mp.ses.GetRequestContextUnsafe(), "needLen %d < 0. hasDataLen %d n - i %d", curLen, hasDataLen, n-i)
 		}
 		outbuf.Grow(curLen)
 		buf = outbuf.RawBuf()
@@ -2301,7 +2301,7 @@ func (mp *MysqlProtocolImpl) closePacket(appendZeroPacket bool) error {
 	outbuf := mp.tcpConn.OutBuf()
 	payLoadLen := outbuf.GetWriteIndex() - mp.beginWriteIndex - 4
 	if payLoadLen < 0 || payLoadLen > int(MaxPayloadSize) {
-		return moerr.NewInternalError(mp.ses.GetRequestContext(), "invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
+		return moerr.NewInternalError(mp.ses.GetRequestContextUnsafe(), "invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
 			payLoadLen, outbuf.GetWriteIndex(), mp.beginWriteIndex)
 	}
 

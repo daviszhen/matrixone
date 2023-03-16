@@ -866,6 +866,10 @@ func (ses *Session) GetRequestContext() context.Context {
 	return ses.requestCtx
 }
 
+func (ses *Session) GetRequestContextUnsafe() context.Context {
+	return ses.requestCtx
+}
+
 func (ses *Session) SetTxnCtx(ctx context.Context) {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
@@ -991,7 +995,7 @@ func (ses *Session) SetPrepareStmt(name string, prepareStmt *PrepareStmt) error 
 	defer ses.mu.Unlock()
 	if _, ok := ses.prepareStmts[name]; !ok {
 		if len(ses.prepareStmts) >= MaxPrepareNumberInOneSession {
-			return moerr.NewInvalidState(ses.GetRequestContext(), "too many prepared statement, max %d", MaxPrepareNumberInOneSession)
+			return moerr.NewInvalidState(ses.requestCtx, "too many prepared statement, max %d", MaxPrepareNumberInOneSession)
 		}
 	}
 	ses.prepareStmts[name] = prepareStmt
@@ -1004,7 +1008,7 @@ func (ses *Session) GetPrepareStmt(name string) (*PrepareStmt, error) {
 	if prepareStmt, ok := ses.prepareStmts[name]; ok {
 		return prepareStmt, nil
 	}
-	return nil, moerr.NewInvalidState(ses.GetRequestContext(), "prepared statement '%s' does not exist", name)
+	return nil, moerr.NewInvalidState(ses.requestCtx, "prepared statement '%s' does not exist", name)
 }
 
 func (ses *Session) RemovePrepareStmt(name string) {
