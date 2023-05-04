@@ -1213,7 +1213,7 @@ func (tbl *txnTable) updateLogtail(ctx context.Context) error {
 	if tbl.oldTableId != 0 {
 		tableId = tbl.oldTableId
 		//FIXME: do not sync logail
-		return nil
+		//return nil
 	}
 
 	if tbl.db.txn.engine.UsePushModelOrNot() {
