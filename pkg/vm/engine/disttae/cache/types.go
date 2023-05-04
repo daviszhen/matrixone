@@ -184,6 +184,13 @@ func tableItemLess(a, b *TableItem) bool {
 		return false
 	}
 	if a.Ts.Equal(b.Ts) {
+		//if a.deleted && !b.deleted { //deleted item head first
+		//	return true
+		//} else if !a.deleted && b.deleted {
+		//	return false
+		//} else { //a.deleted && b.deleted || !a.deleted && !b.deleted
+		//	return a.Id > b.Id
+		//}
 		return a.deleted
 	}
 	return a.Ts.Greater(b.Ts)

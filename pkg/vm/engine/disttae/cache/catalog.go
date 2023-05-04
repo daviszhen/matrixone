@@ -15,6 +15,7 @@
 package cache
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -189,11 +190,13 @@ func (cc *CatalogCache) GetTable(tbl *TableItem) bool {
 			}
 			ts = item.Ts
 			tableId = item.Id
+			fmt.Println("GetTable x", item.deleted, item.DatabaseId, item.Name, item.Ts, item.Id)
 			return true
 		}
 		if !item.deleted && item.AccountId == tbl.AccountId &&
 			item.DatabaseId == tbl.DatabaseId && item.Name == tbl.Name &&
 			(ts.IsEmpty() || ts.Equal(item.Ts) && tableId != item.Id) {
+			fmt.Println("GetTable y", item.deleted, item.DatabaseId, item.Name, item.Ts, item.Id)
 			find = true
 			tbl.Id = item.Id
 			tbl.Defs = item.Defs
@@ -238,6 +241,7 @@ func (cc *CatalogCache) DeleteTable(bat *batch.Batch) {
 	rowids := vector.MustFixedCol[types.Rowid](bat.GetVector(MO_ROWID_IDX))
 	timestamps := vector.MustFixedCol[types.TS](bat.GetVector(MO_TIMESTAMP_IDX))
 	for i, rowid := range rowids {
+		fmt.Println("DeleteTable", rowid, timestamps[i].ToTimestamp())
 		if item, ok := cc.tables.rowidIndex.Get(&TableItem{Rowid: rowid}); ok {
 			newItem := &TableItem{
 				deleted:    true,
@@ -249,6 +253,7 @@ func (cc *CatalogCache) DeleteTable(bat *batch.Batch) {
 				Ts:         timestamps[i].ToTimestamp(),
 			}
 			cc.tables.data.Set(newItem)
+			fmt.Println("DeleteTable", newItem.deleted, newItem.DatabaseId, newItem.Name, newItem.Id, newItem.Ts)
 		}
 	}
 }
@@ -307,6 +312,7 @@ func (cc *CatalogCache) InsertTable(bat *batch.Batch) {
 		copy(item.Rowid[:], rowids[i][:])
 		cc.tables.data.Set(item)
 		cc.tables.rowidIndex.Set(item)
+		fmt.Println("insert table", item.DatabaseId, item.Name, item.Id, item.Ts)
 	}
 }
 
