@@ -121,6 +121,7 @@ type tableItemKey struct {
 	AccountId    uint32
 	DatabaseId   uint64
 	Name         string
+	Id           uint64
 	PhysicalTime uint64
 	LogicalTime  uint32
 	NodeId       uint32
@@ -165,6 +166,9 @@ func databaseItemLess(a, b *DatabaseItem) bool {
 }
 
 func tableItemLess(a, b *TableItem) bool {
+	if a == nil {
+		return false
+	}
 	if a.AccountId < b.AccountId {
 		return true
 	}
@@ -184,14 +188,14 @@ func tableItemLess(a, b *TableItem) bool {
 		return false
 	}
 	if a.Ts.Equal(b.Ts) {
-		//if a.deleted && !b.deleted { //deleted item head first
-		//	return true
-		//} else if !a.deleted && b.deleted {
-		//	return false
-		//} else { //a.deleted && b.deleted || !a.deleted && !b.deleted
-		//	return a.Id > b.Id
-		//}
-		return a.deleted
+		if a.deleted && !b.deleted { //deleted item head first
+			return true
+		} else if !a.deleted && b.deleted {
+			return false
+		} else { //a.deleted && b.deleted || !a.deleted && !b.deleted
+			return a.Id < b.Id
+		}
+		//return a.deleted
 	}
 	return a.Ts.Greater(b.Ts)
 }
