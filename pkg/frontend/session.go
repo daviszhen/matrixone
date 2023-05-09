@@ -99,7 +99,7 @@ const (
 	profileTypeAll = profileTypeAccountWithName | profileTypeAccountWithId |
 		profileTypeSessionId | profileTypeConnectionWithId | profileTypeConnectionWithIp
 
-	profileTypeConcise = profileTypeConnectionWithId
+	profileTypeConcise = profileTypeConnectionWithId | profileTypeConnectionWithIp
 )
 
 type Session struct {
