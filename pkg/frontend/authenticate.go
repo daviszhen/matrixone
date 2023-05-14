@@ -5110,7 +5110,7 @@ func InitSysTenant(ctx context.Context, autoincrcaches defines.AutoIncrCaches) e
 		return err
 	}
 	defer mpool.DeleteMPool(mp)
-	bh := NewBackgroundHandler(ctx, mp, pu, autoincrcaches)
+	bh := NewBackgroundHandler(ctx, ctx, mp, pu, autoincrcaches)
 	defer bh.Close()
 
 	//USE the mo_catalog
@@ -5623,29 +5623,6 @@ func createTablesInInformationSchemaOfGeneralTenant(ctx context.Context, bh Back
 		}
 	}
 	return err
-}
-
-func checkUserExistsOrNot(ctx context.Context, pu *config.ParameterUnit, tenantName string) (bool, error) {
-	mp, err := mpool.NewMPool("check_user_exists", 0, mpool.NoFixed)
-	if err != nil {
-		return false, err
-	}
-	defer mpool.DeleteMPool(mp)
-
-	sqlForCheckUser := getSqlForPasswordOfUser(tenantName)
-
-	// A mock autoIncrCaches
-	aic := defines.AutoIncrCaches{}
-	erArray, err := executeSQLInBackgroundSession(ctx, mp, pu, sqlForCheckUser, aic)
-	if err != nil {
-		return false, err
-	}
-
-	if !execResultArrayHasData(erArray) {
-		return false, nil
-	}
-
-	return true, nil
 }
 
 // InitUser creates new user for the tenant

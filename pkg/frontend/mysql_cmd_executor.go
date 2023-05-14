@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -227,7 +226,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	var txn TxnOperator
 	var err error
 	if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-		txn, err = handler.GetTxn()
+		_, txn, err = handler.GetTxn()
 		if err != nil {
 			logutil.Errorf("RecordStatement. error:%v", err)
 		} else {
@@ -302,7 +301,7 @@ var RecordStatementTxnID = func(ctx context.Context, ses *Session) {
 	var txn TxnOperator
 	if stm := motrace.StatementFromContext(ctx); ses != nil && stm != nil && stm.IsZeroTxnID() {
 		if handler := ses.GetTxnHandler(); handler.IsValidTxn() {
-			txn, err = handler.GetTxn()
+			_, txn, err = handler.GetTxn()
 			if err != nil {
 				logutil.Errorf("RecordStatementTxnID. error:%v", err)
 			} else {
@@ -1038,13 +1037,14 @@ func extractRowFromVector(ses *Session, vec *vector.Vector, i int, row []interfa
 func doUse(ctx context.Context, ses *Session, db string) error {
 	txnHandler := ses.GetTxnHandler()
 	var txn TxnOperator
+	var txnCtx context.Context
 	var err error
-	txn, err = txnHandler.GetTxn()
+	txnCtx, txn, err = txnHandler.GetTxn()
 	if err != nil {
 		return err
 	}
 	//TODO: check meta data
-	if _, err = ses.GetParameterUnit().StorageEngine.Database(ctx, db, txn); err != nil {
+	if _, err = ses.GetParameterUnit().StorageEngine.Database(txnCtx, db, txn); err != nil {
 		//echo client. no such database
 		return moerr.NewBadDB(ctx, db)
 	}
@@ -1058,214 +1058,6 @@ func doUse(ctx context.Context, ses *Session, db string) error {
 
 func (mce *MysqlCmdExecutor) handleChangeDB(requestCtx context.Context, db string) error {
 	return doUse(requestCtx, mce.GetSession(), db)
-}
-
-func (mce *MysqlCmdExecutor) handleDump(requestCtx context.Context, dump *tree.MoDump) error {
-	var err error
-	if !dump.DumpDatabase {
-		return doDumpQueryResult(requestCtx, mce.GetSession(), dump.ExportParams)
-	}
-	dump.OutFile = maybeAppendExtension(dump.OutFile)
-	exists, err := fileExists(dump.OutFile)
-	if exists {
-		return moerr.NewFileAlreadyExists(requestCtx, dump.OutFile)
-	}
-	if err != nil {
-		return err
-	}
-	if dump.MaxFileSize != 0 && dump.MaxFileSize < mpool.MB {
-		return moerr.NewInvalidInput(requestCtx, "max file size must be larger than 1MB")
-	}
-	if len(dump.Database) == 0 {
-		return moerr.NewInvalidInput(requestCtx, "No database selected")
-	}
-	return mce.dumpData(requestCtx, dump)
-}
-
-func (mce *MysqlCmdExecutor) dumpData(requestCtx context.Context, dump *tree.MoDump) error {
-	ses := mce.GetSession()
-	txnHandler := ses.GetTxnHandler()
-	bh := ses.GetBackgroundExec(requestCtx)
-	defer bh.Close()
-	dbName := string(dump.Database)
-	var (
-		db        engine.Database
-		err       error
-		showDbDDL = false
-		dbDDL     string
-		tables    []string
-	)
-	var txn TxnOperator
-	txn, err = txnHandler.GetTxn()
-	if err != nil {
-		return err
-	}
-	if db, err = ses.GetParameterUnit().StorageEngine.Database(requestCtx, dbName, txn); err != nil {
-		return moerr.NewBadDB(requestCtx, dbName)
-	}
-	err = bh.Exec(requestCtx, fmt.Sprintf("use `%s`", dbName))
-	if err != nil {
-		return err
-	}
-	if len(dump.Tables) == 0 {
-		dbDDL = fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;\n", dbName)
-		createSql, err := getDDL(bh, requestCtx, fmt.Sprintf("SHOW CREATE DATABASE `%s`;", dbName))
-		if err != nil {
-			return err
-		}
-		dbDDL += createSql + "\n\nUSE `" + dbName + "`;\n\n"
-		showDbDDL = true
-		tables, err = db.Relations(requestCtx)
-		if err != nil {
-			return err
-		}
-	} else {
-		tables = make([]string, len(dump.Tables))
-		for i, t := range dump.Tables {
-			tables[i] = string(t.ObjectName)
-		}
-	}
-
-	params := make([]*dumpTable, 0, len(tables))
-	for _, tblName := range tables {
-		if strings.HasPrefix(tblName, "%!%") { //skip hidden table
-			continue
-		}
-		table, err := db.Relation(requestCtx, tblName)
-		if err != nil {
-			return err
-		}
-		tblDDL, err := getDDL(bh, requestCtx, fmt.Sprintf("SHOW CREATE TABLE `%s`;", tblName))
-		if err != nil {
-			return err
-		}
-		tableDefs, err := table.TableDefs(requestCtx)
-		if err != nil {
-			return err
-		}
-		attrs, isView, err := getAttrFromTableDef(tableDefs)
-		if err != nil {
-			return err
-		}
-		if isView {
-			tblDDL = fmt.Sprintf("DROP VIEW IF EXISTS `%s`;\n", tblName) + tblDDL + "\n\n"
-		} else {
-			tblDDL = fmt.Sprintf("DROP TABLE IF EXISTS `%s`;\n", tblName) + tblDDL + "\n\n"
-		}
-		params = append(params, &dumpTable{tblName, tblDDL, table, attrs, isView})
-	}
-	return mce.dumpData2File(requestCtx, dump, dbDDL, params, showDbDDL)
-}
-
-func (mce *MysqlCmdExecutor) dumpData2File(requestCtx context.Context, dump *tree.MoDump, dbDDL string, params []*dumpTable, showDbDDL bool) error {
-	ses := mce.GetSession()
-	var (
-		err         error
-		f           *os.File
-		curFileSize int64 = 0
-		curFileIdx  int64 = 1
-		buf         *bytes.Buffer
-		rbat        *batch.Batch
-	)
-	f, err = createDumpFile(requestCtx, dump.OutFile)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if f != nil {
-				f.Close()
-			}
-			if buf != nil {
-				buf.Reset()
-			}
-			if rbat != nil {
-				rbat.Clean(ses.mp)
-			}
-			removeFile(dump.OutFile, curFileIdx)
-		}
-	}()
-	buf = new(bytes.Buffer)
-	if showDbDDL {
-		_, err = buf.WriteString(dbDDL)
-		if err != nil {
-			return err
-		}
-	}
-	f, curFileIdx, curFileSize, err = writeDump2File(requestCtx, buf, dump, f, curFileIdx, curFileSize)
-	if err != nil {
-		return err
-	}
-	for _, param := range params {
-		if param.isView {
-			continue
-		}
-		_, err = buf.WriteString(param.ddl)
-		if err != nil {
-			return err
-		}
-		f, curFileIdx, curFileSize, err = writeDump2File(requestCtx, buf, dump, f, curFileIdx, curFileSize)
-		if err != nil {
-			return err
-		}
-		rds, err := param.rel.NewReader(requestCtx, 1, nil, nil)
-		if err != nil {
-			return err
-		}
-		for {
-			bat, err := rds[0].Read(requestCtx, param.attrs, nil, ses.mp)
-			if err != nil {
-				return err
-			}
-			if bat == nil {
-				break
-			}
-
-			buf.WriteString("INSERT INTO ")
-			buf.WriteString(param.name)
-			buf.WriteString(" VALUES ")
-			rbat, err = convertValueBat2Str(requestCtx, bat, ses.mp, ses.GetTimeZone())
-			if err != nil {
-				return err
-			}
-			for i := 0; i < rbat.Length(); i++ {
-				if i != 0 {
-					buf.WriteString(", ")
-				}
-				buf.WriteString("(")
-				for j := 0; j < rbat.VectorCount(); j++ {
-					if j != 0 {
-						buf.WriteString(", ")
-					}
-					buf.WriteString(rbat.GetVector(int32(j)).GetString(int64(i)))
-				}
-				buf.WriteString(")")
-			}
-			buf.WriteString(";\n")
-			f, curFileIdx, curFileSize, err = writeDump2File(requestCtx, buf, dump, f, curFileIdx, curFileSize)
-			if err != nil {
-				return err
-			}
-		}
-		buf.WriteString("\n\n\n")
-	}
-	if !showDbDDL {
-		return nil
-	}
-	for _, param := range params {
-		if !param.isView {
-			continue
-		}
-		_, err = buf.WriteString(param.ddl)
-		if err != nil {
-			return err
-		}
-		f, curFileIdx, curFileSize, err = writeDump2File(requestCtx, buf, dump, f, curFileIdx, curFileSize)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 /*
@@ -1315,127 +1107,6 @@ func (mce *MysqlCmdExecutor) handleSelectVariables(ve *tree.VarExpr) error {
 		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
-}
-
-func doLoadData(requestCtx context.Context, ses *Session, proc *process.Process, load *tree.Import) (*LoadResult, error) {
-	var err error
-	var txn TxnOperator
-	var dbHandler engine.Database
-	var tableHandler engine.Relation
-	proto := ses.GetMysqlProtocol()
-
-	logInfof(ses.GetConciseProfile(), "+++++load data")
-	/*
-		TODO:support LOCAL
-	*/
-	if load.Local {
-		return nil, moerr.NewInternalError(requestCtx, "LOCAL is unsupported now")
-	}
-	if load.Param.Tail.Fields == nil || len(load.Param.Tail.Fields.Terminated) == 0 {
-		load.Param.Tail.Fields = &tree.Fields{Terminated: ","}
-	}
-
-	if load.Param.Tail.Fields != nil && load.Param.Tail.Fields.EscapedBy != 0 {
-		return nil, moerr.NewInternalError(requestCtx, "EscapedBy field is unsupported now")
-	}
-
-	/*
-		check file
-	*/
-	exist, isfile, err := PathExists(load.Param.Filepath)
-	if err != nil || !exist {
-		return nil, moerr.NewInternalError(requestCtx, "file %s does exist. err:%v", load.Param.Filepath, err)
-	}
-
-	if !isfile {
-		return nil, moerr.NewInternalError(requestCtx, "file %s is a directory", load.Param.Filepath)
-	}
-
-	/*
-		check database
-	*/
-	loadDb := string(load.Table.Schema())
-	loadTable := string(load.Table.Name())
-	if loadDb == "" {
-		if proto.GetDatabaseName() == "" {
-			return nil, moerr.NewInternalError(requestCtx, "load data need database")
-		}
-
-		//then, it uses the database name in the session
-		loadDb = ses.GetDatabaseName()
-	}
-
-	txnHandler := ses.GetTxnHandler()
-	if ses.InMultiStmtTransactionMode() {
-		return nil, moerr.NewInternalError(requestCtx, "do not support the Load in a transaction started by BEGIN/START TRANSACTION statement")
-	}
-	txn, err = txnHandler.GetTxn()
-	if err != nil {
-		return nil, err
-	}
-	dbHandler, err = ses.GetStorage().Database(requestCtx, loadDb, txn)
-	if err != nil {
-		//echo client. no such database
-		return nil, moerr.NewBadDB(requestCtx, loadDb)
-	}
-
-	//change db to the database in the LOAD DATA statement if necessary
-	if loadDb != ses.GetDatabaseName() {
-		oldDB := ses.GetDatabaseName()
-		ses.SetDatabaseName(loadDb)
-		logInfof(ses.GetConciseProfile(), "User %s change database from [%s] to [%s] in LOAD DATA", ses.GetUserName(), oldDB, ses.GetDatabaseName())
-	}
-
-	/*
-		check table
-	*/
-	if ses.IfInitedTempEngine() {
-		requestCtx = context.WithValue(requestCtx, defines.TemporaryDN{}, ses.GetTempTableStorage())
-	}
-	tableHandler, err = dbHandler.Relation(requestCtx, loadTable)
-	if err != nil {
-		txn, err = ses.txnHandler.GetTxn()
-		if err != nil {
-			return nil, err
-		}
-		dbHandler, err = ses.GetStorage().Database(requestCtx, defines.TEMPORARY_DBNAME, txn)
-		if err != nil {
-			return nil, moerr.NewNoSuchTable(requestCtx, loadDb, loadTable)
-		}
-		loadTable = engine.GetTempTableName(loadDb, loadTable)
-		tableHandler, err = dbHandler.Relation(requestCtx, loadTable)
-		if err != nil {
-			//echo client. no such table
-			return nil, moerr.NewNoSuchTable(requestCtx, loadDb, loadTable)
-		}
-		loadDb = defines.TEMPORARY_DBNAME
-		load.Table.ObjectName = tree.Identifier(loadTable)
-	}
-
-	/*
-		execute load data
-	*/
-	return LoadLoop(requestCtx, ses, proc, load, dbHandler, tableHandler, loadDb)
-}
-
-/*
-handle Load DataSource statement
-*/
-func (mce *MysqlCmdExecutor) handleLoadData(requestCtx context.Context, proc *process.Process, load *tree.Import) error {
-	ses := mce.GetSession()
-	result, err := doLoadData(requestCtx, ses, proc, load)
-	if err != nil {
-		return err
-	}
-	/*
-		response
-	*/
-	info := moerr.NewLoadInfo(requestCtx, result.Records, result.Deleted, result.Skipped, result.Warnings, result.WriteTimeout).Error()
-	resp := NewOkResponse(result.Records, 0, uint16(result.Warnings), 0, int(COM_QUERY), info)
-	if err = ses.GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
-		return moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-	}
-	return nil
 }
 
 func doCmdFieldList(requestCtx context.Context, ses *Session, icfl *InternalCmdFieldList) error {
@@ -2336,6 +2007,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		requestCtx = context.WithValue(requestCtx, defines.TemporaryDN{}, cwft.ses.GetTempTableStorage())
 		cwft.ses.SetRequestContext(requestCtx)
 		cwft.proc.Ctx = context.WithValue(cwft.proc.Ctx, defines.TemporaryDN{}, cwft.ses.GetTempTableStorage())
+		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx()
 	}
 	cacheHit := cwft.plan != nil
 	if !cacheHit {
@@ -2419,15 +2091,16 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	}
 
 	txnHandler := cwft.ses.GetTxnHandler()
+	txnCtx := requestCtx
 	if cacheHit && cwft.plan.NeedImplicitTxn() {
-		cwft.proc.TxnOperator, err = txnHandler.GetTxn()
+		txnCtx, cwft.proc.TxnOperator, err = txnHandler.GetTxn()
 		if err != nil {
 			return nil, err
 		}
 	} else if cwft.plan.GetQuery().GetLoadTag() {
-		cwft.proc.TxnOperator = txnHandler.GetTxnOnly()
+		txnCtx, cwft.proc.TxnOperator = txnHandler.GetTxnOperator()
 	} else if cwft.plan.NeedImplicitTxn() {
-		cwft.proc.TxnOperator, err = txnHandler.GetTxn()
+		txnCtx, cwft.proc.TxnOperator, err = txnHandler.GetTxn()
 		if err != nil {
 			return nil, err
 		}
@@ -2436,13 +2109,14 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	if len(cwft.ses.GetParameterUnit().ClusterNodes) > 0 {
 		addr = cwft.ses.GetParameterUnit().ClusterNodes[0].Addr
 	}
+	cwft.proc.Ctx = txnCtx
 	cwft.proc.FileService = cwft.ses.GetParameterUnit().FileService
 	cwft.compile = compile.New(addr, cwft.ses.GetDatabaseName(), cwft.ses.GetSql(), cwft.ses.GetUserName(), requestCtx, cwft.ses.GetStorage(), cwft.proc, cwft.stmt)
 
 	if _, ok := cwft.stmt.(*tree.ExplainAnalyze); ok {
 		fill = func(obj interface{}, bat *batch.Batch) error { return nil }
 	}
-	err = cwft.compile.Compile(requestCtx, cwft.plan, cwft.ses, fill)
+	err = cwft.compile.Compile(txnCtx, cwft.plan, cwft.ses, fill)
 	if err != nil {
 		return nil, err
 	}
@@ -2476,11 +2150,11 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		// 2. bind the temporary engine to the session and txnHandler
 		cwft.ses.SetTempEngine(requestCtx, tempEngine)
 		cwft.compile.SetTempEngine(requestCtx, tempEngine)
-		txnHandler := cwft.ses.txnCompileCtx.txnHandler
 		txnHandler.SetTempEngine(tempEngine)
+		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx()
 
 		// 3. init temp-db to store temporary relations
-		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.txnHandler.txn)
+		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.txnHandler.txnOperator)
 		if err != nil {
 			return nil, err
 		}
@@ -2867,14 +2541,6 @@ func getStmtExecutor(ses *Session, proc *process.Process, base *baseStmtExecutor
 				base,
 			},
 			dd: st,
-		})
-	case *tree.Import:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = (&ImportExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			i: st,
 		})
 	case *tree.PrepareStmt:
 		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
@@ -3403,7 +3069,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 		requestCtx,
 		ses.GetMemPool(),
 		ses.GetTxnHandler().GetTxnClient(),
-		ses.GetTxnHandler().GetTxnOperator(),
+		nil,
 		pu.FileService,
 		pu.GetClusterDetails,
 	)
@@ -3566,25 +3232,11 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, sql string) 
 			if err != nil {
 				goto handleFailed
 			}
-		case *tree.MoDump:
-			selfHandle = true
-			//dump
-			err = mce.handleDump(requestCtx, st)
-			if err != nil {
-				goto handleFailed
-			}
 		case *tree.DropDatabase:
 			ses.InvalidatePrivilegeCache()
 			// if the droped database is the same as the one in use, database must be reseted to empty.
 			if string(st.Name) == ses.GetDatabaseName() {
 				ses.SetDatabaseName("")
-			}
-		case *tree.Import:
-			fromLoadData = true
-			selfHandle = true
-			err = mce.handleLoadData(requestCtx, proc, st)
-			if err != nil {
-				goto handleFailed
 			}
 		case *tree.PrepareStmt:
 			selfHandle = true
@@ -4250,7 +3902,7 @@ func (mce *MysqlCmdExecutor) doComQueryInProgress(requestCtx context.Context, sq
 		requestCtx,
 		ses.GetMemPool(),
 		pu.TxnClient,
-		ses.GetTxnHandler().GetTxnOperator(),
+		nil,
 		pu.FileService,
 		pu.GetClusterDetails,
 	)
