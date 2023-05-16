@@ -565,14 +565,23 @@ func (e *Engine) gc(ctx context.Context) {
 			}
 			e.db.Unlock()
 			for i := range ps {
+				i := i
 				for j := range ps[i] {
-					select {
-					case <-ps[i][j].lock:
-					case <-ctx.Done():
+					j := j
+					if err := func() error {
+						select {
+						case <-ps[i][j].lock:
+							defer func() {
+								ps[i][j].lock <- struct{}{}
+							}()
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+						ps[i][j].GC(ts)
+						return nil
+					}(); err != nil {
 						return
 					}
-					ps[i][j].GC(ts)
-					ps[i][j].lock <- struct{}{}
 				}
 			}
 		}

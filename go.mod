@@ -35,6 +35,7 @@ require (
 	github.com/prashantv/gostub v1.1.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/samber/lo v1.33.0
+	github.com/sasha-s/go-deadlock v0.3.1
 	github.com/smartystreets/goconvey v1.7.2
 	github.com/stretchr/testify v1.8.0
 	github.com/tidwall/btree v1.4.3
@@ -76,6 +77,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/hashicorp/memberlist v0.3.1 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
+	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
 	github.com/smartystreets/assertions v1.2.0 // indirect
 	github.com/valyala/fastrand v1.1.0 // indirect

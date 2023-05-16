@@ -308,27 +308,34 @@ func (db *DB) Update(ctx context.Context, dnList []DNStore, tbl *table, op clien
 	for i, dn := range dnList {
 		part := parts[db.dnMap[dn.UUID]]
 
-		select {
-		case <-part.lock:
-			if part.ts.Greater(ts) ||
-				part.ts.Equal(ts) {
-				part.lock <- struct{}{}
-				return nil
+		if err := func() error {
+			select {
+			case <-part.lock:
+				defer func() {
+					part.lock <- struct{}{}
+				}()
+				if part.ts.Greater(ts) ||
+					part.ts.Equal(ts) {
+					return nil
+				}
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 
-		if err := updatePartition(
-			i, primaryIdx, tbl, ts, ctx, op, db, part, dn,
-			genSyncLogTailReq(part.ts, ts, databaseId, tableId),
-		); err != nil {
-			part.lock <- struct{}{}
+			if err := updatePartition(
+				i, primaryIdx, tbl, ts, ctx, op, db, part, dn,
+				genSyncLogTailReq(part.ts, ts, databaseId, tableId),
+			); err != nil {
+				return err
+			}
+
+			part.ts = ts
+
+			return nil
+		}(); err != nil {
 			return err
 		}
 
-		part.ts = ts
-		part.lock <- struct{}{}
 	}
 
 	return nil
