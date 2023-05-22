@@ -156,6 +156,7 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 	}
 	sess := NewSession(ie.proto, mp, ie.pu, gSysVariables, true)
 	sess.SetRequestContext(ctx)
+	sess.SetConnectContext(ctx)
 	applyOverride(sess, ie.baseSessOpts)
 	applyOverride(sess, opts)
 	return sess

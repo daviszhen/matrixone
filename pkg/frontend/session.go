@@ -63,12 +63,14 @@ const (
 )
 
 type TxnHandler struct {
-	storage   engine.Engine
-	txnClient TxnClient
-	ses       *Session
-	txn       TxnOperator
-	mu        sync.Mutex
-	entryMu   sync.Mutex
+	storage      engine.Engine
+	txnClient    TxnClient
+	ses          *Session
+	txnCtx       context.Context
+	txnCtxCancel context.CancelFunc
+	txnOperator  TxnOperator
+	mu           sync.Mutex
+	entryMu      sync.Mutex
 }
 
 func InitTxnHandler(storage engine.Engine, txnClient TxnClient) *TxnHandler {
@@ -137,6 +139,7 @@ type Session struct {
 	lastStmtId   uint32
 
 	requestCtx context.Context
+	connectCtx context.Context
 
 	//it gets the result set from the pipeline and send it to the client
 	outputCallback func(interface{}, *batch.Batch) error
@@ -269,14 +272,15 @@ type BackgroundSession struct {
 }
 
 // NewBackgroundSession generates an independent background session executing the sql
-func NewBackgroundSession(ctx context.Context, mp *mpool.MPool, PU *config.ParameterUnit, gSysVars *GlobalSystemVariables) *BackgroundSession {
+func NewBackgroundSession(connCtx, reqCtx context.Context, mp *mpool.MPool, PU *config.ParameterUnit, gSysVars *GlobalSystemVariables) *BackgroundSession {
 	ses := NewSession(&FakeProtocol{}, mp, PU, gSysVars, false)
 	ses.SetOutputCallback(fakeDataSetFetcher)
-	if stmt := trace.StatementFromContext(ctx); stmt != nil {
+	if stmt := trace.StatementFromContext(reqCtx); stmt != nil {
 		logutil.Infof("session uuid: %s -> background session uuid: %s", uuid.UUID(stmt.SessionID).String(), ses.uuid.String())
 	}
-	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(ctx)
+	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(reqCtx)
 	ses.SetRequestContext(cancelBackgroundCtx)
+	ses.SetConnectContext(connCtx)
 	backSes := &BackgroundSession{
 		Session: ses,
 		cancel:  cancelBackgroundFunc,
@@ -393,7 +397,7 @@ func (ses *Session) InvalidatePrivilegeCache() {
 
 // GetBackgroundExec generates a background executor
 func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
-	return NewBackgroundHandler(ctx, ses.GetMemPool(), ses.GetParameterUnit())
+	return NewBackgroundHandler(ses.GetConnectContext(), ctx, ses.GetMemPool(), ses.GetParameterUnit())
 }
 
 func (ses *Session) GetIsInternal() bool {
@@ -900,7 +904,7 @@ func (ses *Session) InActiveMultiStmtTransaction() bool {
 }
 
 /*
-TxnStart starts the transaction implicitly and idempotent
+TxnCreate starts the transaction implicitly and idempotent
 
 When it is in multi-statement transaction mode:
 
@@ -911,15 +915,16 @@ When it is not in single statement transaction mode:
 
 	Starts a new transaction if there is none. Reuse the current transaction if there is one.
 */
-func (ses *Session) TxnStart() error {
-	var err error
+func (ses *Session) TxnCreate() (context.Context, TxnOperator, error) {
 	if ses.InMultiStmtTransactionMode() {
 		ses.SetServerStatus(SERVER_STATUS_IN_TRANS)
 	}
-	if !ses.GetTxnHandler().IsValidTxn() {
-		err = ses.GetTxnHandler().NewTxn()
+	if !ses.GetTxnHandler().IsValidTxnOperator() {
+		return ses.GetTxnHandler().NewTxn()
 	}
-	return err
+	txnHandler := ses.GetTxnHandler()
+	txnCtx, txnOp := txnHandler.GetTxnOperator()
+	return txnCtx, txnOp, nil
 }
 
 /*
@@ -1016,7 +1021,7 @@ func (ses *Session) TxnBegin() error {
 	}
 	ses.SetOptionBits(OPTION_BEGIN)
 	ses.SetServerStatus(SERVER_STATUS_IN_TRANS)
-	err = ses.GetTxnHandler().NewTxn()
+	_, _, err = ses.GetTxnHandler().NewTxn()
 	return err
 }
 
@@ -1046,7 +1051,7 @@ func (ses *Session) InActiveTransaction() bool {
 	if ses.InActiveMultiStmtTransaction() {
 		return true
 	} else {
-		return ses.GetTxnHandler().IsValidTxn()
+		return ses.GetTxnHandler().IsValidTxnOperator()
 	}
 }
 
@@ -1126,7 +1131,7 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 	pu := ses.GetParameterUnit()
 	mp := ses.GetMemPool()
 	logDebugf(sessionProfile, "check tenant %s exists", tenant)
-	rsset, err = executeSQLInBackgroundSession(sysTenantCtx, mp, pu, sqlForCheckTenant)
+	rsset, err = executeSQLInBackgroundSession(ses.GetConnectContext(), sysTenantCtx, mp, pu, sqlForCheckTenant)
 	if err != nil {
 		return nil, err
 	}
@@ -1159,7 +1164,7 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 	logDebugf(sessionProfile, "check user of %s exists", tenant)
 	//Get the password of the user in an independent session
 	sqlForPasswordOfUser := getSqlForPasswordOfUser(tenant.GetUser())
-	rsset, err = executeSQLInBackgroundSession(tenantCtx, mp, pu, sqlForPasswordOfUser)
+	rsset, err = executeSQLInBackgroundSession(ses.GetConnectContext(), tenantCtx, mp, pu, sqlForPasswordOfUser)
 	if err != nil {
 		return nil, err
 	}
@@ -1202,7 +1207,7 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 		logDebugf(sessionProfile, "check default role of user %s.", tenant)
 		//step4 : check role exists or not
 		sqlForCheckRoleExists := getSqlForRoleIdOfRole(tenant.GetDefaultRole())
-		rsset, err = executeSQLInBackgroundSession(tenantCtx, mp, pu, sqlForCheckRoleExists)
+		rsset, err = executeSQLInBackgroundSession(ses.GetConnectContext(), tenantCtx, mp, pu, sqlForCheckRoleExists)
 		if err != nil {
 			return nil, err
 		}
@@ -1214,7 +1219,7 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 		logDebugf(sessionProfile, "check granted role of user %s.", tenant)
 		//step4.2 : check the role has been granted to the user or not
 		sqlForRoleOfUser := getSqlForRoleOfUser(userID, tenant.GetDefaultRole())
-		rsset, err = executeSQLInBackgroundSession(tenantCtx, mp, pu, sqlForRoleOfUser)
+		rsset, err = executeSQLInBackgroundSession(ses.GetConnectContext(), tenantCtx, mp, pu, sqlForRoleOfUser)
 		if err != nil {
 			return nil, err
 		}
@@ -1232,7 +1237,7 @@ func (ses *Session) AuthenticateUser(userInput string) ([]byte, error) {
 		logDebugf(sessionProfile, "check designated role of user %s.", tenant)
 		//the get name of default_role from mo_role
 		sql := getSqlForRoleNameOfRoleId(defaultRoleID)
-		rsset, err = executeSQLInBackgroundSession(tenantCtx, mp, pu, sql)
+		rsset, err = executeSQLInBackgroundSession(ses.GetConnectContext(), tenantCtx, mp, pu, sql)
 		if err != nil {
 			return nil, err
 		}
@@ -1276,6 +1281,18 @@ func (ses *Session) GetFromRealUser() bool {
 	return ses.fromRealUser
 }
 
+func (ses *Session) SetConnectContext(conn context.Context) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	ses.connectCtx = conn
+}
+
+func (ses *Session) GetConnectContext() context.Context {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return ses.connectCtx
+}
+
 func (th *TxnHandler) SetSession(ses *Session) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
@@ -1288,71 +1305,103 @@ func (th *TxnHandler) GetTxnClient() TxnClient {
 	return th.txnClient
 }
 
-// TxnClientNew creates a new txn
-func (th *TxnHandler) TxnClientNew() error {
+func (th *TxnHandler) createTxnCtx() context.Context {
+	if th.txnCtx == nil {
+		th.txnCtx, th.txnCtxCancel = context.WithTimeout(th.ses.GetConnectContext(),
+			th.ses.GetParameterUnit().SV.SessionTimeout.Duration)
+	}
+	reqCtx := th.ses.GetRequestContext()
+	retTxnCtx := th.txnCtx
+	if v := reqCtx.Value(defines.TenantIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.TenantIDKey{}, v)
+	}
+	if v := reqCtx.Value(defines.UserIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.UserIDKey{}, v)
+	}
+	if v := reqCtx.Value(defines.RoleIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.RoleIDKey{}, v)
+	}
+	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(reqCtx))
+	return retTxnCtx
+}
+
+// NewTxnOperator creates a new txn
+func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 	var err error
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	if th.txnClient == nil {
 		panic("must set txn client")
 	}
-	th.txn, err = th.txnClient.New()
+	txnCtx := th.createTxnCtx()
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+	th.txnOperator, err = th.txnClient.New()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	if th.txn == nil {
-		return moerr.NewInternalError(th.ses.GetRequestContext(), "TxnClientNew: txnClient new a null txn")
+	if th.txnOperator == nil {
+		return nil, nil, moerr.NewInternalError(th.ses.GetRequestContext(), "NewTxnOperator: txnClient new a null txn")
 	}
-	return err
+	return txnCtx, th.txnOperator, err
 }
 
 // NewTxn commits the old transaction if it existed.
 // Then it creates the new transaction.
-func (th *TxnHandler) NewTxn() error {
+func (th *TxnHandler) NewTxn() (context.Context, TxnOperator, error) {
 	var err error
-	if th.IsValidTxn() {
+	var txnCtx context.Context
+	var txnOp TxnOperator
+	if th.IsValidTxnOperator() {
 		err = th.CommitTxn()
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 	}
-	th.SetInvalid()
+	th.SetTxnOperatorInvalid()
 	defer func() {
 		if err != nil {
 			tenant := th.ses.GetTenantName(nil)
 			incTransactionErrorsCounter(tenant, metric.SQLTypeBegin)
 		}
 	}()
-	err = th.TxnClientNew()
+	txnCtx, txnOp, err = th.NewTxnOperator()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	ctx := th.GetSession().GetRequestContext()
 	if ctx == nil {
 		panic("context should not be nil")
 	}
 	storage := th.GetStorage()
-	err = storage.New(ctx, th.GetTxnOperator())
-	return err
+	err = storage.New(ctx, txnOp)
+	return txnCtx, txnOp, err
 }
 
-// IsValidTxn checks the transaction is true or not.
-func (th *TxnHandler) IsValidTxn() bool {
+// IsValidTxnOperator checks the transaction is true or not.
+func (th *TxnHandler) IsValidTxnOperator() bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	return th.txn != nil
+	return th.txnOperator != nil
 }
 
-func (th *TxnHandler) SetInvalid() {
+func (th *TxnHandler) SetTxnOperatorInvalid() {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	th.txn = nil
+	th.txnOperator = nil
+	if th.txnCtxCancel != nil {
+		//fmt.Printf("**> %v\n", th.txnCtx)
+		th.txnCtxCancel()
+		th.txnCtxCancel = nil
+	}
+	th.txnCtx = nil
 }
 
-func (th *TxnHandler) GetTxnOperator() TxnOperator {
+func (th *TxnHandler) GetTxnOperator() (context.Context, TxnOperator) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	return th.txn
+	return th.createTxnCtx(), th.txnOperator
 }
 
 func (th *TxnHandler) GetSession() *Session {
@@ -1364,18 +1413,22 @@ func (th *TxnHandler) GetSession() *Session {
 func (th *TxnHandler) CommitTxn() error {
 	th.entryMu.Lock()
 	defer th.entryMu.Unlock()
-	if !th.IsValidTxn() {
+	if !th.IsValidTxnOperator() {
 		return nil
 	}
 	ses := th.GetSession()
 	sessionProfile := ses.GetConciseProfile()
-	ctx := ses.GetRequestContext()
-	if ctx == nil {
+	txnCtx, txnOp := th.GetTxnOperator()
+	if txnOp == nil {
+		th.SetTxnOperatorInvalid()
+		logErrorf(sessionProfile, "CommitTxn: txn operator is null")
+	}
+	if txnCtx == nil {
 		panic("context should not be nil")
 	}
 	storage := th.GetStorage()
-	ctx, cancel := context.WithTimeout(
-		ctx,
+	ctx2, cancel := context.WithTimeout(
+		txnCtx,
 		storage.Hints().CommitOrRollbackTimeout,
 	)
 	defer cancel()
@@ -1388,53 +1441,53 @@ func (th *TxnHandler) CommitTxn() error {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeCommit)
 		}
 	}()
-	txnOp := th.GetTxnOperator()
-	if txnOp == nil {
-		logErrorf(sessionProfile, "CommitTxn: txn operator is null")
-	}
 
 	txnId := txnOp.Txn().DebugString()
 	logDebugf(sessionProfile, "CommitTxn txnId:%s", txnId)
 	defer func() {
 		logDebugf(sessionProfile, "CommitTxn exit txnId:%s", txnId)
 	}()
-	if err = storage.Commit(ctx, txnOp); err != nil {
-		th.SetInvalid()
+	if err = storage.Commit(ctx2, txnOp); err != nil {
 		logErrorf(sessionProfile, "CommitTxn: storage commit failed. txnId:%s error:%v", txnId, err)
 		if txnOp != nil {
-			err2 = txnOp.Rollback(ctx)
+			err2 = txnOp.Rollback(ctx2)
 			if err2 != nil {
 				logErrorf(sessionProfile, "CommitTxn: txn operator rollback failed. txnId:%s error:%v", txnId, err2)
 			}
 		}
+		th.SetTxnOperatorInvalid()
 		return err
 	}
 	if txnOp != nil {
-		err = txnOp.Commit(ctx)
+		err = txnOp.Commit(ctx2)
 		if err != nil {
-			th.SetInvalid()
+			th.SetTxnOperatorInvalid()
 			logErrorf(sessionProfile, "CommitTxn: txn operator commit failed. txnId:%s error:%v", txnId, err)
 		}
 	}
-	th.SetInvalid()
+	th.SetTxnOperatorInvalid()
 	return err
 }
 
 func (th *TxnHandler) RollbackTxn() error {
 	th.entryMu.Lock()
 	defer th.entryMu.Unlock()
-	if !th.IsValidTxn() {
+	if !th.IsValidTxnOperator() {
 		return nil
 	}
 	ses := th.GetSession()
 	sessionProfile := ses.GetConciseProfile()
-	ctx := ses.GetRequestContext()
-	if ctx == nil {
+	txnCtx, txnOp := th.GetTxnOperator()
+	if txnOp == nil {
+		th.SetTxnOperatorInvalid()
+		logErrorf(sessionProfile, "RollbackTxn: txn operator is null")
+	}
+	if txnCtx == nil {
 		panic("context should not be nil")
 	}
 	storage := th.GetStorage()
-	ctx, cancel := context.WithTimeout(
-		ctx,
+	ctx2, cancel := context.WithTimeout(
+		txnCtx,
 		storage.Hints().CommitOrRollbackTimeout,
 	)
 	defer cancel()
@@ -1448,34 +1501,31 @@ func (th *TxnHandler) RollbackTxn() error {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeRollback)
 		}
 	}()
-	txnOp := th.GetTxnOperator()
-	if txnOp == nil {
-		logErrorf(sessionProfile, "RollbackTxn: txn operator is null")
-	}
+
 	txnId := txnOp.Txn().DebugString()
 	logDebugf(sessionProfile, "RollbackTxn txnId:%s", txnId)
 	defer func() {
 		logDebugf(sessionProfile, "RollbackTxn exit txnId:%s", txnId)
 	}()
-	if err = storage.Rollback(ctx, txnOp); err != nil {
-		th.SetInvalid()
+	if err = storage.Rollback(ctx2, txnOp); err != nil {
 		logErrorf(sessionProfile, "RollbackTxn: storage rollback failed. txnId:%s error:%v", txnId, err)
 		if txnOp != nil {
-			err2 = txnOp.Rollback(ctx)
+			err2 = txnOp.Rollback(ctx2)
 			if err2 != nil {
 				logErrorf(sessionProfile, "RollbackTxn: txn operator rollback failed. txnId:%s error:%v", txnId, err2)
 			}
 		}
+		th.SetTxnOperatorInvalid()
 		return err
 	}
 	if txnOp != nil {
-		err = txnOp.Rollback(ctx)
+		err = txnOp.Rollback(ctx2)
 		if err != nil {
-			th.SetInvalid()
+			th.SetTxnOperatorInvalid()
 			logErrorf(sessionProfile, "RollbackTxn: txn operator commit failed. txnId:%s error:%v", txnId, err)
 		}
 	}
-	th.SetInvalid()
+	th.SetTxnOperatorInvalid()
 	return err
 }
 
@@ -1485,19 +1535,13 @@ func (th *TxnHandler) GetStorage() engine.Engine {
 	return th.storage
 }
 
-func (th *TxnHandler) GetTxn() (TxnOperator, error) {
-	err := th.GetSession().TxnStart()
+func (th *TxnHandler) GetTxn() (context.Context, TxnOperator, error) {
+	txnCtx, txnOp, err := th.GetSession().TxnCreate()
 	if err != nil {
 		logutil.Errorf("GetTxn. error:%v", err)
-		return nil, err
+		return nil, nil, err
 	}
-	return th.GetTxnOperator(), nil
-}
-
-func (th *TxnHandler) GetTxnOnly() TxnOperator {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	return th.txn
+	return txnCtx, txnOp, err
 }
 
 var _ plan2.CompilerContext = &TxnCompilerContext{}
@@ -1586,13 +1630,14 @@ func (tcc *TxnCompilerContext) GetContext() context.Context {
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	var err error
 	var txn TxnOperator
-	txn, err = tcc.GetTxnHandler().GetTxn()
+	var txnCtx context.Context
+	txnCtx, txn, err = tcc.GetTxnHandler().GetTxn()
 	if err != nil {
 		return false
 	}
 	//open database
 	ses := tcc.GetSession()
-	_, err = tcc.GetTxnHandler().GetStorage().Database(ses.GetRequestContext(), name, txn)
+	_, err = tcc.GetTxnHandler().GetStorage().Database(txnCtx, name, txn)
 	if err != nil {
 		logErrorf(ses.GetConciseProfile(), "get database %v failed. error %v", name, err)
 		return false
@@ -1601,38 +1646,37 @@ func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	return true
 }
 
-func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (engine.Relation, error) {
+func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string) (context.Context, engine.Relation, error) {
 	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	ses := tcc.GetSession()
-	ctx := ses.GetRequestContext()
-	txn, err := tcc.GetTxnHandler().GetTxn()
+	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	//open database
-	db, err := tcc.GetTxnHandler().GetStorage().Database(ctx, dbName, txn)
+	db, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
 	if err != nil {
 		logErrorf(ses.GetConciseProfile(), "get database %v error %v", dbName, err)
-		return nil, err
+		return nil, nil, err
 	}
 
-	tableNames, err := db.Relations(ctx)
+	tableNames, err := db.Relations(txnCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	logDebugf(ses.GetConciseProfile(), "dbName %v tableNames %v", dbName, tableNames)
 
 	//open table
-	table, err := db.Relation(ctx, tableName)
+	table, err := db.Relation(txnCtx, tableName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return table, nil
+	return txnCtx, table, nil
 }
 
 func (tcc *TxnCompilerContext) ensureDatabaseIsNotEmpty(dbName string) (string, error) {
@@ -1650,12 +1694,11 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	if err != nil {
 		return nil, nil
 	}
-	table, err := tcc.getRelation(dbName, tableName)
+	txnCtx, table, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil, nil
 	}
-	ctx := tcc.GetSession().GetRequestContext()
-	engineDefs, err := table.TableDefs(ctx)
+	engineDefs, err := table.TableDefs(txnCtx)
 	if err != nil {
 		return nil, nil
 	}
@@ -1768,7 +1811,7 @@ func (tcc *TxnCompilerContext) Resolve(dbName string, tableName string) (*plan2.
 	}
 
 	if tcc.GetQueryType() != TXN_DEFAULT {
-		hideKeys, err := table.GetHideKeys(ctx)
+		hideKeys, err := table.GetHideKeys(txnCtx)
 		if err != nil {
 			return nil, nil
 		}
@@ -1816,17 +1859,16 @@ func (tcc *TxnCompilerContext) ResolveVariable(varName string, isSystemVar, isGl
 }
 
 func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string) []*plan2.ColDef {
-	ctx := tcc.GetSession().GetRequestContext()
 	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
 	if err != nil {
 		return nil
 	}
-	relation, err := tcc.getRelation(dbName, tableName)
+	txnCtx, relation, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil
 	}
 
-	priKeys, err := relation.GetPrimaryKeys(ctx)
+	priKeys, err := relation.GetPrimaryKeys(txnCtx)
 	if err != nil {
 		return nil
 	}
@@ -1852,17 +1894,16 @@ func (tcc *TxnCompilerContext) GetPrimaryKeyDef(dbName string, tableName string)
 }
 
 func (tcc *TxnCompilerContext) GetHideKeyDef(dbName string, tableName string) *plan2.ColDef {
-	ctx := tcc.GetSession().GetRequestContext()
 	dbName, err := tcc.ensureDatabaseIsNotEmpty(dbName)
 	if err != nil {
 		return nil
 	}
-	relation, err := tcc.getRelation(dbName, tableName)
+	txnCtx, relation, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return nil
 	}
 
-	hideKeys, err := relation.GetHideKeys(ctx)
+	hideKeys, err := relation.GetHideKeys(txnCtx)
 	if err != nil {
 		return nil
 	}
@@ -1904,15 +1945,15 @@ func (tcc *TxnCompilerContext) Stats(obj *plan2.ObjectRef, e *plan2.Expr) (stats
 		return
 	}
 	tableName := obj.GetObjName()
-	table, err := tcc.getRelation(dbName, tableName)
+	txnCtx, table, err := tcc.getRelation(dbName, tableName)
 	if err != nil {
 		return
 	}
 	if e != nil {
-		cols, _ := table.TableColumns(tcc.GetSession().GetRequestContext())
+		cols, _ := table.TableColumns(txnCtx)
 		fixColumnName(cols, e)
 	}
-	blockNum, rows, err := table.FilteredStats(tcc.GetSession().GetRequestContext(), e)
+	blockNum, rows, err := table.FilteredStats(txnCtx, e)
 	if err != nil {
 		return
 	}
@@ -1977,11 +2018,11 @@ func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) 
 
 // executeSQLInBackgroundSession executes the sql in an independent session and transaction.
 // It sends nothing to the client.
-func executeSQLInBackgroundSession(ctx context.Context, mp *mpool.MPool, pu *config.ParameterUnit, sql string) ([]ExecResult, error) {
-	bh := NewBackgroundHandler(ctx, mp, pu)
+func executeSQLInBackgroundSession(connCtx, reqCtx context.Context, mp *mpool.MPool, pu *config.ParameterUnit, sql string) ([]ExecResult, error) {
+	bh := NewBackgroundHandler(connCtx, reqCtx, mp, pu)
 	defer bh.Close()
 	logutil.Debugf("background exec sql:%v", sql)
-	err := bh.Exec(ctx, sql)
+	err := bh.Exec(reqCtx, sql)
 	logutil.Debugf("background exec sql done")
 	if err != nil {
 		return nil, err
@@ -2000,7 +2041,7 @@ func executeSQLInBackgroundSession(ctx context.Context, mp *mpool.MPool, pu *con
 	//	}
 	//}
 
-	return getResultSet(ctx, bh)
+	return getResultSet(reqCtx, bh)
 }
 
 type BackgroundHandler struct {
@@ -2008,10 +2049,10 @@ type BackgroundHandler struct {
 	ses *BackgroundSession
 }
 
-var NewBackgroundHandler = func(ctx context.Context, mp *mpool.MPool, pu *config.ParameterUnit) BackgroundExec {
+var NewBackgroundHandler = func(connCtx, reqCtx context.Context, mp *mpool.MPool, pu *config.ParameterUnit) BackgroundExec {
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(ctx, mp, pu, gSysVariables),
+		ses: NewBackgroundSession(connCtx, reqCtx, mp, pu, gSysVariables),
 	}
 	return bh
 }

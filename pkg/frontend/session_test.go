@@ -65,15 +65,20 @@ func TestTxnHandler_NewTxn(t *testing.T) {
 			CommitOrRollbackTimeout: time.Second,
 		}).AnyTimes()
 
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
+		convey.So(err, convey.ShouldBeNil)
+
 		txn := InitTxnHandler(eng, txnClient)
 		txn.ses = &Session{
 			requestCtx: ctx,
+			pu:         pu,
+			connectCtx: ctx,
 		}
-		err := txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
-		err = txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldNotBeNil)
-		err = txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
@@ -108,15 +113,20 @@ func TestTxnHandler_CommitTxn(t *testing.T) {
 
 		txnClient.EXPECT().New().Return(txnOperator, nil).AnyTimes()
 
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
+		convey.So(err, convey.ShouldBeNil)
+
 		txn := InitTxnHandler(eng, txnClient)
 		txn.ses = &Session{
 			requestCtx: ctx,
+			pu:         pu,
+			connectCtx: ctx,
 		}
-		err := txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		err = txn.CommitTxn()
 		convey.So(err, convey.ShouldBeNil)
-		err = txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		err = txn.CommitTxn()
 		convey.So(err, convey.ShouldNotBeNil)
@@ -153,15 +163,20 @@ func TestTxnHandler_RollbackTxn(t *testing.T) {
 
 		txnClient.EXPECT().New().Return(txnOperator, nil).AnyTimes()
 
+		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
+		convey.So(err, convey.ShouldBeNil)
+
 		txn := InitTxnHandler(eng, txnClient)
 		txn.ses = &Session{
 			requestCtx: ctx,
+			pu:         pu,
+			connectCtx: ctx,
 		}
-		err := txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		err = txn.RollbackTxn()
 		convey.So(err, convey.ShouldBeNil)
-		err = txn.NewTxn()
+		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		err = txn.RollbackTxn()
 		convey.So(err, convey.ShouldNotBeNil)
@@ -192,6 +207,7 @@ func TestSession_TxnBegin(t *testing.T) {
 		eng.EXPECT().Commit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 		session := NewSession(proto, nil, config.NewParameterUnit(&config.FrontendParameters{}, eng, txnClient, nil, nil), gSysVars, false)
 		session.SetRequestContext(context.Background())
+		session.SetConnectContext(context.Background())
 		return session
 	}
 	convey.Convey("new session", t, func() {
@@ -212,7 +228,7 @@ func TestSession_TxnBegin(t *testing.T) {
 		convey.So(err, convey.ShouldNotBeNil)
 		err = ses.TxnCommit()
 		convey.So(err, convey.ShouldBeNil)
-		_, _ = ses.GetTxnHandler().GetTxn()
+		_, _, _ = ses.GetTxnHandler().GetTxn()
 		convey.So(err, convey.ShouldBeNil)
 
 		err = ses.TxnCommit()
@@ -517,6 +533,7 @@ func TestSession_TxnCompilerContext(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
 		session := NewSession(proto, nil, pu, gSysVars, false)
 		session.SetRequestContext(context.Background())
+		session.SetConnectContext(context.Background())
 		return session
 	}
 
@@ -564,7 +581,7 @@ func TestSession_TxnCompilerContext(t *testing.T) {
 		convey.So(defDBName, convey.ShouldEqual, "")
 		convey.So(tcc.DatabaseExists("abc"), convey.ShouldBeTrue)
 
-		_, err := tcc.getRelation("abc", "t1")
+		_, _, err := tcc.getRelation("abc", "t1")
 		convey.So(err, convey.ShouldBeNil)
 
 		object, tableRef := tcc.Resolve("abc", "t1")
