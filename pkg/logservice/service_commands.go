@@ -144,7 +144,7 @@ func (s *Service) heartbeatWorker(ctx context.Context) {
 }
 
 func (s *Service) heartbeat(ctx context.Context) {
-	ctx2, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx2, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if s.haClient == nil {

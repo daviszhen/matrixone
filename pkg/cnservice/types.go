@@ -152,7 +152,7 @@ func (c *Config) Validate() error {
 		c.HAKeeper.HeatbeatInterval.Duration = time.Second
 	}
 	if c.HAKeeper.HeatbeatTimeout.Duration == 0 {
-		c.HAKeeper.HeatbeatTimeout.Duration = time.Second * 3
+		c.HAKeeper.HeatbeatTimeout.Duration = time.Second * 10
 	}
 	if c.TaskRunner.Parallelism == 0 {
 		c.TaskRunner.Parallelism = runtime.NumCPU() / 16
