@@ -81,6 +81,7 @@ func (s *service) initTaskServiceHolder() {
 func (s *service) createTaskService(command *logservicepb.CreateTaskService) {
 	// Notify frontend to setup the special account used to task framework create and query async tasks.
 	// The account is always in the memory.
+	s.logger.Info("cnservice", zap.String("set special user", command.User.Username))
 	frontend.SetSpecialUser(command.User.Username, []byte(command.User.Password))
 
 	if err := s.task.holder.Create(*command); err != nil {
