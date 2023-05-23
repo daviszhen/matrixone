@@ -1342,7 +1342,7 @@ func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 		return nil, nil, err
 	}
 	if th.txnOperator == nil {
-		return nil, nil, moerr.NewInternalError(th.ses.GetRequestContext(), "NewTxnOperator: txnClient new a null txn")
+		return nil, nil, moerr.NewInternalError(txnCtx, "NewTxnOperator: txnClient new a null txn")
 	}
 	return txnCtx, th.txnOperator, err
 }
@@ -1370,12 +1370,11 @@ func (th *TxnHandler) NewTxn() (context.Context, TxnOperator, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx := th.GetSession().GetRequestContext()
-	if ctx == nil {
+	if txnCtx == nil {
 		panic("context should not be nil")
 	}
 	storage := th.GetStorage()
-	err = storage.New(ctx, txnOp)
+	err = storage.New(txnCtx, txnOp)
 	return txnCtx, txnOp, err
 }
 
@@ -1391,7 +1390,6 @@ func (th *TxnHandler) SetTxnOperatorInvalid() {
 	defer th.mu.Unlock()
 	th.txnOperator = nil
 	if th.txnCtxCancel != nil {
-		//fmt.Printf("**> %v\n", th.txnCtx)
 		th.txnCtxCancel()
 		th.txnCtxCancel = nil
 	}
