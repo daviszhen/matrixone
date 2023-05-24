@@ -83,6 +83,7 @@ func (s *service) initTaskServiceHolder() {
 func (s *service) createTaskService(command *logservicepb.CreateTaskService) {
 	// Notify frontend to setup the special account used to task framework create and query async tasks.
 	// The account is always in the memory.
+	s.logger.Info("cnservice set special user", zap.String("username", command.User.Username))
 	frontend.SetSpecialUser(command.User.Username, []byte(command.User.Password))
 
 	// FIXME: create auto increment here is bad.

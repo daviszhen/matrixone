@@ -295,6 +295,8 @@ func SetSpecialUser(userName string, password []byte) {
 		password: password,
 	}
 
+	logutil.Infof("SetSpecialUser: %s", userName)
+
 	specialUser.Store(user)
 }
 
@@ -302,8 +304,10 @@ func SetSpecialUser(userName string, password []byte) {
 func isSpecialUser(userName string) (bool, []byte, *TenantInfo) {
 	user := getSpecialUser()
 	if user != nil && user.account.GetUser() == userName {
+		logutil.Infof("isSpecialUser true: %s", userName)
 		return true, user.password, user.account
 	}
+	logutil.Infof("isSpecialUser false: %s", userName)
 	return false, nil, nil
 }
 
