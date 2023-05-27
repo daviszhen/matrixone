@@ -4483,7 +4483,6 @@ func doRevokeRole(ctx context.Context, ses *Session, rr *tree.RevokeRole) (err e
 				}
 			}
 
-			sql = ""
 			if to.typ == roleType {
 				//revoke from role
 				//delete (granted_id,grantee_id) from the mo_role_grant
@@ -4678,7 +4677,6 @@ func doGrantRole(ctx context.Context, ses *Session, gr *tree.GrantRole) (err err
 				return err
 			}
 
-			sql = ""
 			if to.typ == roleType {
 				if from.id == to.id { //direct loop
 					return moerr.NewRoleGrantedToSelf(ctx, from.name, to.name)
@@ -7836,18 +7834,18 @@ func doAlterAccountConfig(ctx context.Context, ses *Session, stmt *tree.AlterDat
 	return err
 }
 
-func insertRecordToMoMysqlCompatbilityMode(ctx context.Context, ses *Session, stmt tree.Statement) (err error) {
+func insertRecordToMoMysqlCompatibilityMode(ctx context.Context, ses *Session, stmt tree.Statement) (err error) {
 	var sql string
-	var account_id uint32
+	var accountId uint32
 	var accountName string
-	var datname string
-	variable_name := "version_compatibility"
-	variable_value := "0.7"
+	var dbName string
+	variableName := "version_compatibility"
+	variableValue := "0.7"
 
 	if createDatabaseStmt, ok := stmt.(*tree.CreateDatabase); ok {
-		datname = string(createDatabaseStmt.Name)
+		dbName = string(createDatabaseStmt.Name)
 		//if create sys database, do nothing
-		if _, ok = sysDatabases[datname]; ok {
+		if _, ok = sysDatabases[dbName]; ok {
 			return nil
 		}
 
@@ -7866,18 +7864,18 @@ func insertRecordToMoMysqlCompatbilityMode(ctx context.Context, ses *Session, st
 			//step 1: get account_name and database_name
 			if ses.GetTenantInfo() != nil {
 				accountName = ses.GetTenantInfo().GetTenant()
-				account_id = ses.GetTenantInfo().GetTenantID()
+				accountId = ses.GetTenantInfo().GetTenantID()
 			} else {
 				return err
 			}
 
 			//step 2: check database name
-			if _, ok = bannedCatalogDatabases[datname]; ok {
+			if _, ok = bannedCatalogDatabases[dbName]; ok {
 				return nil
 			}
 
 			//step 3: insert the record
-			sql = fmt.Sprintf(initMoMysqlCompatbilityModeFormat, account_id, accountName, datname, variable_name, variable_value, false)
+			sql = fmt.Sprintf(initMoMysqlCompatbilityModeFormat, accountId, accountName, dbName, variableName, variableValue, false)
 
 			err = bh.Exec(ctx, sql)
 			if err != nil {
