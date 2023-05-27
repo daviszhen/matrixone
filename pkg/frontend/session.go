@@ -443,7 +443,6 @@ func NewBackgroundSession(
 	ses.SetConnectContext(connCtx)
 	ses.SetBackgroundSession(true)
 	ses.UpdateDebugString()
-	ses.debugStr += "|" + upstream.uuid.String()
 	backSes := &BackgroundSession{
 		Session: ses,
 		cancel:  cancelBackgroundFunc,
@@ -528,6 +527,12 @@ func (ses *Session) UpdateDebugString() {
 	sb.WriteByte('|')
 	//session id
 	sb.WriteString(ses.uuid.String())
+	//upstream sessionid
+	if ses.upstream != nil {
+		sb.WriteByte('|')
+		sb.WriteString(ses.upstream.uuid.String())
+	}
+
 	ses.debugStr = sb.String()
 }
 
@@ -1689,7 +1694,9 @@ func (bh *BackgroundHandler) Exec(ctx context.Context, sql string) error {
 	if len(statements) > 1 {
 		return moerr.NewInternalError(ctx, "Exec() can run one statement at one time. but get '%d' statements now, sql = %s", len(statements), sql)
 	}
-	logutil.Infof("background exec sql/query trace: %s %s", sql, bh.ses.debugStr)
+	logInfo(bh.ses.GetDebugString(), "query trace(backgroundExecSql)",
+		logutil.ConnectionIdField(bh.ses.GetConnectionID()),
+		logutil.QueryField(SubStringFromBegin(sql, int(bh.ses.GetParameterUnit().SV.LengthOfQueryPrinted))))
 	err = bh.mce.GetDoQueryFunc()(ctx, sql)
 	if err != nil {
 		return err
@@ -1723,8 +1730,7 @@ type SqlHelper struct {
 }
 
 // Made for sequence func. nextval, setval.
-func (sh *SqlHelper) ExecSql(sql string) ([]interface{}, error) {
-	var err error
+func (sh *SqlHelper) ExecSql(sql string) (ret []interface{}, err error) {
 	var erArray []ExecResult
 
 	ctx := sh.ses.GetRequestContext()
@@ -1732,25 +1738,22 @@ func (sh *SqlHelper) ExecSql(sql string) ([]interface{}, error) {
 	defer bh.Close()
 
 	err = bh.Exec(ctx, "begin;")
+	defer func() {
+		err = finishTxn(ctx, bh, err)
+	}()
 	if err != nil {
-		goto handleFailed
+		return nil, err
 	}
 
 	bh.ClearExecResultSet()
 	err = bh.Exec(ctx, sql)
 	if err != nil {
-		goto handleFailed
+		return nil, err
 	}
 
 	erArray, err = getResultSet(ctx, bh)
 	if err != nil {
-		goto handleFailed
-	}
-
-	// Success.
-	err = bh.Exec(ctx, "commit;")
-	if err != nil {
-		goto handleFailed
+		return nil, err
 	}
 
 	if len(erArray) == 0 {
@@ -1758,13 +1761,6 @@ func (sh *SqlHelper) ExecSql(sql string) ([]interface{}, error) {
 	}
 
 	return erArray[0].(*MysqlResultSet).Data[0], nil
-handleFailed:
-	//ROLLBACK the transaction
-	rbErr := bh.Exec(ctx, "rollback;")
-	if rbErr != nil {
-		return nil, rbErr
-	}
-	return nil, err
 }
 
 func (ses *Session) updateLastCommitTS(lastCommitTS timestamp.Timestamp) {
