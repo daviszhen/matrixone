@@ -47,3 +47,5 @@ type = "distributed-tae"
 [cn.txn]
 enable-sacrificing-freshness = false
 enable-cn-based-consistency = true
+max-active-ages = "30s"
+panic-if-txn-leak-found = true
