@@ -46,6 +46,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"github.com/sasha-s/go-deadlock"
 	"go.uber.org/zap"
 )
 
@@ -732,13 +733,40 @@ func copyBytes(src []byte, needCopy bool) []byte {
 	return src
 }
 
-var _ sync.Locker = &DummyMutex{}
+var _ sync.Locker = &OptionMutex{}
 
-type DummyMutex struct {
+type OptionMutexMode int
+
+const (
+	OptionMutexModeDummy OptionMutexMode = iota
+	OptionMutexModeSyncMutex
+	OptionMutexModeDeadMutex
+)
+
+type OptionMutex struct {
+	mode      OptionMutexMode
+	synMu     sync.Mutex
+	deadMutex deadlock.Mutex
 }
 
-func (m *DummyMutex) Lock() {
+func (m *OptionMutex) Lock() {
+	switch m.mode {
+	case OptionMutexModeSyncMutex:
+		m.synMu.Lock()
+	case OptionMutexModeDeadMutex:
+		m.deadMutex.Lock()
+	case OptionMutexModeDummy:
+		return
+	}
 }
 
-func (m *DummyMutex) Unlock() {
+func (m *OptionMutex) Unlock() {
+	switch m.mode {
+	case OptionMutexModeSyncMutex:
+		m.synMu.Unlock()
+	case OptionMutexModeDeadMutex:
+		m.deadMutex.Unlock()
+	case OptionMutexModeDummy:
+		return
+	}
 }

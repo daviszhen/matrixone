@@ -133,7 +133,7 @@ type Session struct {
 
 	debugStr string
 
-	mu DummyMutex
+	mu OptionMutex
 
 	isNotBackgroundSession bool
 	lastInsertID           uint64
