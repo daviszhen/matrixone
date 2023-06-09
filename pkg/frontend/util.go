@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -729,4 +730,15 @@ func copyBytes(src []byte, needCopy bool) []byte {
 		}
 	}
 	return src
+}
+
+var _ sync.Locker = &DummyMutex{}
+
+type DummyMutex struct {
+}
+
+func (m *DummyMutex) Lock() {
+}
+
+func (m *DummyMutex) Unlock() {
 }

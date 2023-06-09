@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -134,7 +133,7 @@ type Session struct {
 
 	debugStr string
 
-	mu sync.Mutex
+	mu DummyMutex
 
 	isNotBackgroundSession bool
 	lastInsertID           uint64
