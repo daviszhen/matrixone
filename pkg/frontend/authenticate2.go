@@ -78,3 +78,18 @@ func getDefaultAccount() *TenantInfo {
 		delimiter:     ':',
 	}
 }
+
+// privilegeCache cache privileges on table
+type privilegeCache struct {
+}
+
+// has checks the cache has privilege on a table
+func (pc *privilegeCache) has(objTyp objectType, dbName, tableName string, priv PrivilegeType) (bool, error) {
+
+	return false, nil
+}
+
+// invalidate makes the cache empty
+func (pc *privilegeCache) invalidate() {
+
+}
