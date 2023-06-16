@@ -5244,17 +5244,12 @@ func verifyPrivilegeEntryInMultiPrivilegeLevels(
 	pls []privilegeLevelType) (bool, error) {
 	var erArray []ExecResult
 	var sql string
-	var yes bool
 	var err error
 	dbName := entry.databaseName
 	if len(dbName) == 0 {
 		dbName = ses.GetDatabaseName()
 	}
 	for _, pl := range pls {
-		yes = cache.has(entry.objType, pl, dbName, entry.tableName, entry.privilegeId)
-		if yes {
-			return true, nil
-		}
 		sql, err = getSqlForPrivilege2(ses, roleId, entry, pl)
 		if err != nil {
 			return false, err
@@ -5272,7 +5267,6 @@ func verifyPrivilegeEntryInMultiPrivilegeLevels(
 		}
 
 		if execResultArrayHasData(erArray) {
-			cache.add(entry.objType, pl, dbName, entry.tableName, entry.privilegeId)
 			return true, nil
 		}
 	}

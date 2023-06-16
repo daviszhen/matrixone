@@ -268,7 +268,7 @@ func checkPrivilege(uuids []string, requestCtx context.Context, ses *Session) er
 		if ast, err = simpleAstUnmarshal([]byte(a)); err != nil {
 			return err
 		}
-		if err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, ast, pn); err != nil {
+		if err = canExecStatement(requestCtx, ses, ast, true, pn); err != nil {
 			return err
 		}
 	}

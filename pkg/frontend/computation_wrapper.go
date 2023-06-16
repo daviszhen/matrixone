@@ -197,7 +197,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 	} else if cwft.ses != nil && cwft.ses.GetTenantInfo() != nil {
 		cwft.ses.accountId = defines.GetAccountId(requestCtx)
-		err = authenticateCanExecuteStatementAndPlan(requestCtx, cwft.ses, cwft.stmt, cwft.plan)
+		err = canExecStatement(requestCtx, cwft.ses, cwft.stmt, true, cwft.plan)
 	}
 	if err != nil {
 		return nil, err

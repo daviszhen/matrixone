@@ -1527,7 +1527,7 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	}
 	if ret != nil {
 		if ses != nil && ses.GetTenantInfo() != nil {
-			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, ret)
+			err = canExecStatement(requestCtx, ses, stmt, true, ret)
 			if err != nil {
 				return nil, err
 			}
@@ -1555,7 +1555,7 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	}
 	if ret != nil {
 		if ses != nil && ses.GetTenantInfo() != nil {
-			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, ret)
+			err = canExecStatement(requestCtx, ses, stmt, true, ret)
 			if err != nil {
 				return nil, err
 			}
@@ -2682,7 +2682,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		if err != nil {
 			return err
 		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, prepareStmt.PrepareStmt, prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
+		err = canExecStatement(requestCtx, ses,
+			prepareStmt.PrepareStmt, false,
+			prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
 		if err != nil {
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
@@ -2693,7 +2695,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		if err != nil {
 			return err
 		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, prepareStmt.PrepareStmt, prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
+		err = canExecStatement(requestCtx, ses,
+			prepareStmt.PrepareStmt, false,
+			prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
 		if err != nil {
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
@@ -3316,7 +3320,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 		tenant := ses.GetTenantName(stmt)
 		//skip PREPARE statement here
 		if ses.GetTenantInfo() != nil && !IsPrepareStatement(stmt) {
-			err = authenticateUserCanExecuteStatement(requestCtx, ses, stmt)
+			err = canExecStatement(requestCtx, ses, stmt, false, nil)
 			if err != nil {
 				logStatementStatus(requestCtx, ses, stmt, fail, err)
 				return err
