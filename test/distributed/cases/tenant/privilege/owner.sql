@@ -10,8 +10,11 @@ create table db1.t1(a int);
 insert into db1.t1 values(1);
 select * from db1.t1;
 truncate table db1.t1;
+-- truncate has changed the table id
+-- @bvt:issue#20000
 insert into db1.t1 values(2);
 select * from db1.t1;
+-- @bvt:issue
 -- @session
 drop account default_1;
 
