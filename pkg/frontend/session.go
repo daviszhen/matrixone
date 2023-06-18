@@ -381,7 +381,7 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 			msgs:   make([]string, 0, MoDefaultErrorCount),
 			maxCnt: MoDefaultErrorCount,
 		},
-		cache:     &privilegeCache{},
+		cache:     newPrivilegeCache(),
 		blockIdx:  0,
 		planCache: newPlanCache(100),
 	}

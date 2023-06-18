@@ -86,6 +86,25 @@ func getDefaultAccount() *TenantInfo {
 	}
 }
 
+/*
+The Design of the Privilege Cache.
+
+1. Background
+
+From a business perspective, the MO just want to know the user can execute
+the statement or not. The MO does not care about the details why the user can.
+
+We design a corresponding stmtPrivilege with the same name for every statement below.
+Before executing the statement, the MO check its stmtPrivilege first. The background
+logic will evaluate if the user has the stmtPrivilege.
+
+2. The content of the privilege cache
+
+cache key: the stmtPrivilege
+cache value: nil or special data structure based on the statement
+
+
+*/
 // stmtPrivilege denotes the kind of statement we can execute
 type stmtPrivilege int
 
@@ -188,6 +207,222 @@ const (
 	PrivilegeEnd
 )
 
+func (sp stmtPrivilege) String() string {
+	switch sp {
+	case PrivilegeNone:
+		return "PrivilegeNone "
+	case CreateAccount:
+		return "CreateAccount"
+	case DropAccount:
+		return "DropAccount"
+	case AlterAccount:
+		return "AlterAccount"
+	case CreateUser:
+		return "CreateUser"
+	case CreateUserWithRole:
+		return "CreateUserWithRole"
+	case DropUser:
+		return "DropUser"
+	case AlterUser:
+		return "AlterUser"
+	case CreateRole:
+		return "CreateRole"
+	case DropRole:
+		return "DropRole"
+	case GrantRole:
+		return "GrantRole"
+	case GrantPrivilege:
+		return "GrantPrivilege"
+	case RevokeRole:
+		return "RevokeRole"
+	case RevokePrivilege:
+		return "RevokePrivilege"
+	case CreateDatabase:
+		return "CreateDatabase"
+	case DropDatabase:
+		return "DropDatabase"
+	case ShowDatabases:
+		return "ShowDatabases"
+	case ShowSequences:
+		return "ShowSequences"
+	case Use:
+		return "Use"
+	case ShowTables:
+		return "ShowTables"
+	case ShowCreateTable:
+		return "ShowCreateTable"
+	case ShowColumns:
+		return "ShowColumns"
+	case ShowCreateView:
+		return "ShowCreateView"
+	case ShowCreateDatabase:
+		return "ShowCreateDatabase"
+	case ShowCreatePublications:
+		return "ShowCreatePublications"
+	case CreateTable:
+		return "CreateTable"
+	case CreateView:
+		return "CreateView"
+	case CreateSequence:
+		return "CreateSequence"
+	case AlterView:
+		return "AlterView"
+	case AlterDataBaseConfig:
+		return "AlterDataBaseConfig"
+	case CreateFunction:
+		return "CreateFunction"
+	case AlterTable:
+		return "AlterTable"
+	case CreateProcedure:
+		return "CreateProcedure"
+	case CallStmt:
+		return "CallStmt"
+	case DropTable:
+		return "DropTable"
+	case DropView:
+		return "DropView"
+	case DropSequence:
+		return "DropSequence"
+	case DropFunction:
+		return "DropFunction"
+	case DropProcedure:
+		return "DropProcedure"
+	case Select:
+		return "Select"
+	case Do:
+		return "Do"
+	case Insert:
+		return "Insert"
+	case Replace:
+		return "Replace"
+	case Load:
+		return "Load"
+	case Update:
+		return "Update"
+	case Delete:
+		return "Delete"
+	case CreateIndex:
+		return "CreateIndex"
+	case DropIndex:
+		return "DropIndex"
+	case ShowProcessList:
+		return "ShowProcessList"
+	case ShowErrors:
+		return "ShowErrors"
+	case ShowWarnings:
+		return "ShowWarnings"
+	case ShowVariables:
+		return "ShowVariables"
+	case ShowStatus:
+		return "ShowStatus"
+	case ShowTarget:
+		return "ShowTarget"
+	case ShowTableStatusStmt:
+		return "ShowTableStatusStmt"
+	case ShowGrants:
+		return "ShowGrants"
+	case ShowCollation:
+		return "ShowCollation"
+	case ShowIndex:
+		return "ShowIndex"
+	case ShowTableNumber:
+		return "ShowTableNumber"
+	case ShowColumnNumber:
+		return "ShowColumnNumber"
+	case ShowTableValues:
+		return "ShowTableValues"
+	case ShowNodeList:
+		return "ShowNodeList"
+	case ShowRolesStmt:
+		return "ShowRolesStmt"
+	case ShowLocks:
+		return "ShowLocks"
+	case ShowFunctionOrProcedureStatus:
+		return "ShowFunctionOrProcedureStatus"
+	case ShowPublications:
+		return "ShowPublications"
+	case ShowSubscriptions:
+		return "ShowSubscriptions"
+	case ShowBackendServers:
+		return "ShowBackendServers"
+	case ShowAccounts:
+		return "ShowAccounts"
+	case ExplainFor:
+		return "ExplainFor"
+	case ExplainAnalyze:
+		return "ExplainAnalyze"
+	case ExplainStmt:
+		return "ExplainStmt"
+	case BeginTransaction:
+		return "BeginTransaction"
+	case CommitTransaction:
+		return "CommitTransaction"
+	case RollbackTransaction:
+		return "RollbackTransaction"
+	case SetVar:
+		return "SetVar"
+	case SetDefaultRole:
+		return "SetDefaultRole"
+	case SetRole:
+		return "SetRole"
+	case SetPassword:
+		return "SetPassword"
+	case PrepareStmtPt:
+		return "PrepareStmtPt"
+	case PrepareString:
+		return "PrepareString"
+	case Deallocate:
+		return "Deallocate"
+	case Reset:
+		return "Reset"
+	case ExecutePt:
+		return "ExecutePt"
+	case Declare:
+		return "Declare"
+	case InternalCmdFieldListPt:
+		return "InternalCmdFieldListPt"
+	case ValuesStatement:
+		return "ValuesStatement"
+	case TruncateTable:
+		return "TruncateTable"
+	case MoDump:
+		return "MoDump"
+	case Kill:
+		return "Kill"
+	case LockTableStmt:
+		return "LockTableStmt"
+	case UnLockTableStmt:
+		return "UnLockTableStmt"
+	case CreatePublication:
+		return "CreatePublication"
+	case DropPublication:
+		return "DropPublication"
+	case AlterPublication:
+		return "AlterPublication"
+	case PrivilegeEnd:
+		return "PrivilegeEnd"
+	default:
+		return fmt.Sprintf("unknown privilege %d", sp)
+	}
+}
+
+type stmtPrivliegeOption struct {
+	writeDatabaseAndTableDirectly bool
+	dbName                        string
+	tableName                     string
+	clusterTable                  bool
+	clusterTableOperation         clusterTableOperationType
+}
+
+func (spo *stmtPrivliegeOption) String() string {
+	return fmt.Sprintf("writeDatabaseAndTableDirectly: %v, dbName: %s, tableName: %s, clusterTable: %v, clusterTableOperation: %v",
+		spo.writeDatabaseAndTableDirectly,
+		spo.dbName,
+		spo.tableName,
+		spo.clusterTable,
+		spo.clusterTableOperation)
+}
+
 /*
 if the item is in the cache,
 return the true.
@@ -202,13 +437,17 @@ type privilegeCache struct {
 	store map[stmtPrivilege]any
 }
 
-func (pc *privilegeCache) has(priv stmtPrivilege) (bool, any) {
-	value, ok := pc.store[priv]
-	return ok, value
+func newPrivilegeCache() *privilegeCache {
+	return &privilegeCache{store: make(map[stmtPrivilege]any)}
 }
 
-func (pc *privilegeCache) update(priv stmtPrivilege, value any) {
-	pc.store[priv] = value
+func (pc *privilegeCache) has(priv stmtPrivilege) (bool, any) {
+	item, ok := pc.store[priv]
+	return ok, item
+}
+
+func (pc *privilegeCache) update(priv stmtPrivilege, item any) {
+	pc.store[priv] = item
 }
 
 // invalidate makes the cache empty
@@ -216,13 +455,71 @@ func (pc *privilegeCache) invalidate() {
 
 }
 
-func hasStmtPrivilege(ctx context.Context, ses *Session, stmt tree.Statement, onlyCheckPlan bool, p *plan.Plan, priv stmtPrivilege) error {
+type dbCacheItem struct {
+	clusterTable   bool
+	clusterTableOp clusterTableOperationType
+}
+
+type databaseCache struct {
+	store map[string]*dbCacheItem
+}
+
+func (dc *databaseCache) has(dbName string) (bool, *dbCacheItem) {
+	if v, ok := dc.store[dbName]; ok {
+		return ok, v
+	}
+	return false, nil
+}
+
+func (dc *databaseCache) add(dbName string, item *dbCacheItem) {
+	dc.store[dbName] = item
+}
+
+func hasStmtPrivilege(ctx context.Context, ses *Session, stmt tree.Statement, onlyCheckPlan bool, p *plan.Plan, priv stmtPrivilege, option stmtPrivliegeOption) error {
 	var err error
-	//cache := ses.GetPrivilegeCache()
-	//ok, _ := cache.has(priv)
-	//if ok {
-	//	return nil
-	//}
+	fmt.Println("[[[[[[", priv, option)
+	defer func() {
+		fmt.Println("]]]]]]", priv, option)
+	}()
+	cache := ses.GetPrivilegeCache()
+	ok, item := cache.has(priv)
+	if ok {
+		if option.writeDatabaseAndTableDirectly {
+			switch priv {
+			case DropDatabase, CreateTable, CreateView,
+				CreateSequence, AlterView, CreateFunction,
+				AlterTable, CreateProcedure, CallStmt,
+				DropTable, DropView, DropSequence,
+				DropFunction, DropProcedure, Load,
+				CreateIndex, DropIndex, TruncateTable:
+				//check database name
+				dbName := option.dbName
+				if len(dbName) == 0 {
+					dbName = ses.GetDatabaseName()
+				}
+				fmt.Println("--->2", priv, dbName)
+				if dbCache, ok2 := item.(*databaseCache); ok2 {
+					if ok3, value := dbCache.has(dbName); ok3 {
+						fmt.Println("--->3", priv, "database ", dbName, "has been cached")
+						if priv == CreateTable {
+							if value != nil {
+								if value.clusterTable == option.clusterTable &&
+									value.clusterTableOp == option.clusterTableOperation {
+									return nil
+								}
+							}
+						} else {
+							return nil
+						}
+					}
+				}
+			case Insert, Replace, Update, Delete:
+			}
+		} else {
+			fmt.Println("--->", priv, "has been cached")
+			return nil
+		}
+	}
 
 	if !onlyCheckPlan {
 		err = authenticateUserCanExecuteStatement(ctx, ses, stmt)
@@ -237,217 +534,299 @@ func hasStmtPrivilege(ctx context.Context, ses *Session, stmt tree.Statement, on
 			return err
 		}
 	}
-	//cache.update(priv, true)
+	fmt.Println("+++>", priv, "has been evaluated")
+	if option.writeDatabaseAndTableDirectly {
+		switch priv {
+		case DropDatabase, CreateTable, CreateView:
+			//check database name
+			dbName := option.dbName
+			if len(dbName) == 0 {
+				dbName = ses.GetDatabaseName()
+			}
+			if item == nil {
+				item = &databaseCache{store: make(map[string]*dbCacheItem)}
+			}
+			fmt.Println("+++>2", priv, dbName)
+			if dbCache, ok2 := item.(*databaseCache); ok2 {
+				fmt.Println("+++>3", priv, "database ", dbName, "has been cached")
+				var value *dbCacheItem
+				if priv == CreateTable {
+					value = &dbCacheItem{
+						clusterTable:   option.clusterTable,
+						clusterTableOp: option.clusterTableOperation}
+				}
+				dbCache.add(dbName, value)
+			}
+		}
+	}
+	cache.update(priv, item)
 	return err
 }
 
 func canExecStatement(ctx context.Context, ses *Session, stmt tree.Statement, onlyCheckPlan bool, p *plan.Plan) error {
+	var stmtPriv = PrivilegeNone
+	var option stmtPrivliegeOption
 	switch st := stmt.(type) {
 	case *tree.CreateAccount:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateAccount)
+		stmtPriv = CreateAccount
 	case *tree.DropAccount:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropAccount)
+		stmtPriv = DropAccount
 	case *tree.AlterAccount:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, AlterAccount)
+		stmtPriv = AlterAccount
 	case *tree.CreateUser:
 		if st.Role == nil {
-			return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateUser)
+			stmtPriv = CreateUser
 		} else {
-			return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateUserWithRole)
+			stmtPriv = CreateUserWithRole
 		}
 	case *tree.DropUser:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropUser)
+		stmtPriv = DropUser
 	case *tree.AlterUser:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, AlterUser)
+		stmtPriv = AlterUser
 	case *tree.CreateRole:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateRole)
+		stmtPriv = CreateRole
 	case *tree.DropRole:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropRole)
+		stmtPriv = DropRole
 	case *tree.Grant:
 		if st.Typ == tree.GrantTypeRole {
-			return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, GrantRole)
+			stmtPriv = GrantRole
 		} else if st.Typ == tree.GrantTypePrivilege {
-			return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, GrantPrivilege)
+			stmtPriv = GrantPrivilege
 		}
 	case *tree.GrantRole:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, GrantRole)
+		stmtPriv = GrantRole
 	case *tree.GrantPrivilege:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, GrantPrivilege)
+		stmtPriv = GrantPrivilege
 	case *tree.Revoke:
 		if st.Typ == tree.RevokeTypeRole {
-			return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, RevokeRole)
+			stmtPriv = RevokeRole
 		} else if st.Typ == tree.RevokeTypePrivilege {
-			return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, RevokePrivilege)
+			stmtPriv = RevokePrivilege
 		}
 	case *tree.RevokeRole:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, RevokeRole)
+		stmtPriv = RevokeRole
 	case *tree.RevokePrivilege:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, RevokePrivilege)
+		stmtPriv = RevokePrivilege
 	case *tree.CreateDatabase:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateDatabase)
+		stmtPriv = CreateDatabase
 	case *tree.DropDatabase:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropDatabase)
+		stmtPriv = DropDatabase
+		option.writeDatabaseAndTableDirectly = true
+		option.dbName = string(st.Name)
 	case *tree.ShowDatabases:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowDatabases)
+		stmtPriv = ShowDatabases
 	case *tree.ShowSequences:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowSequences)
+		stmtPriv = ShowSequences
 	case *tree.Use:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Use)
+		stmtPriv = Use
 	case *tree.ShowTables:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowTables)
+		stmtPriv = ShowTables
 	case *tree.ShowCreateTable:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowCreateTable)
+		stmtPriv = ShowCreateTable
 	case *tree.ShowColumns:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowColumns)
+		stmtPriv = ShowColumns
 	case *tree.ShowCreateView:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowCreateView)
+		stmtPriv = ShowCreateView
 	case *tree.ShowCreateDatabase:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowCreateDatabase)
+		stmtPriv = ShowCreateDatabase
 	case *tree.ShowCreatePublications:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowCreatePublications)
+		stmtPriv = ShowCreatePublications
 	case *tree.CreateTable:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateTable)
+		stmtPriv = CreateTable
+		option.writeDatabaseAndTableDirectly = true
+		option.dbName = string(st.Table.SchemaName)
+		if st.IsClusterTable {
+			option.clusterTable = true
+			option.clusterTableOperation = clusterTableCreate
+		}
 	case *tree.CreateView:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateView)
+		stmtPriv = CreateView
+		option.writeDatabaseAndTableDirectly = true
+		if st.Name != nil {
+			option.dbName = string(st.Name.SchemaName)
+		}
 	case *tree.CreateSequence:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateSequence)
+		stmtPriv = CreateSequence
+		option.writeDatabaseAndTableDirectly = true
+		if st.Name != nil {
+			option.dbName = string(st.Name.SchemaName)
+		}
 	case *tree.AlterView:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, AlterView)
+		stmtPriv = AlterView
+		option.writeDatabaseAndTableDirectly = true
+		if st.Name != nil {
+			option.dbName = string(st.Name.SchemaName)
+		}
 	case *tree.AlterDataBaseConfig:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, AlterDataBaseConfig)
+		stmtPriv = AlterDataBaseConfig
 	case *tree.CreateFunction:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateFunction)
+		stmtPriv = CreateFunction
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.AlterTable:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, AlterTable)
+		stmtPriv = AlterTable
+		option.writeDatabaseAndTableDirectly = true
+		if st.Table != nil {
+			option.dbName = string(st.Table.SchemaName)
+		}
 	case *tree.CreateProcedure:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateProcedure)
+		stmtPriv = CreateProcedure
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.CallStmt:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CallStmt)
+		stmtPriv = CallStmt
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.DropTable:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropTable)
+		stmtPriv = DropTable
+		option.writeDatabaseAndTableDirectly = true
+		if len(st.Names) != 0 {
+			option.dbName = string(st.Names[0].SchemaName)
+		}
 	case *tree.DropView:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropView)
+		stmtPriv = DropView
+		option.writeDatabaseAndTableDirectly = true
+		if len(st.Names) != 0 {
+			option.dbName = string(st.Names[0].SchemaName)
+		}
 	case *tree.DropSequence:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropSequence)
+		stmtPriv = DropSequence
+		option.writeDatabaseAndTableDirectly = true
+		if len(st.Names) != 0 {
+			option.dbName = string(st.Names[0].SchemaName)
+		}
 	case *tree.DropFunction:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropFunction)
+		stmtPriv = DropFunction
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.DropProcedure:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropProcedure)
+		stmtPriv = DropProcedure
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.Select:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Select)
+		stmtPriv = Select
 	case *tree.Do:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Do)
+		stmtPriv = Do
 	case *tree.Insert:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Insert)
+		stmtPriv = Insert
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.Replace:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Replace)
+		stmtPriv = Replace
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.Load:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Load)
+		stmtPriv = Load
+		option.writeDatabaseAndTableDirectly = true
+		if st.Table != nil {
+			option.dbName = string(st.Table.SchemaName)
+		}
 	case *tree.Update:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Update)
+		stmtPriv = Update
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.Delete:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Delete)
+		stmtPriv = Delete
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.CreateIndex:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreateIndex)
+		stmtPriv = CreateIndex
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.DropIndex:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropIndex)
+		stmtPriv = DropIndex
+		option.writeDatabaseAndTableDirectly = true
 	case *tree.ShowProcessList:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowProcessList)
+		stmtPriv = ShowProcessList
 	case *tree.ShowErrors:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowErrors)
+		stmtPriv = ShowErrors
 	case *tree.ShowWarnings:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowWarnings)
+		stmtPriv = ShowWarnings
 	case *tree.ShowVariables:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowVariables)
+		stmtPriv = ShowVariables
 	case *tree.ShowStatus:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowStatus)
+		stmtPriv = ShowStatus
 	case *tree.ShowTarget:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowTarget)
+		stmtPriv = ShowTarget
 	case *tree.ShowTableStatus:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowTableStatusStmt)
+		stmtPriv = ShowTableStatusStmt
 	case *tree.ShowGrants:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowGrants)
+		stmtPriv = ShowGrants
 	case *tree.ShowCollation:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowCollation)
+		stmtPriv = ShowCollation
 	case *tree.ShowIndex:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowIndex)
+		stmtPriv = ShowIndex
 	case *tree.ShowTableNumber:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowTableNumber)
+		stmtPriv = ShowTableNumber
 	case *tree.ShowColumnNumber:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowColumnNumber)
+		stmtPriv = ShowColumnNumber
 	case *tree.ShowTableValues:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowTableValues)
+		stmtPriv = ShowTableValues
 	case *tree.ShowNodeList:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowNodeList)
+		stmtPriv = ShowNodeList
 	case *tree.ShowRolesStmt:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowRolesStmt)
+		stmtPriv = ShowRolesStmt
 	case *tree.ShowLocks:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowLocks)
+		stmtPriv = ShowLocks
 	case *tree.ShowFunctionOrProcedureStatus:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowFunctionOrProcedureStatus)
+		stmtPriv = ShowFunctionOrProcedureStatus
 	case *tree.ShowPublications:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowPublications)
+		stmtPriv = ShowPublications
 	case *tree.ShowSubscriptions:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowSubscriptions)
+		stmtPriv = ShowSubscriptions
 	case *tree.ShowBackendServers:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowBackendServers)
+		stmtPriv = ShowBackendServers
 	case *tree.ShowAccounts:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ShowAccounts)
+		stmtPriv = ShowAccounts
 	case *tree.ExplainFor:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ExplainFor)
+		stmtPriv = ExplainFor
 	case *tree.ExplainAnalyze:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ExplainAnalyze)
+		stmtPriv = ExplainAnalyze
 	case *tree.ExplainStmt:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ExplainStmt)
+		stmtPriv = ExplainStmt
 	case *tree.BeginTransaction:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, BeginTransaction)
+		stmtPriv = BeginTransaction
 	case *tree.CommitTransaction:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CommitTransaction)
+		stmtPriv = CommitTransaction
 	case *tree.RollbackTransaction:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, RollbackTransaction)
+		stmtPriv = RollbackTransaction
 	case *tree.SetVar:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, SetVar)
+		stmtPriv = SetVar
 	case *tree.SetDefaultRole:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, SetDefaultRole)
+		stmtPriv = SetDefaultRole
 	case *tree.SetRole:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, SetRole)
+		stmtPriv = SetRole
 	case *tree.SetPassword:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, SetPassword)
+		stmtPriv = SetPassword
 	case *tree.PrepareStmt:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, PrepareStmtPt)
+		stmtPriv = PrepareStmtPt
 	case *tree.PrepareString:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, PrepareString)
+		stmtPriv = PrepareString
 	case *tree.Deallocate:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Deallocate)
+		stmtPriv = Deallocate
 	case *tree.Reset:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Reset)
+		stmtPriv = Reset
 	case *tree.Execute:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ExecutePt)
+		stmtPriv = ExecutePt
 	case *tree.Declare:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Declare)
+		stmtPriv = Declare
 	case *InternalCmdFieldList:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, InternalCmdFieldListPt)
+		stmtPriv = InternalCmdFieldListPt
 	case *tree.ValuesStatement:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, ValuesStatement)
+		stmtPriv = ValuesStatement
 	case *tree.TruncateTable:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, TruncateTable)
+		stmtPriv = TruncateTable
+		option.writeDatabaseAndTableDirectly = true
+		if st.Name != nil {
+			option.dbName = string(st.Name.SchemaName)
+		}
 	case *tree.MoDump:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, MoDump)
+		stmtPriv = MoDump
 	case *tree.Kill:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, Kill)
+		stmtPriv = Kill
 	case *tree.LockTableStmt:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, LockTableStmt)
+		stmtPriv = LockTableStmt
 	case *tree.UnLockTableStmt:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, UnLockTableStmt)
+		stmtPriv = UnLockTableStmt
 	case *tree.CreatePublication:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, CreatePublication)
+		stmtPriv = CreatePublication
 	case *tree.DropPublication:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, DropPublication)
+		stmtPriv = DropPublication
 	case *tree.AlterPublication:
-		return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, AlterPublication)
+		stmtPriv = AlterPublication
 	default:
 		panic(fmt.Sprintf("does not have the privilege definition of the statement %s", stmt))
 	}
-	return nil
+	return hasStmtPrivilege(ctx, ses, stmt, onlyCheckPlan, p, stmtPriv, option)
 }
 
