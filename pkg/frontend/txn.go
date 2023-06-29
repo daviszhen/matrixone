@@ -17,6 +17,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/pb/txn"
 	"sync"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -190,6 +191,7 @@ func (th *TxnHandler) NewTxn() (context.Context, TxnOperator, error) {
 		panic("context should not be nil")
 	}
 	storage := th.GetStorage()
+	txnOpIsCommittedOrRollback(txnOp)
 	err = storage.New(txnCtx, txnOp)
 	return txnCtx, txnOp, err
 }
@@ -211,6 +213,14 @@ func (th *TxnHandler) SetTxnOperatorInvalid() {
 		th.txnCtxCancel = nil
 	}
 	th.txnCtx = nil
+}
+
+func txnOpIsCommittedOrRollback(txnOp TxnOperator) {
+	meta := txnOp.Txn()
+	if meta.Status == txn.TxnStatus_Aborted || meta.Status == txn.TxnStatus_Aborting ||
+		meta.Status == txn.TxnStatus_Committing || meta.Status == txn.TxnStatus_Committed {
+		panic(fmt.Sprintf("=====> invalid txn %s status %d", meta.DebugString(), meta.Status))
+	}
 }
 
 func (th *TxnHandler) GetTxnOperator() (context.Context, TxnOperator) {
@@ -493,6 +503,7 @@ func (ses *Session) TxnCreate() (context.Context, TxnOperator, error) {
 	}
 	txnHandler := ses.GetTxnHandler()
 	txnCtx, txnOp := txnHandler.GetTxnOperator()
+	txnOpIsCommittedOrRollback(txnOp)
 	return txnCtx, txnOp, nil
 }
 
