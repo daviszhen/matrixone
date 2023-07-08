@@ -1841,6 +1841,7 @@ func analyzeFilters(proc *process.Process, node *plan.Node) error {
 	}
 
 	//step 1: check all filter has the format "colRef = const and colRef = const and ..."
+	//TODO: process " ... and ... and"
 	for _, filter := range node.FilterList {
 		if !isExprWithOneColRefOneConst(filter) {
 			return nil
@@ -1908,14 +1909,17 @@ func analyzeFilters(proc *process.Process, node *plan.Node) error {
 	//step 7: prune the partition
 	var partitionId int32
 	if resVec.IsConstNull() {
-		fmt.Println("***> partitionId is null")
-		return err
-	} else {
+		return moerr.NewInternalErrorNoCtx("the partitionId is null")
+	}
+	if resVec.Length() >= 1 {
 		partitionId = vector.MustFixedCol[int32](resVec)[0]
 		fmt.Println("***> partitionId ", partitionId)
+	} else {
+		return moerr.NewInternalErrorNoCtx("evaluate the partitionId failed")
 	}
 
-	//step 8: update tableDef to
+	//step 8: update tableDef.
+	//set unused partitionTableName to ""
 	partitionTableNames := node.TableDef.GetPartition().GetPartitionTableNames()
 	if len(partitionTableNames) != 0 && partitionId < int32(len(partitionTableNames)) {
 		for i := 0; i < len(partitionTableNames); i++ {
@@ -1930,7 +1934,7 @@ func analyzeFilters(proc *process.Process, node *plan.Node) error {
 func (builder *QueryBuilder) prunePartition(nodes []*Node, node *plan.Node) error {
 	var err error
 	switch node.NodeType {
-	case plan.Node_TABLE_SCAN, plan.Node_MATERIAL_SCAN, plan.Node_EXTERNAL_SCAN:
+	case plan.Node_TABLE_SCAN:
 		err = analyzeFilters(builder.compCtx.GetProcess(), node)
 		if err != nil {
 			return err

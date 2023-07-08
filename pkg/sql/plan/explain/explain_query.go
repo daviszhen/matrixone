@@ -116,6 +116,37 @@ func explainStep(ctx context.Context, step *plan.Node, settings *FormatSettings,
 		if nodedescImpl.Node.NodeType == plan.Node_SINK_SCAN {
 			msg := "DataSource: " + fmt.Sprintf("Plan %v", nodedescImpl.Node.SourceStep)
 			settings.buffer.PushNewLine(msg, false, settings.level)
+		} else if nodedescImpl.Node.NodeType == plan.Node_TABLE_SCAN {
+			partition := nodedescImpl.Node.GetTableDef().GetPartition()
+			if partition != nil {
+				cnt := 0
+				for _, partName := range partition.GetPartitionTableNames() {
+					if len(partName) == 0 {
+						continue
+					}
+					cnt++
+				}
+
+				//use partial partitions
+				if cnt > 0 {
+					bb := bytes.Buffer{}
+					cnt = 0
+					for i, partName := range partition.GetPartitionTableNames() {
+						if len(partName) == 0 {
+							continue
+						}
+						if cnt > 0 {
+							bb.WriteString(", ")
+						}
+						bb.WriteString(partition.GetPartitions()[i].GetPartitionName())
+						cnt++
+					}
+					msg := "UsedPartitions: " + bb.String()
+					settings.buffer.PushNewLine(msg, false, settings.level)
+				}
+
+			}
+
 		}
 
 		// Process verbose optioan information , "Output:"
