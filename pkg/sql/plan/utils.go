@@ -1717,3 +1717,231 @@ func doFormatExpr(expr *plan.Expr, out *bytes.Buffer, depth int) {
 		out.WriteString(fmt.Sprintf("%sExpr_Unknown(%s)", prefix, expr.String()))
 	}
 }
+
+var (
+	comparisonOpMap = map[string]tree.ComparisonOp{
+		"=": tree.EQUAL,
+	}
+)
+
+func isCompareFunc(funcName string) (bool, tree.ComparisonOp) {
+	ret, ok := comparisonOpMap[funcName]
+	return ok, ret
+}
+
+func isColRef(expr *plan.Expr) bool {
+	switch expr.Expr.(type) {
+	case *plan.Expr_Col:
+		return true
+	}
+	return false
+}
+
+func isConst(expr *plan.Expr) bool {
+	switch expr.Expr.(type) {
+	case *plan.Expr_C:
+		return true
+	}
+	return false
+}
+
+// isExprWithOneColRefOneConst
+func isExprWithOneColRefOneConst(expr *plan.Expr) bool {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_F:
+		if exprImpl.F.Func.ObjName == "=" {
+			if isColRef(exprImpl.F.Args[0]) && isConst(exprImpl.F.Args[1]) ||
+				isConst(exprImpl.F.Args[0]) && isColRef(exprImpl.F.Args[1]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func saveCol(expr *plan.Expr, other *plan.Expr, colRefs map[string]*plan.Expr) {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_Col:
+		colRefs[exprImpl.Col.Name] = other
+	}
+}
+
+func getAllCols(expr *plan.Expr, colRefs map[string]*plan.Expr) {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_F:
+		if exprImpl.F.Func.ObjName == "=" {
+			if isColRef(exprImpl.F.Args[0]) {
+				saveCol(exprImpl.F.Args[0], exprImpl.F.Args[1], colRefs)
+			} else if isColRef(exprImpl.F.Args[1]) {
+				saveCol(exprImpl.F.Args[1], exprImpl.F.Args[0], colRefs)
+			}
+		}
+	}
+}
+
+// saveColFromExpr extracts column names from partition expression
+func getColFromExpr(cols []*plan.ColDef, expr *Expr, result map[string]int) {
+	switch exprImpl := expr.Expr.(type) {
+	case *plan.Expr_Col:
+		col := cols[exprImpl.Col.ColPos]
+		//split := strings.Split(colRef, ".")
+		//colName := split[len(split)-1]
+		result[col.Name] = 0
+	case *plan.Expr_F:
+		for _, arg := range exprImpl.F.Args {
+			getColFromExpr(cols, arg, result)
+		}
+	}
+}
+
+func getPartitionKeys(cols []*plan.ColDef, partitionDef *plan.PartitionByDef, partitionKeys map[string]int) error {
+	if partitionDef.PartitionColumns != nil {
+		if dup, dupName := stringSliceToMap(partitionDef.PartitionColumns.PartitionColumns, partitionKeys); dup {
+			return moerr.NewInvalidInputNoCtx("duplicate name %s", dupName)
+		}
+	} else if partitionDef.PartitionExpr.Expr != nil {
+		getColFromExpr(cols, partitionDef.PartitionExpr.Expr, partitionKeys)
+	} else {
+		return moerr.NewInvalidInputNoCtx("both COLUMNS and EXPR in PARTITION BY are invalid")
+	}
+	return nil
+}
+
+// exprColsIncludePartKey checks the partitioning key is included in the expression.
+func exprColsIncludePartKey(partitionKeys map[string]int, exprCols map[string]*plan.Expr) bool {
+	for key := range partitionKeys {
+		if !keyIsInExprCols(key, exprCols) {
+			return false
+		}
+	}
+	return true
+}
+
+func keyIsInExprCols(c string, exprCols map[string]*plan.Expr) bool {
+	for c1 := range exprCols {
+		if strings.EqualFold(c, c1) {
+			return true
+		}
+	}
+	return false
+}
+
+//!!!before column prune
+func analyzeFilters(proc *process.Process, node *plan.Node) error {
+	var err error
+	var resVec, colVec *vector.Vector
+	switch node.NodeType {
+	case plan.Node_TABLE_SCAN, plan.Node_MATERIAL_SCAN, plan.Node_EXTERNAL_SCAN:
+	default:
+		return nil
+	}
+
+	if node.TableDef.GetPartition() == nil {
+		return nil
+	}
+
+	//step 1: check all filter has the format "colRef = const and colRef = const and ..."
+	for _, filter := range node.FilterList {
+		if !isExprWithOneColRefOneConst(filter) {
+			return nil
+		}
+	}
+
+	//step 2: extract all colRef from filters
+	cols := make(map[string]*plan.Expr)
+	for _, filter := range node.FilterList {
+		getAllCols(filter, cols)
+	}
+
+	for col, _ := range cols {
+		fmt.Println("+++>colFromFilter ", col)
+	}
+
+	//step 3: get partition keys from tableDef
+	partitionKeys := make(map[string]int)
+	err = getPartitionKeys(node.TableDef.GetCols(), node.TableDef.GetPartition(), partitionKeys)
+
+	for partkey, _ := range partitionKeys {
+		fmt.Println("--->partitionKey ", partkey)
+	}
+
+	//step 4: check if the colRef cover the partition expr
+	if !exprColsIncludePartKey(partitionKeys, cols) {
+		return nil
+	}
+
+	//step 5: evaluate the partition expr where the colRef assigned with const
+	inputBat := batch.NewWithSize(len(node.TableDef.GetCols()))
+	inputBat.InitZsOne(1)
+	defer inputBat.Clean(proc.Mp())
+
+	tmpBat := batch.NewWithSize(1)
+	tmpBat.InitZsOne(1)
+	defer tmpBat.Clean(proc.Mp())
+
+	for i, colDef := range node.TableDef.GetCols() {
+		if colExpr, ok := cols[colDef.GetName()]; ok {
+			resVec, err = colexec.EvalExpressionOnce(proc, colExpr, []*batch.Batch{tmpBat})
+			if err != nil {
+				return err
+			}
+			colVec, err = resVec.Dup(proc.Mp())
+			if err != nil {
+				return err
+			}
+		} else {
+			colType := colDef.GetTyp()
+			typ := types.New(types.T(colType.Id), colType.Width, colType.Scale)
+			colVec = vector.NewConstNull(typ, 1, proc.Mp())
+		}
+		inputBat.SetVector(int32(i), colVec)
+	}
+
+	resVec, err = colexec.EvalExpressionOnce(proc,
+		node.TableDef.GetPartition().GetPartitionExpression(),
+		[]*batch.Batch{inputBat})
+	if err != nil {
+		return err
+	}
+	defer resVec.Free(proc.Mp())
+
+	//step 7: prune the partition
+	var partitionId int32
+	if resVec.IsConstNull() {
+		fmt.Println("***> partitionId is null")
+		return err
+	} else {
+		partitionId = vector.MustFixedCol[int32](resVec)[0]
+		fmt.Println("***> partitionId ", partitionId)
+	}
+
+	//step 8: update tableDef to
+	partitionTableNames := node.TableDef.GetPartition().GetPartitionTableNames()
+	if len(partitionTableNames) != 0 && partitionId < int32(len(partitionTableNames)) {
+		for i := 0; i < len(partitionTableNames); i++ {
+			if i != int(partitionId) {
+				node.TableDef.GetPartition().PartitionTableNames[i] = ""
+			}
+		}
+	}
+	return err
+}
+
+func (builder *QueryBuilder) prunePartition(nodes []*Node, node *plan.Node) error {
+	var err error
+	switch node.NodeType {
+	case plan.Node_TABLE_SCAN, plan.Node_MATERIAL_SCAN, plan.Node_EXTERNAL_SCAN:
+		err = analyzeFilters(builder.compCtx.GetProcess(), node)
+		if err != nil {
+			return err
+		}
+	default:
+		for _, child := range node.Children {
+			err = builder.prunePartition(nodes, nodes[child])
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return err
+}

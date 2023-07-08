@@ -994,6 +994,7 @@ func (builder *QueryBuilder) remapAllColRefs(nodeID int32, colRefCnt map[[2]int3
 }
 
 func (builder *QueryBuilder) createQuery() (*Query, error) {
+	var err error
 	for i, rootID := range builder.qry.Steps {
 		rootID, _ = builder.pushdownFilters(rootID, nil, false)
 		colRefCnt := make(map[[2]int32]int)
@@ -1025,6 +1026,12 @@ func (builder *QueryBuilder) createQuery() (*Query, error) {
 		determineShuffleMethod(rootID, builder)
 		builder.pushdownRuntimeFilters(rootID)
 
+		//prune partition
+		err = builder.prunePartition(builder.qry.Nodes, builder.qry.Nodes[rootID])
+		if err != nil {
+			return nil, err
+		}
+
 		colRefCnt = make(map[[2]int32]int)
 		rootNode := builder.qry.Nodes[rootID]
 		resultTag := rootNode.BindingTags[0]
@@ -1032,7 +1039,7 @@ func (builder *QueryBuilder) createQuery() (*Query, error) {
 			colRefCnt[[2]int32{resultTag, int32(i)}] = 1
 		}
 
-		_, err := builder.remapAllColRefs(rootID, colRefCnt)
+		_, err = builder.remapAllColRefs(rootID, colRefCnt)
 		if err != nil {
 			return nil, err
 		}

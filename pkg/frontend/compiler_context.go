@@ -684,6 +684,9 @@ func (tcc *TxnCompilerContext) Stats(obj *plan2.ObjectRef) bool {
 	if partitionInfo != nil {
 		ptables = make([]any, len(partitionInfo.PartitionTableNames))
 		for i, PartitionTableName := range partitionInfo.PartitionTableNames {
+			if len(PartitionTableName) == 0 {
+				continue
+			}
 			_, ptable, _ := tcc.getRelation(dbName, PartitionTableName, nil)
 			ptables[i] = ptable
 		}

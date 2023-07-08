@@ -1640,23 +1640,23 @@ GetComputationWrapper gets the execs from the computation engine
 */
 var GetComputationWrapper = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 	var cw []ComputationWrapper = nil
-	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
-		modify := false
-		for i, stmt := range cached.stmts {
-			tcw := InitTxnComputationWrapper(ses, stmt, proc)
-			tcw.plan = cached.plans[i]
-			if checkColModify(tcw.plan, proc, ses) {
-				modify = true
-				break
-			}
-			cw = append(cw, tcw)
-		}
-		if modify {
-			cw = nil
-		} else {
-			return cw, nil
-		}
-	}
+	//if cached := ses.getCachedPlan(input.getSql()); cached != nil {
+	//	modify := false
+	//	for i, stmt := range cached.stmts {
+	//		tcw := InitTxnComputationWrapper(ses, stmt, proc)
+	//		tcw.plan = cached.plans[i]
+	//		if checkColModify(tcw.plan, proc, ses) {
+	//			modify = true
+	//			break
+	//		}
+	//		cw = append(cw, tcw)
+	//	}
+	//	if modify {
+	//		cw = nil
+	//	} else {
+	//		return cw, nil
+	//	}
+	//}
 
 	var stmts []tree.Statement = nil
 	var cmdFieldStmt *InternalCmdFieldList

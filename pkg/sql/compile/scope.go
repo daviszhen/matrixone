@@ -347,6 +347,9 @@ func (s *Scope) ParallelRun(c *Compile, remote bool) error {
 			}
 			// create readers for reading dirty blocks from partition table.
 			for num, relName := range s.DataSource.PartitionRelationNames {
+				if len(relName) == 0 {
+					continue
+				}
 				subrel, err := db.Relation(c.ctx, relName, c.proc)
 				if err != nil {
 					return err

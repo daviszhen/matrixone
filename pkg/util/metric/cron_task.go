@@ -112,7 +112,7 @@ func CalculateStorageUsage(ctx context.Context, sqlExecutor func() ie.InternalEx
 	}()
 
 	// start background task to check new account
-	go checkNewAccountSize(ctx, logger, sqlExecutor)
+	//go checkNewAccountSize(ctx, logger, sqlExecutor)
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()

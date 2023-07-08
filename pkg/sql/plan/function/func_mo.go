@@ -107,6 +107,9 @@ func MoTableRows(ivecs []*vector.Vector, result vector.FunctionResultWrapper, pr
 				var prows int64
 				// for partition table,  the table rows is equal to the sum of the partition tables.
 				for _, partitionTable := range partitionInfo.PartitionTableNames {
+					if len(partitionTable) == 0 {
+						continue
+					}
 					prel, err = dbo.Relation(ctx, partitionTable, nil)
 					if err != nil {
 						return err
@@ -200,6 +203,9 @@ func MoTableSize(ivecs []*vector.Vector, result vector.FunctionResultWrapper, pr
 				var psize int64
 				// for partition table, the table size is equal to the sum of the partition tables.
 				for _, partitionTable := range partitionInfo.PartitionTableNames {
+					if len(partitionTable) == 0 {
+						continue
+					}
 					prel, err = dbo.Relation(ctx, partitionTable, nil)
 					if err != nil {
 						return err

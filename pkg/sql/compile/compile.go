@@ -2484,6 +2484,9 @@ func (c *Compile) generateNodes(n *plan.Node) (engine.Nodes, error) {
 		partitionTableNames := partitionInfo.PartitionTableNames
 		for i := 0; i < partitionNum; i++ {
 			partTableName := partitionTableNames[i]
+			if len(partTableName) == 0 {
+				continue
+			}
 			subrelation, err := db.Relation(ctx, partTableName, c.proc)
 			if err != nil {
 				return nil, err
