@@ -281,3 +281,19 @@ func (node *SetTransaction) Format(ctx *FmtCtx) {
 
 func (node *SetTransaction) GetStatementType() string { return "Set Transaction" }
 func (node *SetTransaction) GetQueryType() string     { return QueryTypeTCL }
+
+type BackupStart struct {
+	statementImpl
+	Timestamp string
+	Dir       string
+}
+
+func (node *BackupStart) Format(ctx *FmtCtx) {
+	ctx.WriteString("backup start ")
+	ctx.WriteString(node.Timestamp)
+	ctx.WriteString(" ")
+	ctx.WriteString(node.Dir)
+}
+
+func (node *BackupStart) GetStatementType() string { return "Start Backup" }
+func (node *BackupStart) GetQueryType() string     { return QueryTypeOth }

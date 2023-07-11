@@ -32,6 +32,7 @@ const (
 	InternalSQLExecutor = "internal-sql-executor"
 	// AutoIncrmentService attr name for AutoIncrmentService
 	AutoIncrmentService = "auto-incrment-service"
+	TaskService         = "task-service"
 
 	// TxnOptions options used to create txn
 	TxnOptions = "txn-options"

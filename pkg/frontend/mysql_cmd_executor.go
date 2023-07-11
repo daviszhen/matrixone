@@ -1670,6 +1670,8 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 			return nil, err
 		}
 		stmts = append(stmts, cmdFieldStmt)
+	} else if isStartBackup(input.getSql()) {
+		stmts = append(stmts, parseBackup(input.getSql()))
 	} else {
 		var v interface{}
 		v, err = ses.GetGlobalVar("lower_case_table_names")
@@ -2546,7 +2548,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 					}
 				}
 
-			case *tree.SetVar, *tree.SetTransaction:
+			case *tree.SetVar, *tree.SetTransaction, *tree.BackupStart:
 				resp := mce.setResponse(i, len(cws), rspLen)
 				if err = proto.SendResponse(requestCtx, resp); err != nil {
 					return moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
@@ -2937,7 +2939,12 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	case *tree.SetTransaction:
 		selfHandle = true
-		//TODO: handle set transaction
+	//TODO: handle set transaction
+	case *tree.BackupStart:
+		selfHandle = true
+		if err = mce.handleStartBackup(requestCtx, st); err != nil {
+			return err
+		}
 	}
 
 	if selfHandle {

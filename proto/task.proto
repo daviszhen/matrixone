@@ -42,6 +42,8 @@
    MetricLogMerge = 2;
    // MetricStorageUsage handle metric server_storage_usage collection
    MetricStorageUsage = 3;
+   // Backup handle physical backup
+   Backup = 4;
  }
  
  // TaskMetadata is a task metadata abstraction that can be scheduled for execution at any CN node.
