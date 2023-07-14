@@ -17,7 +17,6 @@ package cnservice
 import (
 	"context"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/backup"
 	"math/rand"
 	"time"
 
@@ -287,6 +286,4 @@ func (s *service) registerExecutorsLocked() {
 	// init metric task
 	s.task.runner.RegisterExecutor(task.TaskCode_MetricStorageUsage,
 		metric.GetMetricStorageUsageExecutor(ieFactory))
-
-	s.task.runner.RegisterExecutor(task.TaskCode_Backup, backup.BackupTaskExecutor())
 }

@@ -2,24 +2,53 @@ package backup
 
 import (
     "context"
-    "fmt"
-    "github.com/matrixorigin/matrixone/pkg/pb/task"
-    "strings"
-    "time"
 )
 
-func BackupTaskExecutor() func(ctx context.Context, task task.Task) error {
-    execBackupTask := func(ctx context.Context, task task.Task) error {
-        params := strings.Split(string(task.Metadata.Context), " ")
-        fmt.Println("+++>backup task start", params)
-        select {
-        case <-ctx.Done():
-        case <-time.After(time.Second * 30):
-        }
-        //CALL DN backup api
-        fmt.Println("+++>backup task end")
-        return nil
+// Backup
+// Note: ctx needs to support cancel. The user can cancel the backup task by canceling the ctx.
+func Backup(ctx context.Context, cfg *BackupConfig) error {
+    var err error
+
+    // step 1 : setup fileservice
+
+    // step 2 : backup mo
+    if err = backupBuildInfo(ctx, cfg); err != nil {
+        return err
     }
 
-    return execBackupTask
+    if err = backupConfigs(ctx, cfg); err != nil {
+        return err
+    }
+
+    if err = backupTae(ctx, cfg); err != nil {
+        return err
+    }
+
+    if err = backupHakeeper(ctx, cfg); err != nil {
+        return err
+    }
+
+    return err
+}
+
+// saveBuildInfo saves backupVersion, build info.
+func backupBuildInfo(ctx context.Context, cfg *BackupConfig) error {
+
+    return nil
+}
+
+// saveConfigs saves cluster config or service config
+func backupConfigs(ctx context.Context, cfg *BackupConfig) error {
+
+    return nil
+}
+
+func backupTae(ctx context.Context, config *BackupConfig) error {
+
+    return nil
+}
+
+func backupHakeeper(ctx context.Context, config *BackupConfig) error {
+
+    return nil
 }
