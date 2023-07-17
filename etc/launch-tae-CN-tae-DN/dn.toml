@@ -15,13 +15,13 @@ service-addresses = [
 memory-capacity = "512MB"
 
 [[fileservice]]
-name = "LOCAL"  data-dir/home/abc/file.
+name = "LOCAL"
 backend = "DISK"
 
 [[fileservice]]
 name = "SHARED"
 backend = "DISK"
-data-dir = "mo-data/s3"/home/abc/file.
+data-dir = "mo-data/s3"
 
 [fileservice.cache]
 memory-capacity = "512MB"

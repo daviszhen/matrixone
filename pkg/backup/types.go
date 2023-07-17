@@ -1,13 +1,16 @@
 package backup
 
-import "github.com/matrixorigin/matrixone/pkg/fileservice"
-
-const (
-    Version       = "v1"
-    BackupVersion = Version
+import (
+    "github.com/matrixorigin/matrixone/pkg/fileservice"
+    "github.com/matrixorigin/matrixone/pkg/logservice"
 )
 
-type BackupConfig struct {
+const (
+    Version1 = "v1-20230714"
+    Version  = Version1
+)
+
+type Config struct {
     // Backup Timestamp
     Timestamp string
 
@@ -15,4 +18,7 @@ type BackupConfig struct {
     Directory string
 
     DirFS fileservice.FileService
+
+    // hakeeper client
+    Hakeeper logservice.CNHAKeeperClient
 }

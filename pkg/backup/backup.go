@@ -6,7 +6,7 @@ import (
 
 // Backup
 // Note: ctx needs to support cancel. The user can cancel the backup task by canceling the ctx.
-func Backup(ctx context.Context, cfg *BackupConfig) error {
+func Backup(ctx context.Context, cfg *Config) error {
     var err error
 
     // step 1 : setup fileservice
@@ -32,23 +32,23 @@ func Backup(ctx context.Context, cfg *BackupConfig) error {
 }
 
 // saveBuildInfo saves backupVersion, build info.
-func backupBuildInfo(ctx context.Context, cfg *BackupConfig) error {
+func backupBuildInfo(ctx context.Context, cfg *Config) error {
 
     return nil
 }
 
 // saveConfigs saves cluster config or service config
-func backupConfigs(ctx context.Context, cfg *BackupConfig) error {
+func backupConfigs(ctx context.Context, cfg *Config) error {
 
     return nil
 }
 
-func backupTae(ctx context.Context, config *BackupConfig) error {
+func backupTae(ctx context.Context, config *Config) error {
 
     return nil
 }
 
-func backupHakeeper(ctx context.Context, config *BackupConfig) error {
+func backupHakeeper(ctx context.Context, config *Config) error {
 
     return nil
 }
