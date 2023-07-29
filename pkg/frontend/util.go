@@ -573,25 +573,6 @@ func parseCmdFieldList(ctx context.Context, sql string) (*InternalCmdFieldList, 
 	}
 }
 
-func isStartBackup(sql string) bool {
-	return strings.HasPrefix(strings.ToLower(sql), "backup start")
-}
-
-func parseBackup(sql string) *tree.BackupStart {
-	s := strings.TrimSpace(sql)
-	fields := strings.Split(s, " ")
-	if len(fields) < 4 {
-		return &tree.BackupStart{
-			Timestamp: "current",
-			Dir:       fields[2],
-		}
-	}
-	return &tree.BackupStart{
-		Timestamp: fields[2],
-		Dir:       fields[3],
-	}
-}
-
 func getVariableValue(varDefault interface{}) string {
 	switch val := varDefault.(type) {
 	case int64:

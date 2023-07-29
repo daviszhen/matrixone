@@ -3,37 +3,28 @@ package frontend
 import (
     "context"
     "fmt"
-    "github.com/matrixorigin/matrixone/pkg/common/moerr"
-    "github.com/matrixorigin/matrixone/pkg/common/runtime"
-    "github.com/matrixorigin/matrixone/pkg/pb/task"
+    "github.com/matrixorigin/matrixone/pkg/backup"
+    "github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
     "github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
-    "github.com/matrixorigin/matrixone/pkg/taskservice"
-    "strings"
 )
 
 func (mce *MysqlCmdExecutor) handleStartBackup(ctx context.Context, sb *tree.BackupStart) error {
     return doBackup(ctx, mce.GetSession(), sb)
 }
 
-func doBackup(ctx context.Context, ses *Session, sb *tree.BackupStart) error {
-    fmt.Println("+++>doBackup start", sb.Timestamp, sb.Dir)
+func doBackup(ctx context.Context, ses *Session, bs *tree.BackupStart) error {
+    fmt.Println("+++>doBackup start", tree.String(bs, dialect.MYSQL))
     defer func() {
-        fmt.Println("+++>doBackup end", sb.Timestamp, sb.Dir)
+        fmt.Println("+++>doBackup end", tree.String(bs, dialect.MYSQL))
     }()
-    v, ok := runtime.ProcessLevelRuntime().GetGlobalVariables(runtime.TaskService)
-    if !ok {
-        return moerr.NewInternalError(ctx, "task service is not ready")
+    //ts, err := strconv.ParseInt(sb.Timestamp, 10, 64)
+    //if err != nil {
+    //    return err
+    //}
+    //
+    //dnTs := types.BuildTS(ts, 0)
+    conf := &backup.Config{
+        //Timestamp: dnTs,
     }
-
-    taskService := v.(taskservice.TaskService)
-    if taskService == nil {
-        return moerr.NewInternalError(ctx, "task service is nil")
-    }
-    meta := task.TaskMetadata{
-        ID:       "backup-0xabc",
-        Executor: task.TaskCode_Backup,
-        Context:  []byte(strings.Join([]string{sb.Timestamp, sb.Dir}, " ")),
-        Options:  task.TaskOptions{Concurrency: 1},
-    }
-    return taskService.Create(ctx, meta)
+    return backup.Backup(ctx, bs, conf)
 }

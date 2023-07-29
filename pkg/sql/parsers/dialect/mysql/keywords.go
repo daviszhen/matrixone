@@ -558,5 +558,7 @@ func init() {
 		"roles":                    ROLES,
 		"backend":                  BACKEND,
 		"servers":                  SERVERS,
+		"backup":                   BACKUP,
+		"filesystem":               FILESYSTEM,
 	}
 }

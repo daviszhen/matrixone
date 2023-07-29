@@ -1670,8 +1670,6 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 			return nil, err
 		}
 		stmts = append(stmts, cmdFieldStmt)
-	} else if isStartBackup(input.getSql()) {
-		stmts = append(stmts, parseBackup(input.getSql()))
 	} else {
 		var v interface{}
 		v, err = ses.GetGlobalVar("lower_case_table_names")
