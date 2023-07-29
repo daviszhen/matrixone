@@ -154,7 +154,6 @@ func (s *service) startTaskRunner() {
 		s.logger.Error("start task runner failed",
 			zap.Error(err))
 	}
-	runtime.ProcessLevelRuntime().SetGlobalVariables(runtime.TaskService, ts)
 }
 
 func (s *service) GetTaskRunner() taskservice.TaskRunner {

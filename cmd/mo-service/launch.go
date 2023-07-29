@@ -53,7 +53,6 @@ func startCluster(ctx context.Context, stopper *stopper.Stopper, perfCounterSet 
 	if err := startLogServiceCluster(ctx, cfg.LogServiceConfigFiles, stopper, perfCounterSet); err != nil {
 		return err
 	}
-
 	if err := startDNServiceCluster(ctx, cfg.DNServiceConfigsFiles, stopper, perfCounterSet); err != nil {
 		return err
 	}
