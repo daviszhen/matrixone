@@ -614,6 +614,7 @@ func ScanCsvFile(ctx context.Context, param *ExternalParam, proc *process.Proces
 	if err != nil {
 		return nil, err
 	}
+	bat.Clean(proc.GetMPool())
 	return bat, nil
 }
 
