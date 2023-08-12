@@ -126,6 +126,7 @@ func Prepare(proc *process.Process, arg any) error {
 
 	param.Filter.exprMono = plan2.CheckExprIsMonotonic(proc.Ctx, param.Filter.FilterExpr)
 	param.Filter.File2Size = make(map[string]int64)
+	param.MoCsvLineArray = make([][]string, ONE_BATCH_MAX_ROW)
 	return nil
 }
 
@@ -560,7 +561,7 @@ func GetMOcsvReader(param *ExternalParam, proc *process.Process) (*ParseLineHand
 		'#',
 		true,
 		false)
-	plh.moCsvLineArray = make([][]string, ONE_BATCH_MAX_ROW)
+	plh.moCsvLineArray = param.MoCsvLineArray 
 	return plh, nil
 }
 

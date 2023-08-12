@@ -75,8 +75,8 @@ func NewMOServer(ctx context.Context, addr string, pu *config.ParameterUnit, aic
 		goetty.WithAppSessionOptions(
 			goetty.WithSessionCodec(codec),
 			goetty.WithSessionLogger(logutil.GetGlobalLogger()),
-			goetty.WithSessionDisableCompactAfterGrow(),
-			goetty.WithSessionRWBUfferSize(1024*1024, 1024*1024)),
+			goetty.WithSessionRWBUfferSize(1024*1024, 1024*1024),
+			goetty.WithSessionAllocator(NewSessionAllocator(pu))),
 		goetty.WithAppSessionAware(rm))
 	if err != nil {
 		logutil.Panicf("start server failed with %+v", err)
