@@ -2822,6 +2822,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	case *tree.PrepareStmt:
 		selfHandle = true
+		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
+			WhoPrepare: "prepare_stmt",
+			PrepareSql: input.getSql(),
+		})
 		prepareStmt, err = mce.handlePrepareStmt(requestCtx, st)
 		if err != nil {
 			return err
@@ -2831,12 +2835,12 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
 		}
-		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
-			WhoPrepare: "prepare_stmt",
-			PrepareSql: input.getSql(),
-		})
 	case *tree.PrepareString:
 		selfHandle = true
+		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
+			WhoPrepare: "prepare_string",
+			PrepareSql: input.getSql(),
+		})
 		prepareStmt, err = mce.handlePrepareString(requestCtx, st)
 		if err != nil {
 			return err
@@ -2846,10 +2850,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
 		}
-		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
-			WhoPrepare: "prepare_string",
-			PrepareSql: input.getSql(),
-		})
 	case *tree.Deallocate:
 		selfHandle = true
 		err = mce.handleDeallocate(requestCtx, st)
@@ -3920,7 +3920,7 @@ func doShowActiveTxn(ctx context.Context, ses *Session, st *tree.ShowActiveTxn) 
 	prepareSql.SetName("prepare_sql")
 
 	mrs := ses.GetMysqlResultSet()
-	
+
 	mrs.AddColumn(id)
 	mrs.AddColumn(meta)
 	mrs.AddColumn(fromPrepare)

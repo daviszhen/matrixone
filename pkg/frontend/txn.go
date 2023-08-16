@@ -156,6 +156,7 @@ func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 	}
 
 	if pv, ok := txnCtx.Value(defines.PrepareKey{}).(*defines.PrepareValue); ok {
+		fmt.Println("++++>", "attach prepare", pv.WhoPrepare, pv.PrepareSql)
 		opts = append(opts, client.WithTxnPrepare(pv.WhoPrepare, pv.PrepareSql))
 	}
 
