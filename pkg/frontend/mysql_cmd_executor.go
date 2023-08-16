@@ -3920,8 +3920,7 @@ func doShowActiveTxn(ctx context.Context, ses *Session, st *tree.ShowActiveTxn) 
 	prepareSql.SetName("prepare_sql")
 
 	mrs := ses.GetMysqlResultSet()
-
-	mrs.AddColumn(id)
+	
 	mrs.AddColumn(id)
 	mrs.AddColumn(meta)
 	mrs.AddColumn(fromPrepare)
