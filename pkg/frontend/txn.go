@@ -157,8 +157,10 @@ func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 		return nil, nil, err
 	}
 	if th.txnOperator == nil {
+		fmt.Println("++++>", "newtxn-error", th.txnOperator.Txn().DebugString())
 		return nil, nil, moerr.NewInternalError(th.ses.GetRequestContext(), "NewTxnOperator: txnClient new a null txn")
 	}
+	fmt.Println("++++>", "newtxn", th.txnOperator.Txn().DebugString())
 	return txnCtx, th.txnOperator, err
 }
 
@@ -319,12 +321,14 @@ func (th *TxnHandler) CommitTxn() error {
 		err = txnOp.Commit(ctx2)
 		if err != nil {
 			txnId := txnOp.Txn().DebugString()
+			fmt.Println("++++>", "commit-error", txnId)
 			th.SetTxnOperatorInvalid()
 			logError(ses, sessionInfo,
 				"CommitTxn: txn operator commit failed",
 				zap.String("txnId", txnId),
 				zap.Error(err))
 		}
+		fmt.Println("++++>", "commit", txnOp.Txn().DebugString())
 		ses.updateLastCommitTS(txnOp.Txn().CommitTS)
 	}
 	th.SetTxnOperatorInvalid()
@@ -379,12 +383,14 @@ func (th *TxnHandler) RollbackTxn() error {
 		err = txnOp.Rollback(ctx2)
 		if err != nil {
 			txnId := txnOp.Txn().DebugString()
+			fmt.Println("++++>", "rollback-error", txnId)
 			th.SetTxnOperatorInvalid()
 			logError(ses, ses.GetDebugString(),
 				"RollbackTxn: txn operator commit failed",
 				zap.String("txnId", txnId),
 				zap.Error(err))
 		}
+		fmt.Println("++++>", "rollback", txnOp.Txn().DebugString())
 	}
 	th.SetTxnOperatorInvalid()
 	return err
