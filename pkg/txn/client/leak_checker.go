@@ -17,6 +17,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"github.com/matrixorigin/matrixone/pkg/pb/txn"
 	"sync"
 	"time"
 
@@ -60,7 +61,8 @@ func (lc *leakChecker) close() {
 
 func (lc *leakChecker) txnOpened(
 	txnID []byte,
-	createBy string) {
+	fromPrepare bool,
+	createBy, whoPrepare, prepareSql string, txnMeta txn.TxnMeta) {
 	if createBy == "" {
 		createBy = "unknown"
 	}
@@ -68,9 +70,12 @@ func (lc *leakChecker) txnOpened(
 	lc.Lock()
 	defer lc.Unlock()
 	lc.actives = append(lc.actives, activeTxn{
-		createBy: createBy,
-		id:       txnID,
-		createAt: time.Now(),
+		createBy:    createBy,
+		id:          txnID,
+		createAt:    time.Now(),
+		fromPrepare: fromPrepare,
+		whoPrepare:  whoPrepare,
+		prepareSql:  prepareSql,
 	})
 }
 
@@ -86,6 +91,22 @@ func (lc *leakChecker) txnClosed(txnID []byte) {
 		values = append(values, txn)
 	}
 	lc.actives = values
+}
+
+func (lc *leakChecker) activeTxn() []*ActiveTxnData {
+	lc.Lock()
+	defer lc.Unlock()
+	res := make([]*ActiveTxnData, 0, len(lc.actives))
+	for _, t := range lc.actives {
+		res = append(res, &ActiveTxnData{
+			FromPrepare: t.fromPrepare,
+			Meta:        t.meta,
+			WhoPrepare:  t.whoPrepare,
+			PrepareSql:  t.prepareSql,
+			ID:          t.id,
+		})
+	}
+	return res
 }
 
 func (lc *leakChecker) check(ctx context.Context) {
@@ -112,7 +133,11 @@ func (lc *leakChecker) doCheck() {
 }
 
 type activeTxn struct {
-	createBy string
-	id       []byte
-	createAt time.Time
+	createBy    string
+	id          []byte
+	createAt    time.Time
+	fromPrepare bool
+	whoPrepare  string
+	prepareSql  string
+	meta        txn.TxnMeta
 }

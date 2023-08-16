@@ -215,3 +215,11 @@ type AutoIncrCache struct {
 	MaxNum uint64
 	Step   uint64
 }
+
+type PrepareKey struct {
+}
+
+type PrepareValue struct {
+	WhoPrepare string
+	PrepareSql string
+}

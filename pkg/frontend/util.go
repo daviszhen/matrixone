@@ -560,6 +560,10 @@ func logDebugf(info string, msg string, fields ...interface{}) {
 	}
 }
 
+func isShowActiveTxn(sql string) bool {
+	return strings.HasPrefix(strings.ToLower(sql), "show active txn")
+}
+
 // isCmdFieldListSql checks the sql is the cmdFieldListSql or not.
 func isCmdFieldListSql(sql string) bool {
 	if len(sql) < cmdFieldListSqlLen {

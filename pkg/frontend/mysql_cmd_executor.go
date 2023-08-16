@@ -1661,23 +1661,23 @@ GetComputationWrapper gets the execs from the computation engine
 */
 var GetComputationWrapper = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 	var cw []ComputationWrapper = nil
-	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
-		modify := false
-		for i, stmt := range cached.stmts {
-			tcw := InitTxnComputationWrapper(ses, stmt, proc)
-			tcw.plan = cached.plans[i]
-			if checkColModify(tcw.plan, proc, ses) {
-				modify = true
-				break
-			}
-			cw = append(cw, tcw)
-		}
-		if modify {
-			cw = nil
-		} else {
-			return cw, nil
-		}
-	}
+	//if cached := ses.getCachedPlan(input.getSql()); cached != nil {
+	//	modify := false
+	//	for i, stmt := range cached.stmts {
+	//		tcw := InitTxnComputationWrapper(ses, stmt, proc)
+	//		tcw.plan = cached.plans[i]
+	//		if checkColModify(tcw.plan, proc, ses) {
+	//			modify = true
+	//			break
+	//		}
+	//		cw = append(cw, tcw)
+	//	}
+	//	if modify {
+	//		cw = nil
+	//	} else {
+	//		return cw, nil
+	//	}
+	//}
 
 	var stmts []tree.Statement = nil
 	var cmdFieldStmt *InternalCmdFieldList
@@ -1685,6 +1685,8 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 	// if the input is an option ast, we should use it directly
 	if input.getStmt() != nil {
 		stmts = append(stmts, input.getStmt())
+	} else if isShowActiveTxn(input.getSql()) {
+		stmts = append(stmts, &tree.ShowActiveTxn{})
 	} else if isCmdFieldListSql(input.getSql()) {
 		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, input.getSql())
 		if err != nil {
@@ -2506,6 +2508,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	pu *config.ParameterUnit,
 	tenant string,
 	userName string,
+	input *UserInput,
 ) (retErr error) {
 	var err error
 	var cmpBegin time.Time
@@ -2828,6 +2831,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
 		}
+		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
+			WhoPrepare: "prepare_stmt",
+			PrepareSql: input.getSql(),
+		})
 	case *tree.PrepareString:
 		selfHandle = true
 		prepareStmt, err = mce.handlePrepareString(requestCtx, st)
@@ -2839,6 +2846,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
 		}
+		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
+			WhoPrepare: "prepare_string",
+			PrepareSql: input.getSql(),
+		})
 	case *tree.Deallocate:
 		selfHandle = true
 		err = mce.handleDeallocate(requestCtx, st)
@@ -3069,6 +3080,11 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		if len(st.Hostname) == 0 || st.Hostname == "%" {
 			st.Hostname = rootHost
 		}
+	case *tree.ShowActiveTxn:
+		selfHandle = true
+		if err = mce.handleShowActiveTxn(requestCtx, st, i, len(cws)); err != nil {
+			return err
+		}
 	}
 
 	if selfHandle {
@@ -3125,7 +3141,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		*tree.ShowProcessList, *tree.ShowStatus, *tree.ShowTableStatus, *tree.ShowGrants, *tree.ShowRolesStmt,
 		*tree.ShowIndex, *tree.ShowCreateView, *tree.ShowTarget, *tree.ShowCollation, *tree.ValuesStatement,
 		*tree.ExplainFor, *tree.ExplainStmt, *tree.ShowTableNumber, *tree.ShowColumnNumber, *tree.ShowTableValues, *tree.ShowLocks, *tree.ShowNodeList, *tree.ShowFunctionOrProcedureStatus,
-		*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages:
+		*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages, *tree.ShowActiveTxn:
 		columns, err = cw.GetColumns()
 		if err != nil {
 			logError(ses, ses.GetDebugString(),
@@ -3398,11 +3414,11 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 
 // execute query
 func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserInput) (retErr error) {
-	if len(input.getSql()) != 0 {
-		fmt.Println("====>", input.getSql())
-	} else {
-		fmt.Println("====> stmt")
-	}
+	//if len(input.getSql()) != 0 {
+	//	fmt.Println("====>", input.getSql())
+	//} else {
+	//	fmt.Println("====> stmt")
+	//}
 	beginInstant := time.Now()
 	ses := mce.GetSession()
 	input.genSqlSourceType(ses)
@@ -3486,7 +3502,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 		ses.SetMysqlResultSet(nil)
 	}()
 
-	canCache := true
+	//canCache := true
 
 	singleStatement := len(cws) == 1
 	sqlRecord := parsers.HandleSqlForRecord(input.getSql())
@@ -3498,7 +3514,7 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 				if _, ok := cwft.stmt.(*tree.SetVar); !ok {
 					ses.cleanCache()
 				}
-				canCache = false
+				//canCache = false
 			}
 		}
 
@@ -3540,25 +3556,25 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 			}
 		}
 
-		err = mce.executeStmt(requestCtx, ses, stmt, proc, cw, i, cws, proto, pu, tenant, userNameOnly)
+		err = mce.executeStmt(requestCtx, ses, stmt, proc, cw, i, cws, proto, pu, tenant, userNameOnly, input)
 		if err != nil {
 			return err
 		}
 	} // end of for
 
-	if canCache && !ses.isCached(input.getSql()) {
-		plans := make([]*plan.Plan, len(cws))
-		stmts := make([]tree.Statement, len(cws))
-		for i, cw := range cws {
-			if cwft, ok := cw.(*TxnComputationWrapper); ok && checkNodeCanCache(cwft.plan) {
-				plans[i] = cwft.plan
-				stmts[i] = cwft.stmt
-			} else {
-				return nil
-			}
-		}
-		ses.cachePlan(input.getSql(), stmts, plans)
-	}
+	//if canCache && !ses.isCached(input.getSql()) {
+	//	plans := make([]*plan.Plan, len(cws))
+	//	stmts := make([]tree.Statement, len(cws))
+	//	for i, cw := range cws {
+	//		if cwft, ok := cw.(*TxnComputationWrapper); ok && checkNodeCanCache(cwft.plan) {
+	//			plans[i] = cwft.plan
+	//			stmts[i] = cwft.stmt
+	//		} else {
+	//			return nil
+	//		}
+	//	}
+	//	ses.cachePlan(input.getSql(), stmts, plans)
+	//}
 
 	return nil
 }
@@ -3862,6 +3878,73 @@ func (mce *MysqlCmdExecutor) SetCancelFunc(cancelFunc context.CancelFunc) {
 }
 
 func (mce *MysqlCmdExecutor) Close() {}
+
+func (mce *MysqlCmdExecutor) handleShowActiveTxn(ctx context.Context, st *tree.ShowActiveTxn, cwIndex, cwsLen int) error {
+	var err error
+	ses := mce.GetSession()
+	proto := ses.GetMysqlProtocol()
+	err = doShowActiveTxn(ctx, ses, st)
+	if err != nil {
+		return err
+	}
+	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+
+	if err = proto.SendResponse(ctx, resp); err != nil {
+		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
+	}
+	return err
+}
+
+func doShowActiveTxn(ctx context.Context, ses *Session, st *tree.ShowActiveTxn) error {
+	var err error
+
+	id := new(MysqlColumn)
+	id.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+	id.SetName("txn_id")
+
+	meta := new(MysqlColumn)
+	meta.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+	meta.SetName("txn_meta")
+
+	fromPrepare := new(MysqlColumn)
+	fromPrepare.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+	fromPrepare.SetName("is_prepare")
+
+	prepareType := new(MysqlColumn)
+	prepareType.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+	prepareType.SetName("prepare_type")
+
+	prepareSql := new(MysqlColumn)
+	prepareSql.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
+	prepareSql.SetName("prepare_sql")
+
+	mrs := ses.GetMysqlResultSet()
+
+	mrs.AddColumn(id)
+	mrs.AddColumn(id)
+	mrs.AddColumn(meta)
+	mrs.AddColumn(fromPrepare)
+	mrs.AddColumn(prepareType)
+	mrs.AddColumn(prepareSql)
+
+	if ses.GetTxnHandler() != nil && ses.GetTxnHandler().GetTxnClient() != nil {
+		txnClient := ses.txnHandler.GetTxnClient()
+		txns := txnClient.ActiveTxn()
+		for _, txn := range txns {
+			idu, _ := uuid.FromBytes(txn.ID)
+			row := make([]interface{}, 5)
+			row[0] = idu.String()
+			row[1] = txn.Meta.DebugString()
+			row[2] = strconv.FormatBool(txn.FromPrepare)
+			row[3] = txn.WhoPrepare
+			row[4] = txn.PrepareSql
+			mrs.AddRow(row)
+		}
+	}
+
+	return err
+}
 
 /*
 convert the type in computation engine to the type in mysql.

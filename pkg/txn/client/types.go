@@ -16,7 +16,6 @@ package client
 
 import (
 	"context"
-
 	"github.com/matrixorigin/matrixone/pkg/common/runtime"
 	"github.com/matrixorigin/matrixone/pkg/pb/lock"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
@@ -62,6 +61,16 @@ type TxnClient interface {
 	RefreshExpressionEnabled() bool
 	// CNBasedConsistencyEnabled return true if cn based consistency feature enabled
 	CNBasedConsistencyEnabled() bool
+
+	ActiveTxn() []*ActiveTxnData
+}
+
+type ActiveTxnData struct {
+	FromPrepare bool
+	WhoPrepare  string
+	PrepareSql  string
+	Meta        txn.TxnMeta
+	ID          []byte
 }
 
 // TxnOperator operator for transaction clients, handling read and write

@@ -111,6 +111,14 @@ func WithTxnCreateBy(createBy string) TxnOption {
 	}
 }
 
+func WithTxnPrepare(whoPrepare string, prepareSql string) TxnOption {
+	return func(tc *txnOperator) {
+		tc.option.fromPrepare = true
+		tc.option.whoPrepare = whoPrepare
+		tc.option.prepareSql = prepareSql
+	}
+}
+
 // WithTxnCacheWrite Set cache write requests, after each Write call, the request will not be sent
 // to the DN node immediately, but stored in the Coordinator's memory, and the Coordinator will
 // choose the right time to send the cached requests. The following scenarios trigger the sending
@@ -160,6 +168,9 @@ type txnOperator struct {
 		disable1PCOpt    bool
 		coordinator      bool
 		createBy         string
+		fromPrepare      bool
+		whoPrepare       string
+		prepareSql       string
 		lockService      lockservice.LockService
 	}
 

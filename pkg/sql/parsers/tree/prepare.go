@@ -67,3 +67,15 @@ func NewPrepareString(name Identifier, sql string) *PrepareString {
 		Sql:  sql,
 	}
 }
+
+// show active txn;
+type ShowActiveTxn struct {
+	Statement
+}
+
+func (node *ShowActiveTxn) Format(ctx *FmtCtx) {
+	ctx.WriteString("show active txn")
+}
+
+func (node *ShowActiveTxn) GetStatementType() string { return "ShowActiveTxn" }
+func (node *ShowActiveTxn) GetQueryType() string     { return QueryTypeDQL }

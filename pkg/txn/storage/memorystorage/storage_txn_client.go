@@ -61,6 +61,10 @@ func (s *StorageTxnClient) New(
 	}, nil
 }
 
+func (*StorageTxnClient) ActiveTxn() []*client.ActiveTxnData {
+	panic("unimplemented")
+}
+
 func (*StorageTxnClient) NewWithSnapshot(snapshot []byte) (client.TxnOperator, error) {
 	panic("unimplemented")
 }

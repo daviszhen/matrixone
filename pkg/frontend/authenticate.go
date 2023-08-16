@@ -5688,7 +5688,7 @@ func determinePrivilegeSetOfStatement(stmt tree.Statement) *privilege {
 	case *tree.SetTransaction:
 		objType = objectTypeNone
 		kind = privilegeKindNone
-	case *tree.CreateStage, *tree.AlterStage, *tree.DropStage:
+	case *tree.CreateStage, *tree.AlterStage, *tree.DropStage, *tree.ShowActiveTxn:
 		objType = objectTypeNone
 		kind = privilegeKindNone
 	default:

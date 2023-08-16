@@ -170,6 +170,13 @@ type txnClient struct {
 	}
 }
 
+func (client *txnClient) ActiveTxn() []*ActiveTxnData {
+	if client.leakChecker != nil {
+		return client.leakChecker.activeTxn()
+	}
+	return nil
+}
+
 // NewTxnClient create a txn client with TxnSender and Options
 func NewTxnClient(
 	sender rpc.TxnSender,
@@ -491,7 +498,7 @@ func (client *txnClient) startLeakChecker() {
 
 func (client *txnClient) addToLeakCheck(op *txnOperator) {
 	if client.leakChecker != nil {
-		client.leakChecker.txnOpened(op.txnID, op.option.createBy)
+		client.leakChecker.txnOpened(op.txnID, op.option.fromPrepare, op.option.createBy, op.option.whoPrepare, op.option.prepareSql, op.Txn())
 	}
 }
 
