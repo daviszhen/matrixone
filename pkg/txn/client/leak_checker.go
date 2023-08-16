@@ -17,6 +17,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
+	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/pb/txn"
 	"sync"
 	"time"
@@ -65,6 +67,10 @@ func (lc *leakChecker) txnOpened(
 	createBy, whoPrepare, prepareSql string, txnMeta txn.TxnMeta) {
 	if createBy == "" {
 		createBy = "unknown"
+	}
+
+	if fromPrepare {
+		fmt.Println("xxxx>", "leakchecker", hex.EncodeToString(txnID), fromPrepare, whoPrepare, prepareSql)
 	}
 
 	lc.Lock()

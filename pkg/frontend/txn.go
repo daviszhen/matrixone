@@ -95,10 +95,6 @@ func (th *TxnHandler) createTxnCtx() context.Context {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryDN{}, th.ses.GetTempTableStorage())
 	}
 
-	if v := reqCtx.Value(defines.PrepareKey{}); v != nil {
-		retTxnCtx = context.WithValue(retTxnCtx, defines.PrepareKey{}, v)
-	}
-
 	return retTxnCtx
 }
 
@@ -155,9 +151,9 @@ func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 			client.WithUserTxn())
 	}
 
-	if pv, ok := txnCtx.Value(defines.PrepareKey{}).(*defines.PrepareValue); ok {
-		fmt.Println("++++>", "attach prepare", pv.WhoPrepare, pv.PrepareSql)
-		opts = append(opts, client.WithTxnPrepare(pv.WhoPrepare, pv.PrepareSql))
+	if th.ses.isPrepare {
+		fmt.Println("++++>", "attach prepare", th.ses.whoPrepare, th.ses.prepareSql)
+		opts = append(opts, client.WithTxnPrepare(th.ses.whoPrepare, th.ses.prepareSql))
 	}
 
 	th.txnOperator, err = th.txnClient.New(
@@ -332,14 +328,20 @@ func (th *TxnHandler) CommitTxn() error {
 		err = txnOp.Commit(ctx2)
 		if err != nil {
 			txnId := txnOp.Txn().DebugString()
-			//fmt.Println("++++>", "commit-error", txnId)
+			//if th.ses.isPrepare {
+			fmt.Println("++++>", "commit-error", txnId)
+			//}
 			th.SetTxnOperatorInvalid()
-			logError(ses, sessionInfo,
+			fmt.Println("++++>", sessionInfo,
 				"CommitTxn: txn operator commit failed",
 				zap.String("txnId", txnId),
 				zap.Error(err))
+		} else {
+			//if th.ses.isPrepare {
+			fmt.Println("++++>", "commit", txnOp.Txn().DebugString())
+			//}
 		}
-		//fmt.Println("++++>", "commit", txnOp.Txn().DebugString())
+
 		ses.updateLastCommitTS(txnOp.Txn().CommitTS)
 	}
 	th.SetTxnOperatorInvalid()
@@ -394,14 +396,19 @@ func (th *TxnHandler) RollbackTxn() error {
 		err = txnOp.Rollback(ctx2)
 		if err != nil {
 			txnId := txnOp.Txn().DebugString()
-			//fmt.Println("++++>", "rollback-error", txnId)
+			//if th.ses.isPrepare {
+			fmt.Println("++++>", "rollback-error", txnId)
+			//}
 			th.SetTxnOperatorInvalid()
-			logError(ses, ses.GetDebugString(),
+			fmt.Println("++++>", ses.GetDebugString(),
 				"RollbackTxn: txn operator commit failed",
 				zap.String("txnId", txnId),
 				zap.Error(err))
+		} else {
+			//if th.ses.isPrepare {
+			fmt.Println("++++>", "rollback", txnOp.Txn().DebugString())
+			//}
 		}
-		//fmt.Println("++++>", "rollback", txnOp.Txn().DebugString())
 	}
 	th.SetTxnOperatorInvalid()
 	return err

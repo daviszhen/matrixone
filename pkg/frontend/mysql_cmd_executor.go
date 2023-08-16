@@ -2523,6 +2523,12 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	var mrs *MysqlResultSet
 	var loadLocalErrGroup *errgroup.Group
 	var loadLocalWriter *io.PipeWriter
+	
+	defer func() {
+		ses.isPrepare = false
+		ses.whoPrepare = ""
+		ses.prepareSql = ""
+	}()
 
 	// per statement profiler
 	requestCtx, endStmtProfile := fileservice.NewStatementProfiler(requestCtx)
@@ -2822,10 +2828,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	case *tree.PrepareStmt:
 		selfHandle = true
-		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
-			WhoPrepare: "prepare_stmt",
-			PrepareSql: input.getSql(),
-		})
+		ses.isPrepare = true
+		ses.whoPrepare = "prepare_stmt"
+		ses.prepareSql = input.getSql()
 		prepareStmt, err = mce.handlePrepareStmt(requestCtx, st)
 		if err != nil {
 			return err
@@ -2835,12 +2840,12 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
 		}
+		//time.Sleep(5 * time.Second)
 	case *tree.PrepareString:
 		selfHandle = true
-		requestCtx = context.WithValue(requestCtx, defines.PrepareKey{}, &defines.PrepareValue{
-			WhoPrepare: "prepare_string",
-			PrepareSql: input.getSql(),
-		})
+		ses.isPrepare = true
+		ses.whoPrepare = "prepare_string"
+		ses.prepareSql = input.getSql()
 		prepareStmt, err = mce.handlePrepareString(requestCtx, st)
 		if err != nil {
 			return err
@@ -2850,6 +2855,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
 			return err
 		}
+		//time.Sleep(5 * time.Second)
 	case *tree.Deallocate:
 		selfHandle = true
 		err = mce.handleDeallocate(requestCtx, st)

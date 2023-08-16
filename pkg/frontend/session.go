@@ -230,6 +230,10 @@ type Session struct {
 	//  nextval internally will derive two sql (a select and an update). the two sql are executed
 	//	in the same transaction.
 	derivedStmt bool
+
+	isPrepare  bool
+	whoPrepare string
+	prepareSql string
 }
 
 func (ses *Session) IsDerivedStmt() bool {
