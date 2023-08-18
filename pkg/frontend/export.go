@@ -93,16 +93,19 @@ func initExportConfig(ctx context.Context, ec *ExportConfig, mrs *MysqlResultSet
 	return err
 }
 
+// needExportToFile checks needing to export into file or not
 func (ec *ExportConfig) needExportToFile() bool {
 	return ec != nil && ec.userConfig != nil && ec.userConfig.Outfile
 }
 
+// sendBatch sends the batch from pipeline to the export routine
 func (ec *ExportConfig) sendBatch(bat *batch.Batch) {
 	if bat != nil {
 		ec.batchChan <- bat
 	}
 }
 
+// initAsyncExport starts the async export routine
 func initAsyncExport(ctx context.Context, ses *Session, ec *ExportConfig) {
 	if !ec.first {
 		ec.first = true
@@ -115,6 +118,7 @@ func initAsyncExport(ctx context.Context, ses *Session, ec *ExportConfig) {
 	}
 }
 
+// doExport the export function
 func doExport(ctx context.Context, ses *Session, ec *ExportConfig) error {
 	var err error
 	var quit bool
@@ -152,6 +156,7 @@ func doExport(ctx context.Context, ses *Session, ec *ExportConfig) error {
 	return err
 }
 
+// writeBatch writes data batch into file
 func writeBatch(ctx context.Context, ses *Session, oq *outputQueue, bat *batch.Batch) error {
 	var err error
 	n := bat.Vecs[0].Length()
@@ -179,7 +184,7 @@ func writeBatch(ctx context.Context, ses *Session, oq *outputQueue, bat *batch.B
 	return err
 }
 
-// fsConfig writes into fileservice
+// fsConfig writes into fileservice for save query result
 type fsConfig struct {
 	fileService fileservice.FileService
 	lineBuffer  *bytes.Buffer
@@ -299,7 +304,7 @@ var openNewFile = func(ctx context.Context, ep *ExportConfig, mrs *MysqlResultSe
 	var err error
 	ep.curFileSize = 0
 	if !ep.seFileService {
-		filePath := getExportFilePath(ep.userConfig.FilePath, ep.fileCnt)
+		filePath := genExportFilePath(ep.userConfig.FilePath, ep.fileCnt)
 		ep.file, err = openFile(filePath, os.O_RDWR|os.O_EXCL|os.O_CREATE, 0o666)
 		if err != nil {
 			return err
@@ -313,7 +318,7 @@ var openNewFile = func(ctx context.Context, ep *ExportConfig, mrs *MysqlResultSe
 			ep.lineBuffer.Reset()
 		}
 		ep.asyncReader, ep.asyncWriter = io.Pipe()
-		filePath := getExportFilePath(ep.userConfig.FilePath, ep.fileCnt)
+		filePath := genExportFilePath(ep.userConfig.FilePath, ep.fileCnt)
 
 		asyncWriteFunc := func() error {
 			vec := fileservice.IOVector{
@@ -368,7 +373,7 @@ var openNewFile = func(ctx context.Context, ep *ExportConfig, mrs *MysqlResultSe
 	return nil
 }
 
-func getExportFilePath(filename string, fileCnt uint) string {
+func genExportFilePath(filename string, fileCnt uint) string {
 	if fileCnt == 0 {
 		return filename
 	} else {
@@ -394,20 +399,6 @@ var formatOutputString = func(oq *outputQueue, tmp, symbol []byte, enclosed byte
 	if err = writeBytesToFile(oq, symbol); err != nil {
 		return err
 	}
-	return nil
-}
-
-var writeFile = func(ep *ExportConfig, output []byte) error {
-	for {
-		if n, err := write(ep, output); err != nil {
-			return err
-		} else if n == len(output) {
-			break
-		}
-	}
-	ep.lineSize += uint64(len(output))
-	ep.curFileSize += uint64(len(output))
-	ep.writtenCsvBytes += uint64(len(output))
 	return nil
 }
 
@@ -447,17 +438,18 @@ func writeBytesToFile(oq *outputQueue, output []byte) error {
 	return nil
 }
 
-func copyBatch(ses *Session, bat *batch.Batch) (*batch.Batch, error) {
-	var err error
-	bat2 := batch.NewWithSize(len(bat.Vecs))
-	for i, vec := range bat.Vecs {
-		bat2.Vecs[i], err = vec.Dup(ses.GetMemPool())
-		if err != nil {
-			return nil, err
+var writeFile = func(ep *ExportConfig, output []byte) error {
+	for {
+		if n, err := write(ep, output); err != nil {
+			return err
+		} else if n == len(output) {
+			break
 		}
 	}
-	bat2.SetRowCount(bat.RowCount())
-	return bat2, err
+	ep.lineSize += uint64(len(output))
+	ep.curFileSize += uint64(len(output))
+	ep.writtenCsvBytes += uint64(len(output))
+	return nil
 }
 
 func addEscapeToString(s []byte) []byte {
@@ -481,6 +473,7 @@ func addEscapeToString(s []byte) []byte {
 	return ret
 }
 
+// exportDataToCSVFile
 func exportDataToCSVFile(oq *outputQueue) error {
 	oq.ep.lineSize = 0
 
@@ -681,4 +674,17 @@ func finishExport(ctx context.Context, ses *Session, ec *ExportConfig) error {
 		ec.ctx = nil
 	}
 	return err
+}
+
+func copyBatch(ses *Session, bat *batch.Batch) (*batch.Batch, error) {
+	var err error
+	bat2 := batch.NewWithSize(len(bat.Vecs))
+	for i, vec := range bat.Vecs {
+		bat2.Vecs[i], err = vec.Dup(ses.GetMemPool())
+		if err != nil {
+			return nil, err
+		}
+	}
+	bat2.SetRowCount(bat.RowCount())
+	return bat2, err
 }
