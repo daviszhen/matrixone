@@ -472,15 +472,15 @@ func doDumpQueryResult(ctx context.Context, ses *Session, eParam *tree.ExportPar
 		mrs.Data[i] = make([]interface{}, columnCount)
 	}
 	exportParam := &ExportConfig{
-		UserConfig: eParam,
+		userConfig: eParam,
 	}
 	//prepare output queue
 	oq := NewOutputQueue(ctx, ses, columnCount, mrs, exportParam)
 	oq.reset()
 	//prepare export param
-	exportParam.UseFileService = true
-	exportParam.FileService = ses.GetParameterUnit().FileService
-	exportParam.Ctx = ctx
+	exportParam.seFileService = true
+	exportParam.fileService = ses.GetParameterUnit().FileService
+	exportParam.ctx = ctx
 	defer func() {
 		_ = finishExport(ctx, ses, exportParam)
 	}()
@@ -543,7 +543,7 @@ func doDumpQueryResult(ctx context.Context, ses *Session, eParam *tree.ExportPar
 		return err
 	}
 
-	err = Close(exportParam)
+	err = closeFile(exportParam)
 	if err != nil {
 		return err
 	}

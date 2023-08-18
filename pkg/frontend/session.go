@@ -799,7 +799,7 @@ func (ses *Session) AppendData(row []interface{}) {
 func (ses *Session) InitExportConfig(ep *tree.ExportParam) {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	ses.ep = &ExportConfig{UserConfig: ep}
+	ses.ep = &ExportConfig{userConfig: ep}
 }
 
 func (ses *Session) GetExportConfig() *ExportConfig {
