@@ -846,3 +846,12 @@ func LoadCheckpointEntries(
 	}
 	return entries, closeCBs, nil
 }
+
+func LoadCheckpointEntriesFromKey(ctx context.Context,fs fileservice.FileService, location objectio.Location)  (*batch.Batch, error) {
+		data := NewCNCheckpointData()
+	    bat,err := data.ReadFromDataWithKey(ctx, location, fs, nil)
+	    if err != nil {
+	    	return nil ,err
+		}
+		return bat, nil
+}
