@@ -8,7 +8,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/objectio"
 	"github.com/matrixorigin/matrixone/pkg/util/executor"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/logtail"
@@ -38,40 +37,26 @@ func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir s
 }
 
 func execBackup(ctx context.Context, srcFs, dstFs fileservice.FileService, names []string) error {
-	files := make(map[string]*fileservice.DirEntry, 0)
 	for _, name := range names {
 		key, err := blockio.EncodeLocationFromString(name)
 		if err != nil {
 			return err
 		}
-		bat, err := logtail.LoadCheckpointEntriesFromKey(ctx, srcFs, key)
+		files, err := logtail.LoadCheckpointEntriesFromKey(ctx, srcFs, key)
 		if err != nil {
 			return err
 		}
-		for i := 0; i < bat.Vecs[3].Length(); i++ {
-			metaLoc := objectio.Location(bat.Vecs[3].GetBytesAt(i))
-			if metaLoc == nil {
-				continue
+		for _, dentry := range files {
+			if dentry.IsDir {
+				panic("not support dir")
 			}
-			if files[metaLoc.Name().String()] == nil {
-				dentry, err := srcFs.StatFile(ctx, metaLoc.Name().String())
-				if err != nil {
-					return err
-				}
-				files[metaLoc.Name().String()] = dentry
+			err := CopyFile(ctx, srcFs, dstFs, dentry, "")
+			if err != nil {
+				return err
 			}
 		}
 	}
 
-	for _, dentry := range files {
-		if dentry.IsDir {
-			panic("not support dir")
-		}
-		err := CopyFile(ctx, srcFs, dstFs, dentry, "")
-		if err != nil {
-			return err
-		}
-	}
 	err := CopyDir(ctx, srcFs, dstFs, "ckp")
 	if err != nil {
 		return err
