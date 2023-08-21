@@ -1728,7 +1728,7 @@ func databaseIsValid(dbName string, ctx CompilerContext) (string, error) {
 	}
 
 	if !ctx.DatabaseExists(dbName) {
-		return "", moerr.NewBadDB(ctx.GetContext(), dbName)
+		return "", moerr.NewNoDB(ctx.GetContext())
 	}
 	return dbName, nil
 }
