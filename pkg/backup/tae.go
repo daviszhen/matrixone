@@ -2,12 +2,15 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/runtime"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/objectio"
+	pb "github.com/matrixorigin/matrixone/pkg/pb/ctl"
 	"github.com/matrixorigin/matrixone/pkg/util/executor"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/logtail"
@@ -15,29 +18,66 @@ import (
 	"strings"
 )
 
+func getFileNames(ctx context.Context, retBytes [][][]byte) ([]string, error) {
+	var err error
+	cr := pb.CtlResult{}
+	err = json.Unmarshal(retBytes[0][0], &cr)
+	if err != nil {
+		return nil, err
+	}
+	rsSlice, ok := cr.Data.([]interface{})
+	if !ok {
+		return nil, moerr.NewInternalError(ctx, "invalid ctl result")
+	}
+	var fileName []string
+	for _, rs := range rsSlice {
+		str, ok := rs.(string)
+		if !ok {
+			return nil, moerr.NewInternalError(ctx, "invalid ctl string")
+		}
+
+		for _, x := range strings.Split(str, ";") {
+			if len(x) == 0 {
+				continue
+			}
+			fileName = append(fileName, x)
+		}
+	}
+	return fileName, err
+}
+
 func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir string) error {
 	v, ok := runtime.ProcessLevelRuntime().GetGlobalVariables(runtime.InternalSQLExecutor)
 	if !ok {
-		return moerr.NewNotSupported(context.Background(), "no implement sqlExecutor")
+		return moerr.NewNotSupported(ctx, "no implement sqlExecutor")
 	}
 	exec := v.(executor.SQLExecutor)
 	opts := executor.Options{}
 	sql := fmt.Sprintf("select mo_ctl('dn','Backup','')")
-	res, err := exec.Exec(context.Background(), sql, opts)
+	res, err := exec.Exec(ctx, sql, opts)
 	if err != nil {
 		return err
 	}
-	var dbs []string
+
+	var retByts [][][]byte
 	res.ReadRows(func(cols []*vector.Vector) bool {
-		dbs = append(dbs, executor.GetStringRows(cols[0])...)
+		retByts = append(retByts, executor.GetBytesRows(cols[0]))
 		return true
 	})
-	fileName := strings.Split(dbs[0], ";")
+  
+  fileName, err := getFileNames(ctx, retByts)
+	if err != nil {
+		return err
+	}
 	return execBackup(ctx, srcFs, dstFs, fileName)
 }
 
 func execBackup(ctx context.Context, srcFs, dstFs fileservice.FileService, names []string) error {
-	for _, name := range names {
+	files := make(map[string]*fileservice.DirEntry, 0)
+	for _, name := range fileName {
+		if len(name) == 0 {
+			continue
+		}
 		key, err := blockio.EncodeLocationFromString(name)
 		if err != nil {
 			return err
