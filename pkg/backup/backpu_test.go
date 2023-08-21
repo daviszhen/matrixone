@@ -16,11 +16,15 @@ package backup
 
 import (
 	"context"
+	pkgcatalog "github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
+	"github.com/matrixorigin/matrixone/pkg/objectio"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/catalog"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/common"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/db/checkpoint"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/db/testutil"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/logtail"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/testutils"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/testutils/config"
 	"github.com/panjf2000/ants/v2"
@@ -94,7 +98,41 @@ func TestBackupData(t *testing.T) {
 	}
 	service, err := fileservice.NewFileService(ctx, c, nil)
 	assert.Nil(t, err)
+	checkpoints := db.BGCheckpointRunner.GetAllCheckpoints()
+	var data *logtail.CheckpointData
+	files := make(map[string]string, 0)
+	for _, candidate := range checkpoints {
+		data, err = collectCkpData(candidate, db.Catalog)
+		assert.Nil(t, err)
+		defer data.Close()
+		ins, _, _, _ := data.GetBlkBatchs()
+		for i := 0; i < ins.Length(); i++ {
+			metaLoc := objectio.Location(ins.GetVectorByName(pkgcatalog.BlockMeta_MetaLoc).Get(i).([]byte))
+			if metaLoc == nil {
+				continue
+			}
+			if files[metaLoc.Name().String()] == "" {
+				files[metaLoc.Name().String()] = metaLoc.String()
+			}
+		}
+	}
 
-	err = BackupData(ctx, db.Opts.Fs, service, "local")
+	locations := make([]string, 0)
+	for _, location := range files {
+		locations = append(locations, location)
+	}
+	err = execBackup(ctx, db.Opts.Fs, service, locations)
 	assert.Nil(t, err)
+}
+
+func collectCkpData(
+	ckp *checkpoint.CheckpointEntry,
+	catalog *catalog.Catalog,
+) (data *logtail.CheckpointData, err error) {
+	factory := logtail.IncrementalCheckpointDataFactory(
+		ckp.GetStart(),
+		ckp.GetEnd(),
+	)
+	data, err = factory(catalog)
+	return
 }

@@ -849,6 +849,7 @@ func LoadCheckpointEntries(
 
 func LoadCheckpointEntriesFromKey(ctx context.Context,fs fileservice.FileService, location objectio.Location)  (*batch.Batch, error) {
 		data := NewCNCheckpointData()
+		logutil.Infof("LoadCheckpointEntriesFromKey location: %s", location.String())
 	    bat,err := data.ReadFromDataWithKey(ctx, location, fs, nil)
 	    if err != nil {
 	    	return nil ,err

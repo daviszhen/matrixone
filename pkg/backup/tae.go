@@ -11,8 +11,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/objectio"
 	"github.com/matrixorigin/matrixone/pkg/util/executor"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/catalog"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/db/checkpoint"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/logtail"
 	"path"
 	"strings"
@@ -25,7 +23,7 @@ func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir s
 	}
 	exec := v.(executor.SQLExecutor)
 	opts := executor.Options{}
-	sql := fmt.Sprintf("select mo_ctl('dn','Backup','');")
+	sql := fmt.Sprintf("select mo_ctl('dn','Backup','')")
 	res, err := exec.Exec(context.Background(), sql, opts)
 	if err != nil {
 		return err
@@ -36,8 +34,12 @@ func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir s
 		return true
 	})
 	fileName := strings.Split(dbs[0], ";")
+	return execBackup(ctx, srcFs, dstFs, fileName)
+}
+
+func execBackup(ctx context.Context, srcFs, dstFs fileservice.FileService, names []string) error {
 	files := make(map[string]*fileservice.DirEntry, 0)
-	for _, name := range fileName {
+	for _, name := range names {
 		key, err := blockio.EncodeLocationFromString(name)
 		if err != nil {
 			return err
@@ -65,12 +67,12 @@ func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir s
 		if dentry.IsDir {
 			panic("not support dir")
 		}
-		err = CopyFile(ctx, srcFs, dstFs, dentry, "")
+		err := CopyFile(ctx, srcFs, dstFs, dentry, "")
 		if err != nil {
 			return err
 		}
 	}
-	err = CopyDir(ctx, srcFs, dstFs, "ckp")
+	err := CopyDir(ctx, srcFs, dstFs, "ckp")
 	if err != nil {
 		return err
 	}
@@ -79,18 +81,6 @@ func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir s
 		return err
 	}
 	return nil
-}
-
-func collectCkpData(
-	ckp *checkpoint.CheckpointEntry,
-	catalog *catalog.Catalog,
-) (data *logtail.CheckpointData, err error) {
-	factory := logtail.IncrementalCheckpointDataFactory(
-		ckp.GetStart(),
-		ckp.GetEnd(),
-	)
-	data, err = factory(catalog)
-	return
 }
 
 func CopyDir(ctx context.Context, srcFs, dstFs fileservice.FileService, dir string) error {
