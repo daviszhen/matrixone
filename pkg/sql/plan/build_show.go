@@ -433,6 +433,8 @@ func buildShowSequences(stmt *tree.ShowSequences, ctx CompilerContext) (*Plan, e
 }
 
 func buildShowTables(stmt *tree.ShowTables, ctx CompilerContext) (*Plan, error) {
+	var dbName string
+	var err error
 	if stmt.Like != nil && stmt.Where != nil {
 		return nil, moerr.NewSyntaxError(ctx.GetContext(), "like clause and where clause cannot exist at the same time")
 	}
@@ -441,10 +443,13 @@ func buildShowTables(stmt *tree.ShowTables, ctx CompilerContext) (*Plan, error) 
 		return nil, moerr.NewNYI(ctx.GetContext(), "statement: '%v'", tree.String(stmt, dialect.MYSQL))
 	}
 
-	accountId := ctx.GetAccountId()
-	dbName, err := databaseIsValid(stmt.DBName, ctx)
-	if err != nil {
-		return nil, err
+	accountId := ctx.GetAccountId()x
+	if len(stmt.DBName) != 0 {
+		dbName, err = databaseIsValid(stmt.DBName, ctx)
+		if err != nil {
+			return nil, err
+		}
+		dbName = stmt.DBName
 	}
 
 	ddlType := plan.DataDefinition_SHOW_TABLES
