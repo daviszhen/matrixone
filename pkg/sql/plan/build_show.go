@@ -443,7 +443,7 @@ func buildShowTables(stmt *tree.ShowTables, ctx CompilerContext) (*Plan, error) 
 		return nil, moerr.NewNYI(ctx.GetContext(), "statement: '%v'", tree.String(stmt, dialect.MYSQL))
 	}
 
-	accountId := ctx.GetAccountId()x
+	accountId := ctx.GetAccountId()
 	if len(stmt.DBName) != 0 {
 		dbName, err = databaseIsValid(stmt.DBName, ctx)
 		if err != nil {
