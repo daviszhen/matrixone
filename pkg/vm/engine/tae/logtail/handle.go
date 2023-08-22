@@ -868,11 +868,14 @@ func LoadCheckpointEntriesFromKey(ctx context.Context, fs fileservice.FileServic
 		locations = append(locations, location)
 	}
 	for i := 0; i < data.bats[BLKMetaInsertIDX].Length(); i++ {
+		deltaLoc := objectio.Location(data.bats[BLKMetaInsertIDX].GetVectorByName(pkgcatalog.BlockMeta_DeltaLoc).Get(i).([]byte))
 		metaLoc := objectio.Location(data.bats[BLKMetaInsertIDX].GetVectorByName(pkgcatalog.BlockMeta_MetaLoc).Get(i).([]byte))
-		if metaLoc.IsEmpty() {
-			continue
+		if !metaLoc.IsEmpty() {
+			locations = append(locations, metaLoc)
 		}
-		locations = append(locations, metaLoc)
+		if !deltaLoc.IsEmpty() {
+			locations = append(locations, deltaLoc)
+		}
 	}
 	return locations, nil
 }

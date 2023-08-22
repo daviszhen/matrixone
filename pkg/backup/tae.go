@@ -80,14 +80,13 @@ func execBackup(ctx context.Context, srcFs, dstFs fileservice.FileService, names
 		}
 		ckpStr := strings.Split(name, ":")
 		if len(ckpStr) != 2 {
-			return moerr.NewInternalError(ctx, "invalid ctl string")
+			return moerr.NewInternalError(ctx, "invalid checkpoint string")
 		}
 		metaLoc := ckpStr[0]
 		version, err := strconv.ParseUint(ckpStr[1], 10, 32)
 		if err != nil {
 			return err
 		}
-		fmt.Println(metaLoc)
 		key, err := blockio.EncodeLocationFromString(metaLoc)
 		if err != nil {
 			return err
