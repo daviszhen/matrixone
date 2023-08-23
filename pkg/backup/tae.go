@@ -89,6 +89,7 @@ func BackupData(ctx context.Context, srcFs, dstFs fileservice.FileService, dir s
 func execBackup(ctx context.Context, srcFs, dstFs fileservice.FileService, names []string) error {
 	files := make(map[string]*fileservice.DirEntry, 0)
 	table := gc.NewGCTable()
+	gcFileMap := make(map[string]string)
 	for _, name := range names {
 		if len(name) == 0 {
 			continue
@@ -111,33 +112,37 @@ func execBackup(ctx context.Context, srcFs, dstFs fileservice.FileService, names
 			return err
 		}
 		table.UpdateTable(data)
+		gcFiles := table.SoftGC()
+		mergeGCFile(gcFiles, gcFileMap)
 		for _, location := range locations {
 			if files[location.Name().String()] == nil {
 				dentry, err := srcFs.StatFile(ctx, location.Name().String())
 				if err != nil {
-					return err
+					if moerr.IsMoErrCode(err, moerr.ErrFileNotFound) &&
+						isGC(gcFileMap, location.Name().String()) {
+						err = nil
+						continue
+					} else {
+						return err
+					}
 				}
 				files[location.Name().String()] = dentry
 			}
 		}
 	}
-	gcFiles := table.SoftGC()
 	for _, dentry := range files {
 		if dentry.IsDir {
 			panic("not support dir")
 		}
 		err := CopyFile(ctx, srcFs, dstFs, dentry, "")
 		if err != nil {
-			if moerr.IsMoErrCode(err, moerr.ErrFileNotFound) {
-				for _, gcFile := range gcFiles {
-					if gcFile == dentry.Name {
-						logutil.Infof("file %s is gc", dentry.Name)
-						err = nil
-						break
-					}
-				}
+			if moerr.IsMoErrCode(err, moerr.ErrFileNotFound) &&
+				isGC(gcFileMap, dentry.Name) {
+				err = nil
+			} else {
+				return err
 			}
-			return err
+
 		}
 	}
 
@@ -200,4 +205,16 @@ func CopyFile(ctx context.Context, srcFs, dstFs fileservice.FileService, dentry 
 	}
 	err = dstFs.Write(ctx, dstIoVec)
 	return err
+}
+
+func mergeGCFile(gcFiles []string, gcFileMap map[string]string) {
+	for _, gcFile := range gcFiles {
+		if gcFileMap[gcFile] == "" {
+			gcFileMap[gcFile] = gcFile
+		}
+	}
+}
+
+func isGC(gcFileMap map[string]string, name string) bool {
+	return gcFileMap[name] != ""
 }
