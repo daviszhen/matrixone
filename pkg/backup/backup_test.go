@@ -84,6 +84,7 @@ func TestBackupData(t *testing.T) {
 		Backend: "DISK",
 		DataDir: dir,
 	}
+	//db.ForceLongCheckpoint()
 	service, err := fileservice.NewFileService(ctx, c, nil)
 	assert.Nil(t, err)
 	//db.ForceCheckpoint()
