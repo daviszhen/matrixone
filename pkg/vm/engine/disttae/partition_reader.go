@@ -16,6 +16,8 @@ package disttae
 
 import (
 	"context"
+	"fmt"
+	"unsafe"
 
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/testutil"
@@ -53,7 +55,7 @@ func (p *PartitionReader) Close() error {
 	return nil
 }
 
-func (p *PartitionReader) prepare() error {
+func (p *PartitionReader) prepare(mp *mpool.MPool) error {
 	txn := p.table.db.txn
 	var inserts []*batch.Batch
 	var deletes map[types.Rowid]uint8
@@ -69,7 +71,18 @@ func (p *PartitionReader) prepare() error {
 				if entry.bat.Attrs[0] == catalog.BlockMeta_MetaLoc {
 					continue
 				}
-				inserts = append(inserts, entry.bat)
+				if entry.bat.GetVector(0).GetType().Oid != types.T_Rowid {
+					fmt.Printf("jjjj> %d %p %v %v\n", entry.typ, entry.bat, entry.bat.IsEmpty(), entry.bat.Attrs)
+				}
+				fmt.Printf("zzzz> %d %p %v %v\n", entry.typ, entry.bat, entry.bat.IsEmpty(), entry.bat.Attrs)
+				tmp := entry.bat
+				//tmp, err := entry.bat.Dup(mp)
+				//if err != nil {
+				//	return err
+				//}
+				tmp.AddCnt(1)
+				batch.SaveVar(uintptr(unsafe.Pointer(entry.bat)))
+				inserts = append(inserts, tmp)
 				continue
 			}
 			//entry.typ == DELETE
@@ -112,13 +125,18 @@ func (p *PartitionReader) Read(
 		return nil, nil
 	}
 	//prepare data for read.
-	if err := p.prepare(); err != nil {
+	if err := p.prepare(mp); err != nil {
 		return nil, err
 	}
 	//p.tryUpdateColumns(colNames)
 	//read batch resides in memory from txn.writes.
 	if len(p.inserts) > 0 {
 		bat := p.inserts[0].GetSubBatch(colNames)
+		fmt.Printf("kkkk> %p %s %p %v %v %s\n",
+			bat, bat.Attrs,
+			p.inserts[0],
+			p.inserts[0].Attrs, colNames,
+			p.inserts[0].Vecs[0].String())
 		rowIds := vector.MustFixedCol[types.Rowid](p.inserts[0].Vecs[0])
 		p.inserts = p.inserts[1:]
 		b := batch.NewWithSize(len(colNames))

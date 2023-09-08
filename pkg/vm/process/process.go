@@ -16,8 +16,11 @@ package process
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -236,6 +239,7 @@ func (proc *Process) CopyVectorPool(src *Process) {
 }
 
 func (proc *Process) PutBatch(bat *batch.Batch) {
+	bat.PrintStack()
 	if bat == batch.EmptyBatch {
 		return
 	}
@@ -245,6 +249,11 @@ func (proc *Process) PutBatch(bat *batch.Batch) {
 	if atomic.AddInt64(&bat.Cnt, -1) > 0 {
 		return
 	}
+	if batch.HasVar(uintptr(unsafe.Pointer(bat))) {
+		fmt.Printf("uuuu> %p %v\n", bat, bat.Attrs)
+		debug.PrintStack()
+	}
+
 	for i := range bat.Vecs {
 		if bat.Vecs[i] != nil {
 			if !bat.Vecs[i].IsConst() && !bat.Vecs[i].NeedDup() {

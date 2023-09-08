@@ -18,6 +18,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"regexp"
+	"runtime/debug"
+	"sync"
 	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/logutil"
@@ -85,6 +88,7 @@ func (info *aggInfo) UnmarshalBinary(data []byte) error {
 }
 
 func (bat *Batch) MarshalBinary() ([]byte, error) {
+	bat.PrintStack()
 	aggInfos := make([]aggInfo, len(bat.Aggs))
 	for i := range aggInfos {
 		aggInfos[i].Op = bat.Aggs[i].GetOperatorId()
@@ -102,6 +106,7 @@ func (bat *Batch) MarshalBinary() ([]byte, error) {
 }
 
 func (bat *Batch) UnmarshalBinary(data []byte) error {
+	bat.PrintStack()
 	rbat := new(EncodeBatch)
 
 	if err := types.Decode(data, rbat); err != nil {
@@ -123,6 +128,7 @@ func (bat *Batch) UnmarshalBinary(data []byte) error {
 }
 
 func (bat *Batch) Shrink(sels []int64) {
+	bat.PrintStack()
 	for _, vec := range bat.Vecs {
 		vec.Shrink(sels, false)
 	}
@@ -130,6 +136,7 @@ func (bat *Batch) Shrink(sels []int64) {
 }
 
 func (bat *Batch) Shuffle(sels []int64, m *mpool.MPool) error {
+	bat.PrintStack()
 	if len(sels) > 0 {
 		mp := make(map[*vector.Vector]uint8)
 		for _, vec := range bat.Vecs {
@@ -170,10 +177,12 @@ func (bat *Batch) Prefetch(poses []int32, vecs []*vector.Vector) {
 }
 
 func (bat *Batch) SetAttributes(attrs []string) {
+	bat.PrintStack()
 	bat.Attrs = attrs
 }
 
 func (bat *Batch) SetVector(pos int32, vec *vector.Vector) {
+	bat.PrintStack()
 	bat.Vecs[pos] = vec
 }
 
@@ -187,14 +196,31 @@ func (bat *Batch) GetSubBatch(cols []string) *Batch {
 		mp[attr] = i
 	}
 	rbat := NewWithSize(len(cols))
+	rbat.Attrs = make([]string, len(bat.Attrs))
+	copy(rbat.Attrs, bat.Attrs)
 	for i, col := range cols {
+		if bat.Vecs == nil || len(bat.Vecs) <= mp[col] {
+			fmt.Printf("yyyy> %p %v %v %v %v %v\n", bat, bat.IsEmpty(), bat.Attrs, bat.Vecs, mp[col], bat.String())
+		}
 		rbat.Vecs[i] = bat.Vecs[mp[col]]
 	}
 	rbat.rowCount = bat.rowCount
 	return rbat
 }
 
+func (bat *Batch) PrintStack() {
+	return
+	if len(bat.Attrs) != 0 {
+		lastAttr := bat.Attrs[len(bat.Attrs)-1]
+		if ok, err := regexp.MatchString("__mo_cbkey.*timestamp.*raw_item", lastAttr); err == nil && ok {
+			fmt.Printf("xxxx> %p", bat)
+			debug.PrintStack()
+		}
+	}
+}
+
 func (bat *Batch) Clean(m *mpool.MPool) {
+	bat.PrintStack()
 	if bat == EmptyBatch {
 		return
 	}
@@ -237,6 +263,7 @@ func (bat *Batch) End() bool {
 }
 
 func (bat *Batch) CleanOnlyData() {
+	bat.PrintStack()
 	for _, vec := range bat.Vecs {
 		if vec != nil {
 			vec.CleanOnlyData()
@@ -279,6 +306,7 @@ func (bat *Batch) Dup(mp *mpool.MPool) (*Batch, error) {
 }
 
 func (bat *Batch) PreExtend(m *mpool.MPool, rows int) error {
+	bat.PrintStack()
 	for i := range bat.Vecs {
 		if err := bat.Vecs[i].PreExtend(rows, m); err != nil {
 			return err
@@ -288,6 +316,7 @@ func (bat *Batch) PreExtend(m *mpool.MPool, rows int) error {
 }
 
 func (bat *Batch) Append(ctx context.Context, mh *mpool.MPool, b *Batch) (*Batch, error) {
+	bat.PrintStack()
 	if bat == nil {
 		return b, nil
 	}
@@ -332,6 +361,7 @@ func (bat *Batch) GetCnt() int64 {
 }
 
 func (bat *Batch) ReplaceVector(oldVec *vector.Vector, newVec *vector.Vector) {
+	bat.PrintStack()
 	for i, vec := range bat.Vecs {
 		if vec == oldVec {
 			bat.SetVector(int32(i), newVec)
@@ -340,6 +370,7 @@ func (bat *Batch) ReplaceVector(oldVec *vector.Vector, newVec *vector.Vector) {
 }
 
 func (bat *Batch) AntiShrink(sels []int64) {
+	bat.PrintStack()
 	for _, vec := range bat.Vecs {
 		vec.Shrink(sels, true)
 	}
@@ -359,4 +390,15 @@ func (bat *Batch) DupJmAuxData() (ret *hashmap.JoinMap) {
 		bat.AuxData = nil
 	}
 	return
+}
+
+var varMap = sync.Map{}
+
+func SaveVar(addr uintptr) {
+	varMap.Store(addr, nil)
+}
+
+func HasVar(addr uintptr) bool {
+	_, ok := varMap.Load(addr)
+	return ok
 }
