@@ -145,7 +145,6 @@ func (txn *Transaction) dumpBatchLocked(offset int) error {
 
 	txn.hasS3Op.Store(true)
 	mp := make(map[[2]string][]*batch.Batch)
-	toFree := make(map[[2]string][]*batch.Batch)
 	for i := offset; i < len(txn.writes); i++ {
 		if txn.writes[i].tableId == catalog.MO_DATABASE_ID ||
 			txn.writes[i].tableId == catalog.MO_TABLES_ID ||
@@ -228,7 +227,7 @@ func (txn *Transaction) dumpBatchLocked(offset int) error {
 		}
 	}
 
- if offset == 0 {
+	if offset == 0 {
 		txn.workspaceSize = 0
 		writes := txn.writes[:0]
 		for i, write := range txn.writes {
