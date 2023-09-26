@@ -16,6 +16,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"math"
 	gotrace "runtime/trace"
 	"sync"
@@ -207,16 +208,17 @@ func (client *txnClient) New(
 	ctx context.Context,
 	minTS timestamp.Timestamp,
 	options ...TxnOption) (TxnOperator, error) {
+	fmt.Println("++++>", 1)
 	// we take a token from the limiter to control the number of transactions created per second.
 	_, task := gotrace.NewTask(context.TODO(), "transaction.New")
 	defer task.End()
 	client.limiter.Take()
-
+	fmt.Println("++++>", 2)
 	ts, err := client.determineTxnSnapshot(ctx, minTS)
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Println("++++>", 2.1)
 	txnMeta := txn.TxnMeta{}
 	txnMeta.ID = client.generator.Generate()
 	txnMeta.SnapshotTS = ts
@@ -234,18 +236,21 @@ func (client *txnClient) New(
 		client.sender,
 		txnMeta,
 		options...)
+	fmt.Println("++++>", 2.2)
 	op.timestampWaiter = client.timestampWaiter
 	op.AppendEventCallback(ClosedEvent,
 		client.updateLastCommitTS,
 		client.closeTxn)
-
+	fmt.Println("++++>", 3)
 	if err := client.openTxn(op); err != nil {
 		return nil, err
 	}
+	fmt.Println("++++>", 4)
 	if err := op.waitActive(ctx); err != nil {
 		_ = op.Rollback(ctx)
 		return nil, err
 	}
+	fmt.Println("++++>", 5)
 	return op, nil
 }
 
