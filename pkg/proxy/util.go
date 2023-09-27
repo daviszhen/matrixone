@@ -18,6 +18,8 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	logservicepb "github.com/matrixorigin/matrixone/pkg/pb/logservice"
+	"github.com/matrixorigin/matrixone/pkg/util"
 	"net"
 	"sort"
 
@@ -203,4 +205,19 @@ func containIP(ipNetList []*net.IPNet, ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+func dumpProxyConfig(cfg Config) (*logservicepb.ConfigData, error) {
+	defCfg := Config{}
+	defCfg.FillDefault()
+
+	items, err := util.DumpConfig(cfg, defCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	data := &logservicepb.ConfigData{
+		Content: items,
+	}
+	return data, err
 }

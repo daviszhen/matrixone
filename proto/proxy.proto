@@ -17,7 +17,17 @@
 syntax = "proto3";
 package proxy;
 option go_package = "github.com/matrixorigin/matrixone/pkg/pb/proxy";
+import "logservice.proto";
 
+// RequestLabel is the requested label from client.
 message RequestLabel {
   map<string, string> labels = 1;
 }
+
+message ProxyInfo{
+  //RequestLabel is the requested label from client.
+  RequestLabel RequestLabel = 1;
+
+  //ConfigData is the config item from proxy's configuration.
+  logservice.ConfigData ConfigData = 2;
+};

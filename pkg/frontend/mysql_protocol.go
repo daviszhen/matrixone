@@ -2727,7 +2727,7 @@ func (mp *MysqlProtocolImpl) receiveExtraInfo(rs goetty.IOSession) {
 		}
 	} else {
 		mp.SetSalt(extraInfo.Salt)
-		mp.GetSession().requestLabel = extraInfo.Label.Labels
+		mp.GetSession().requestLabel = extraInfo.Info.RequestLabel.GetLabels()
 		if extraInfo.InternalConn {
 			mp.GetSession().connType = ConnTypeInternal
 		} else {

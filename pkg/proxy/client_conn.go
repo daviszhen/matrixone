@@ -333,6 +333,7 @@ func (c *clientConn) connAndExec(cn *CNServer, stmt string, resp chan<- []byte) 
 
 // handleKillQuery handles the kill query event.
 func (c *clientConn) handleKillQuery(e *killQueryEvent, resp chan<- []byte) error {
+	//TODO: get CN server
 	cn, err := c.router.SelectByConnID(e.connID)
 	if err != nil {
 		c.log.Error("failed to select CN server", zap.Error(err))

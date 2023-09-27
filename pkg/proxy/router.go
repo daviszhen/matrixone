@@ -16,6 +16,7 @@ package proxy
 
 import (
 	"context"
+	"github.com/matrixorigin/matrixone/pkg/pb/logservice"
 	"time"
 
 	"github.com/fagongzi/goetty/v2"
@@ -80,6 +81,8 @@ type CNServer struct {
 	addr string
 	// internalConn indicates the connection is from internal network. Default is false,
 	internalConn bool
+
+	proxyConfigData *logservice.ConfigData
 }
 
 // Connect connects to backend server and returns IOSession.
@@ -93,11 +96,14 @@ func (s *CNServer) Connect() (goetty.IOSession, error) {
 		return nil, moerr.NewInternalErrorNoCtx("salt is empty")
 	}
 	info := &pb.ExtraInfo{
-		Salt: s.salt,
-		Label: pb.RequestLabel{
-			Labels: s.reqLabel.allLabels(),
-		},
+		Salt:         s.salt,
 		InternalConn: s.internalConn,
+		Info: pb.ProxyInfo{
+			RequestLabel: &pb.RequestLabel{
+				Labels: s.reqLabel.allLabels(),
+			},
+			ConfigData: s.proxyConfigData,
+		},
 	}
 	data, err := info.Encode()
 	if err != nil {
@@ -115,9 +121,10 @@ func (s *CNServer) Connect() (goetty.IOSession, error) {
 // Also, it can balance the load between CN servers so there is a
 // rebalancer in it.
 type router struct {
-	rebalancer *rebalancer
-	moCluster  clusterservice.MOCluster
-	test       bool
+	rebalancer      *rebalancer
+	moCluster       clusterservice.MOCluster
+	test            bool
+	proxyConfigData *logservice.ConfigData
 }
 
 var _ Router = (*router)(nil)
@@ -127,11 +134,13 @@ func newRouter(
 	mc clusterservice.MOCluster,
 	r *rebalancer,
 	test bool,
+	configData *logservice.ConfigData,
 ) Router {
 	return &router{
-		rebalancer: r,
-		moCluster:  mc,
-		test:       test,
+		rebalancer:      r,
+		moCluster:       mc,
+		test:            test,
+		proxyConfigData: configData,
 	}
 }
 
@@ -143,10 +152,11 @@ func (r *router) SelectByConnID(connID uint32) (*CNServer, error) {
 	}
 	// Return a new CNServer instance for temporary connection.
 	return &CNServer{
-		backendConnID: cn.backendConnID,
-		salt:          cn.salt,
-		uuid:          cn.uuid,
-		addr:          cn.addr,
+		backendConnID:   cn.backendConnID,
+		salt:            cn.salt,
+		uuid:            cn.uuid,
+		addr:            cn.addr,
+		proxyConfigData: r.proxyConfigData,
 	}, nil
 }
 
@@ -157,10 +167,11 @@ func (r *router) selectForSuperTenant(c clientInfo, filter func(string) bool) []
 	disttae.SelectForSuperTenant(c.labelInfo.genSelector(), c.username, filter,
 		func(s *metadata.CNService) {
 			cns = append(cns, &CNServer{
-				reqLabel: c.labelInfo,
-				cnLabel:  s.Labels,
-				uuid:     s.ServiceID,
-				addr:     s.SQLAddress,
+				reqLabel:        c.labelInfo,
+				cnLabel:         s.Labels,
+				uuid:            s.ServiceID,
+				addr:            s.SQLAddress,
+				proxyConfigData: r.proxyConfigData,
 			})
 		})
 	return cns
@@ -172,10 +183,11 @@ func (r *router) selectForCommonTenant(c clientInfo, filter func(string) bool) [
 	var cns []*CNServer
 	disttae.SelectForCommonTenant(c.labelInfo.genSelector(), filter, func(s *metadata.CNService) {
 		cns = append(cns, &CNServer{
-			reqLabel: c.labelInfo,
-			cnLabel:  s.Labels,
-			uuid:     s.ServiceID,
-			addr:     s.SQLAddress,
+			reqLabel:        c.labelInfo,
+			cnLabel:         s.Labels,
+			uuid:            s.ServiceID,
+			addr:            s.SQLAddress,
+			proxyConfigData: r.proxyConfigData,
 		})
 	})
 	return cns

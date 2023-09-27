@@ -32,7 +32,7 @@ type ExtraInfo struct {
 	// it is internal.
 	InternalConn bool
 	// Label is the requested label from client.
-	Label RequestLabel
+	Info ProxyInfo
 }
 
 // Encode encodes the ExtraInfo and return bytes.
@@ -42,7 +42,7 @@ func (e *ExtraInfo) Encode() ([]byte, error) {
 	}
 	var err error
 	var labelData []byte
-	labelData, err = e.Label.Marshal()
+	labelData, err = e.Info.Marshal()
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (e *ExtraInfo) Decode(reader *bufio.Reader) error {
 		if err = binary.Read(buf, binary.LittleEndian, labelData); err != nil {
 			return err
 		}
-		if err = e.Label.Unmarshal(labelData); err != nil {
+		if err = e.Info.Unmarshal(labelData); err != nil {
 			return err
 		}
 	}
