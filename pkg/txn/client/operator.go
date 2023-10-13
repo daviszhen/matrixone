@@ -19,8 +19,10 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	gotrace "runtime/trace"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -185,6 +187,10 @@ type txnOperator struct {
 	clock                clock.Clock
 	createAt             time.Time
 	commitAt             time.Time
+	commitEnter          atomic.Int64
+	commitExit           atomic.Int64
+	rollbackEnter        atomic.Int64
+	rollbackExit         atomic.Int64
 }
 
 func newTxnOperator(
@@ -450,6 +456,8 @@ func (tc *txnOperator) Commit(ctx context.Context) error {
 
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Commit")
 	defer task.End()
+	tc.enterCommit()
+	defer tc.exitCommit()
 	util.LogTxnCommit(tc.getTxnMeta(false))
 
 	if tc.option.readyOnly {
@@ -474,6 +482,8 @@ func (tc *txnOperator) Rollback(ctx context.Context) error {
 
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Rollback")
 	defer task.End()
+	tc.enterRollback()
+	defer tc.exitRollback()
 	txnMeta := tc.getTxnMeta(false)
 	util.LogTxnRollback(txnMeta)
 	if tc.workspace != nil && !tc.cannotCleanWorkspace {
@@ -1041,4 +1051,28 @@ func (tc *txnOperator) getWaitLocksLocked() []Lock {
 		values = append(values, l)
 	}
 	return values
+}
+
+func (tc *txnOperator) enterCommit() {
+	tc.commitEnter.Add(1)
+}
+
+func (tc *txnOperator) exitCommit() {
+	tc.commitEnter.Add(1)
+}
+
+func (tc *txnOperator) enterRollback() {
+	tc.rollbackEnter.Add(1)
+}
+
+func (tc *txnOperator) exitRollback() {
+	tc.rollbackExit.Add(1)
+}
+
+func (tc *txnOperator) counter() string {
+	return fmt.Sprintf("commitEnter:%d commitExit:%d rollbackEnter:%d rollbackExit:%d",
+		tc.commitEnter.Load(),
+		tc.commitExit.Load(),
+		tc.rollbackEnter.Load(),
+		tc.rollbackExit.Load())
 }
