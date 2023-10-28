@@ -18,7 +18,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -152,6 +154,7 @@ func getExternalStats(node *plan.Node, builder *QueryBuilder) *Stats {
 	param := &tree.ExternParam{}
 	err := json.Unmarshal([]byte(node.TableDef.Createsql), param)
 	if err != nil || param.Local || param.ScanType == tree.S3 {
+		fmt.Fprintln(os.Stderr, "ssss", err)
 		return DefaultHugeStats()
 	}
 

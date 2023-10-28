@@ -16,6 +16,8 @@ package plan
 
 import (
 	"context"
+	"fmt"
+	"os"
 	gotrace "runtime/trace"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -161,7 +163,9 @@ func BuildPlan(ctx CompilerContext, stmt tree.Statement, isPrepareStmt bool) (*P
 	case *tree.Deallocate:
 		return buildDeallocate(stmt, ctx)
 	case *tree.Load:
-		return buildLoad(stmt, ctx, isPrepareStmt)
+		pl, err := buildLoad(stmt, ctx, isPrepareStmt)
+		fmt.Fprintln(os.Stderr, "uuuu", err)
+		return pl, err
 	case *tree.PrepareStmt, *tree.PrepareString:
 		return buildPrepare(stmt, ctx)
 	case *tree.Do, *tree.Declare:

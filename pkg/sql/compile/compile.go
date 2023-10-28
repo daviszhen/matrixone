@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"os"
 	"runtime"
 	gotrace "runtime/trace"
 	"sort"
@@ -1512,6 +1513,7 @@ func (c *Compile) compileExternScan(ctx context.Context, n *plan.Node) ([]*Scope
 	if n.ExternScan == nil || n.ExternScan.Type != tree.INLINE {
 		err := json.Unmarshal([]byte(n.TableDef.Createsql), param)
 		if err != nil {
+			fmt.Fprintln(os.Stderr, "vvvv", err)
 			return nil, err
 		}
 	} else {

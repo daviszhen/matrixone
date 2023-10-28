@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +74,10 @@ func String(_ any, buf *bytes.Buffer) {
 func Prepare(proc *process.Process, arg any) error {
 	_, span := trace.Start(proc.Ctx, "ExternalPrepare")
 	defer span.End()
+	fmt.Fprintln(os.Stderr, "enter Prepare")
+	defer func() {
+		fmt.Fprintln(os.Stderr, "exit Prepare")
+	}()
 	param := arg.(*Argument).Es
 	if proc.Lim.MaxMsgSize == 0 {
 		param.maxBatchSize = uint64(morpc.GetMessageSize())
@@ -83,6 +88,7 @@ func Prepare(proc *process.Process, arg any) error {
 	if param.Extern == nil {
 		param.Extern = &tree.ExternParam{}
 		if err := json.Unmarshal([]byte(param.CreateSql), param.Extern); err != nil {
+			fmt.Fprintln(os.Stderr, "a1", err)
 			return err
 		}
 		if err := plan2.InitS3Param(param.Extern); err != nil {
@@ -121,6 +127,10 @@ func Prepare(proc *process.Process, arg any) error {
 func Call(idx int, proc *process.Process, arg any, isFirst bool, isLast bool) (process.ExecStatus, error) {
 	ctx, span := trace.Start(proc.Ctx, "ExternalCall")
 	defer span.End()
+	fmt.Fprintln(os.Stderr, "enter Call")
+	defer func() {
+		fmt.Fprintln(os.Stderr, "exit Call")
+	}()
 	select {
 	case <-proc.Ctx.Done():
 		proc.SetInputBatch(nil)
@@ -486,6 +496,7 @@ func getBatchData(param *ExternalParam, plh *ParseLineHandler, proc *process.Pro
 				return nil, moerr.NewInternalError(proc.Ctx, ColumnCntLargerErrorInfo)
 			}
 		}
+		fmt.Fprintln(os.Stderr, "==>\n", line)
 		err = getOneRowData(bat, line, rowIdx, param, proc.GetMPool())
 		if err != nil {
 			return nil, err
@@ -770,6 +781,7 @@ func transJsonObject2Lines(ctx context.Context, str string, attrs []string, cols
 	if err != nil {
 		logutil.Errorf("json unmarshal err:%v", err)
 		param.prevStr = str
+		fmt.Fprintln(os.Stderr, "a2", err)
 		return nil, err
 	}
 	if len(jsonMap) < getRealAttrCnt(attrs, cols) {
@@ -792,6 +804,7 @@ func transJsonObject2Lines(ctx context.Context, str string, attrs []string, cols
 			var bj bytejson.ByteJson
 			err = bj.UnmarshalObject(val)
 			if err != nil {
+				fmt.Fprintln(os.Stderr, "a3", err)
 				return nil, err
 			}
 			dt, err := bj.Marshal()
@@ -839,6 +852,7 @@ func transJsonArray2Lines(ctx context.Context, str string, attrs []string, cols 
 		var bj bytejson.ByteJson
 		err = bj.UnmarshalObject(val)
 		if err != nil {
+			fmt.Fprintln(os.Stderr, "a4", err)
 			return nil, err
 		}
 		dt, err := bj.Marshal()
@@ -881,6 +895,7 @@ func getStrFromLine(line []string, colIdx int, param *ExternalParam) string {
 
 func getOneRowData(bat *batch.Batch, line []string, rowIdx int, param *ExternalParam, mp *mpool.MPool) error {
 	var buf bytes.Buffer
+	fmt.Fprintln(os.Stderr, param.Attrs)
 	for colIdx := range param.Attrs {
 		vec := bat.Vecs[colIdx]
 		if param.Cols[colIdx].Hidden {
@@ -913,6 +928,8 @@ func getOneRowData(bat *batch.Batch, line []string, rowIdx int, param *ExternalP
 			buf.Reset()
 			continue
 		}
+
+		fmt.Fprintln(os.Stderr, param.Attrs[colIdx], id.String(), field)
 
 		switch id {
 		case types.T_bool:

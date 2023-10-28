@@ -185,7 +185,7 @@ type TailParameter struct {
 	//Ignored lines
 	IgnoredLines uint64
 	//col_name_or_user_var
-	ColumnList []LoadColumn
+	ColumnList []LoadColumn `json:"-"`
 	//set col_name
 	Assignments UpdateExprs
 }

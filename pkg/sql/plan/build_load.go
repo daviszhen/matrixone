@@ -16,6 +16,8 @@ package plan
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -25,6 +27,10 @@ import (
 )
 
 func buildLoad(stmt *tree.Load, ctx CompilerContext, isPrepareStmt bool) (*Plan, error) {
+	fmt.Fprintln(os.Stderr, "enter buildLoad")
+	defer func() {
+		fmt.Fprintln(os.Stderr, "exit buildLoad")
+	}()
 	if stmt.Param.Tail.Lines != nil && stmt.Param.Tail.Lines.StartingBy != "" {
 		return nil, moerr.NewBadConfig(ctx.GetContext(), "load operation do not support StartingBy field.")
 	}
@@ -69,7 +75,6 @@ func buildLoad(stmt *tree.Load, ctx CompilerContext, isPrepareStmt bool) (*Plan,
 		return nil, err
 	}
 
-	stmt.Param.Tail.ColumnList = nil
 	stmt.Param.LoadFile = true
 	if stmt.Param.ScanType != tree.INLINE {
 		json_byte, err := json.Marshal(stmt.Param)
@@ -78,6 +83,8 @@ func buildLoad(stmt *tree.Load, ctx CompilerContext, isPrepareStmt bool) (*Plan,
 		}
 		tableDef.Createsql = string(json_byte)
 	}
+
+	fmt.Fprintln(os.Stderr, "xxxx")
 
 	builder := NewQueryBuilder(plan.Query_SELECT, ctx, isPrepareStmt)
 	bindCtx := NewBindContext(builder, nil)
@@ -111,8 +118,10 @@ func buildLoad(stmt *tree.Load, ctx CompilerContext, isPrepareStmt bool) (*Plan,
 	}
 	isInsertWithoutAutoPkCol, err := getProjectNode(stmt, ctx, projectNode, tableDef)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "yyyy", err)
 		return nil, err
 	}
+	fmt.Fprintln(os.Stderr, "zzzz")
 	if stmt.Param.Parallel && (getCompressType(stmt.Param, fileName) != tree.NOCOMPRESS || stmt.Local) {
 		projectNode.ProjectList = makeCastExpr(stmt, fileName, tableDef)
 	}
@@ -185,6 +194,7 @@ func checkFileExist(param *tree.ExternParam, ctx CompilerContext) (string, error
 }
 
 func getProjectNode(stmt *tree.Load, ctx CompilerContext, node *plan.Node, tableDef *TableDef) (bool, error) {
+	fmt.Fprintln(os.Stderr, "enter getProjectNode")
 	tblName := string(stmt.Table.ObjectName)
 	colToIndex := make(map[int32]string, 0)
 	isInsertWithoutAutoPkCol := false
@@ -221,12 +231,16 @@ func getProjectNode(stmt *tree.Load, ctx CompilerContext, node *plan.Node, table
 		}
 		projectVec[i] = tmp
 	}
+	for k, v := range colToIndex {
+		fmt.Fprintln(os.Stderr, k, v)
+	}
 	for i := 0; i < len(tableDef.Cols); i++ {
 		if v, ok := colToIndex[int32(i)]; ok {
 			node.ProjectList[tableDef.Name2ColIndex[v]] = projectVec[i]
 		}
 	}
 	var tmp *plan.Expr
+	var err error
 	//var err error
 	for i := 0; i < len(tableDef.Cols); i++ {
 		if node.ProjectList[i] != nil {
@@ -234,13 +248,23 @@ func getProjectNode(stmt *tree.Load, ctx CompilerContext, node *plan.Node, table
 		}
 
 		if tableDef.Cols[i].Default.Expr == nil || tableDef.Cols[i].Default.NullAbility {
-			tmp = makePlan2NullConstExprWithType()
+			tmp, err = getDefaultExpr(ctx.GetContext(), tableDef.Cols[i])
+			if err != nil {
+				return false, err
+			}
 		} else {
 			tmp = &plan.Expr{
 				Typ:  tableDef.Cols[i].Default.Expr.Typ,
 				Expr: tableDef.Cols[i].Default.Expr.Expr,
 			}
 		}
+
+		//cast default value
+		tmp, err = forceCastExpr(ctx.GetContext(), tmp, tableDef.Cols[i].Typ)
+		if err != nil {
+			return false, err
+		}
+
 		node.ProjectList[i] = tmp
 
 		if tableDef.Cols[i].Typ.AutoIncr && tableDef.Cols[i].Name == tableDef.Pkey.PkeyColName {
