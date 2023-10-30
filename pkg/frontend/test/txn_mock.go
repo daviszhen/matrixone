@@ -465,6 +465,18 @@ func (mr *MockTxnOperatorMockRecorder) Rollback(ctx interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Rollback", reflect.TypeOf((*MockTxnOperator)(nil).Rollback), ctx)
 }
 
+// SetLastSql mocks base method.
+func (m *MockTxnOperator) SetLastSql(sql string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLastSql", sql)
+}
+
+// SetLastSql indicates an expected call of SetLastSql.
+func (mr *MockTxnOperatorMockRecorder) SetLastSql(sql interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLastSql", reflect.TypeOf((*MockTxnOperator)(nil).SetLastSql), sql)
+}
+
 // Snapshot mocks base method.
 func (m *MockTxnOperator) Snapshot() ([]byte, error) {
 	m.ctrl.T.Helper()

@@ -181,6 +181,7 @@ type txnOperator struct {
 		lockSeq   uint64
 		waitLocks map[uint64]Lock
 	}
+
 	cannotCleanWorkspace bool
 	workspace            Workspace
 	timestampWaiter      TimestampWaiter
@@ -191,6 +192,8 @@ type txnOperator struct {
 	commitExit           atomic.Int64
 	rollbackEnter        atomic.Int64
 	rollbackExit         atomic.Int64
+	lastSql              atomic.Value
+
 }
 
 func newTxnOperator(
@@ -1075,4 +1078,8 @@ func (tc *txnOperator) counter() string {
 		tc.commitExit.Load(),
 		tc.rollbackEnter.Load(),
 		tc.rollbackExit.Load())
+}
+
+func (tc *txnOperator) SetLastSql(sql string) {
+	tc.lastSql.Store(sql)
 }
