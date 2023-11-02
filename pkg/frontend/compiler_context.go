@@ -52,6 +52,10 @@ type TxnCompilerContext struct {
 }
 
 var _ plan2.CompilerContext = &TxnCompilerContext{}
+var _ process.GetStats = &TxnCompilerContext{}
+func (tcc *TxnCompilerContext) Stats(db,table string) bool{
+	return tcc.Stats(&plan2.Obj{db,table})
+}
 
 func (tcc *TxnCompilerContext) GetStatsCache() *plan2.StatsCache {
 	tcc.mu.Lock()

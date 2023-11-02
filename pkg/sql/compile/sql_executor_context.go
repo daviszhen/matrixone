@@ -75,7 +75,7 @@ func (c *compilerContext) ResolveAccountIds(accountNames []string) ([]uint32, er
 }
 
 func (c *compilerContext) Stats(obj *plan.ObjectRef) bool {
-	return false
+	return c.proc.GetStatsFunc.Stats(obj.db,obj.tablename)
 }
 
 func (c *compilerContext) GetStatsCache() *plan.StatsCache {

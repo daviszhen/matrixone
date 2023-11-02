@@ -327,6 +327,8 @@ type Process struct {
 	Hakeeper logservice.CNHAKeeperClient
 
 	UdfService udf.Service
+
+	GetStatsFunc GetStats
 }
 
 type vectorPool struct {
@@ -340,6 +342,11 @@ type vectorPool struct {
 type sqlHelper interface {
 	GetCompilerContext() any
 	ExecSql(string) ([]interface{}, error)
+}
+
+
+type GetStats interface {
+    Stats(db,table string) bool
 }
 
 type WrapCs struct {
