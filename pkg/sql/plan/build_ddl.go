@@ -2487,6 +2487,15 @@ func getForeignKeyData(ctx CompilerContext, tableDef *TableDef, def *tree.Foreig
 		fkDbName = ctx.DefaultDatabase()
 	}
 
+	//self reference
+	/*
+		if fkDbName == tableDef.Database && fkTableName == tableDef.Name {
+			check fk columns in tableDef.Cols
+		}else{
+			...
+		}
+	*/
+
 	_, tableRef := ctx.Resolve(fkDbName, fkTableName)
 	if tableRef == nil {
 		return nil, moerr.NewNoSuchTable(ctx.GetContext(), ctx.DefaultDatabase(), fkTableName)
