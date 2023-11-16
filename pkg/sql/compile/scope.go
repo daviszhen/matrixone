@@ -68,6 +68,7 @@ func (s *Scope) Run(c *Compile) (err error) {
 		if e := recover(); e != nil {
 			err = moerr.ConvertPanicError(s.Proc.Ctx, e)
 			getLogger().Error("panic in scope run",
+				zap.String("sql", c.sql),
 				zap.String("error", err.Error()))
 		}
 		p.Cleanup(s.Proc, err != nil, err)
@@ -109,18 +110,20 @@ func (s *Scope) SetContextRecursively(ctx context.Context) {
 
 // MergeRun range and run the scope's pre-scopes by go-routine, and finally run itself to do merge work.
 func (s *Scope) MergeRun(c *Compile) error {
-	errChan := make(chan error, len(s.PreScopes))
 	var wg sync.WaitGroup
+
+	errChan := make(chan error, len(s.PreScopes))
 	for i := range s.PreScopes {
-		scope := s.PreScopes[i]
 		wg.Add(1)
+		scope := s.PreScopes[i]
 		ants.Submit(func() {
 			defer func() {
 				if e := recover(); e != nil {
 					err := moerr.ConvertPanicError(c.ctx, e)
 					getLogger().Error("panic in merge run run",
+						zap.String("sql", c.sql),
 						zap.String("error", err.Error()))
-					wg.Done()
+					errChan <- err
 				}
 				wg.Done()
 			}()
@@ -513,8 +516,6 @@ func (s *Scope) JoinRun(c *Compile) error {
 			probeScope := c.newJoinProbeScope(s, nil)
 			s.PreScopes = append(s.PreScopes, probeScope)
 		}
-		// this is for shuffle join probe scope
-		s.Proc.Reg.MergeReceivers[0].Ch = make(chan *batch.Batch, shuffleJoinProbeChannelBufferSize)
 		return s.MergeRun(c)
 	}
 
@@ -829,8 +830,8 @@ func (s *Scope) notifyAndReceiveFromRemote(errChan chan error) {
 			message := cnclient.AcquireMessage()
 			{
 				message.Id = streamSender.ID()
-				message.Cmd = pbpipeline.PrepareDoneNotifyMessage
-				message.Sid = pbpipeline.Last
+				message.Cmd = pbpipeline.Method_PrepareDoneNotifyMessage
+				message.Sid = pbpipeline.Status_Last
 				message.Uuid = info.Uuid[:]
 			}
 			if errSend := streamSender.Send(s.Proc.Ctx, message); errSend != nil {
@@ -893,9 +894,9 @@ func receiveMsgAndForward(proc *process.Process, receiveCh chan morpc.Message, f
 		}
 
 		switch m.GetSid() {
-		case pbpipeline.WaitingNext:
+		case pbpipeline.Status_WaitingNext:
 			continue
-		case pbpipeline.Last:
+		case pbpipeline.Status_Last:
 			if m.Checksum != crc32.ChecksumIEEE(dataBuffer) {
 				return moerr.NewInternalError(proc.Ctx, "Packages delivered by morpc is broken")
 			}
