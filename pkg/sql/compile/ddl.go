@@ -524,7 +524,9 @@ func (s *Scope) AlterTableInplace(c *Compile) error {
 		if err != nil {
 			return err
 		}
-		err = s.addRefChildTbl(c, fkRelation, tblId)
+		//TODO: fixme
+		panic("TODO:fixme")
+		err = s.addRefChildTbl(c, fkRelation, tblId, "", "")
 		if err != nil {
 			return err
 		}
@@ -716,6 +718,7 @@ func (s *Scope) CreateTable(c *Compile) error {
 				oldCt = ct
 			}
 		}
+		//1. update fk parent table in current tableDef
 		newFkeys := make([]*plan.ForeignKeyDef, len(qry.GetTableDef().Fkeys))
 		for i, fkey := range qry.GetTableDef().Fkeys {
 			newDef := &plan.ForeignKeyDef{
@@ -725,11 +728,20 @@ func (s *Scope) CreateTable(c *Compile) error {
 				ForeignCols: make([]uint64, len(fkey.ForeignCols)),
 				OnDelete:    fkey.OnDelete,
 				OnUpdate:    fkey.OnUpdate,
+				ParentTable: &plan.ParentTable{
+					DatabaseName: fkey.ParentTable.DatabaseName,
+					TableName:    fkey.ParentTable.TableName,
+					ColNames:     make([]string, len(fkey.ParentTable.ColNames)),
+				},
+				ColNames: make([]string, len(fkey.ColNames)),
 			}
 			copy(newDef.ForeignCols, fkey.ForeignCols)
 			for idx, colName := range qry.GetFkCols()[i].Cols {
 				newDef.Cols[idx] = colNameToId[colName]
 			}
+			//copy
+			copy(newDef.ColNames, fkey.ColNames)
+			copy(newDef.ParentTable.ColNames, fkey.ParentTable.ColNames)
 			newFkeys[i] = newDef
 		}
 		// remove old fk settings
@@ -754,7 +766,7 @@ func (s *Scope) CreateTable(c *Compile) error {
 			return err
 		}
 
-		// need to append TableId to parent's TableDef.RefChildTbls
+		//2. need to append TableId to parent's TableDef.RefChildTbls
 		for i, fkTableName := range fkTables {
 			fkDbName := fkDbs[i]
 			fkDbSource, err := c.e.Database(c.ctx, fkDbName, c.proc.TxnOperator)
@@ -775,7 +787,12 @@ func (s *Scope) CreateTable(c *Compile) error {
 				)
 				return err
 			}
-			err = s.addRefChildTbl(c, fkRelation, tblId)
+			//add current table to parent's children table
+			needSavedTableId := tblId
+			if plan2.IsFkSelfRefer(fkDbName, fkTableName, dbName, tblName) {
+				needSavedTableId = 0
+			}
+			err = s.addRefChildTbl(c, fkRelation, needSavedTableId, dbName, tblName)
 			if err != nil {
 				getLogger().Info("createTable",
 					zap.String("databaseName", c.db),
@@ -1176,7 +1193,7 @@ func makeNewCreateConstraint(oldCt *engine.ConstraintDef, c engine.Constraint) (
 	return oldCt, nil
 }
 
-func (s *Scope) addRefChildTbl(c *Compile, fkRelation engine.Relation, tblId uint64) error {
+func (s *Scope) addRefChildTbl(c *Compile, fkRelation engine.Relation, tblId uint64, dbName, tableName string) error {
 	fkTableDef, err := fkRelation.TableDefs(c.ctx)
 	if err != nil {
 		return err
@@ -1198,6 +1215,10 @@ func (s *Scope) addRefChildTbl(c *Compile, fkRelation engine.Relation, tblId uin
 		oldRefChildDef = &engine.RefChildTableDef{}
 	}
 	oldRefChildDef.Tables = append(oldRefChildDef.Tables, tblId)
+	oldRefChildDef.ChildrenTables = append(oldRefChildDef.ChildrenTables, &plan.ChildTable{
+		DatabaseName: dbName,
+		TableName:    tableName,
+	})
 	newCt, err := makeNewCreateConstraint(oldCt, oldRefChildDef)
 	if err != nil {
 		return err
@@ -1633,6 +1654,7 @@ func planDefsToExeDefs(tableDef *plan.TableDef) ([]engine.TableDef, error) {
 	if len(tableDef.RefChildTbls) > 0 {
 		c.Cts = append(c.Cts, &engine.RefChildTableDef{
 			Tables: tableDef.RefChildTbls,
+			ChildrenTables: tableDef.ChildrenTables,
 		})
 	}
 

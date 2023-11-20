@@ -387,6 +387,7 @@ func buildDeletePlans(ctx CompilerContext, builder *QueryBuilder, bindCtx *BindC
 		baseProject := getProjectionByLastNode(builder, lastNodeId)
 
 		for _, tableId := range delCtx.tableDef.RefChildTbls {
+			//TODO: skip self reference
 			// stmt: delete p, c from child_tbl c join parent_tbl p on c.pid = p.id , skip
 			if _, existInDelTable := delCtx.allDelTableIDs[tableId]; existInDelTable {
 				continue
@@ -914,48 +915,51 @@ func makeInsertPlan(
 	if !isFkRecursionCall && len(tableDef.Fkeys) > 0 {
 		lastNodeId = appendSinkScanNode(builder, bindCtx, sourceStep)
 
-		lastNodeId, err = appendJoinNodeForParentFkCheck(builder, bindCtx, tableDef, lastNodeId)
+		lastNodeId, err = appendJoinNodeForParentFkCheck(builder, bindCtx, objRef, tableDef, lastNodeId)
 		if err != nil {
 			return err
 		}
-		lastNode := builder.qry.Nodes[lastNodeId]
-		beginIdx := len(lastNode.ProjectList) - len(tableDef.Fkeys)
+		//skip fk self refer
+		if lastNodeId >= 0 {
+			lastNode := builder.qry.Nodes[lastNodeId]
+			beginIdx := len(lastNode.ProjectList) - len(tableDef.Fkeys)
 
-		//get filter exprs
-		rowIdTyp := types.T_Rowid.ToType()
-		filters := make([]*Expr, len(tableDef.Fkeys))
-		errExpr := makePlan2StringConstExprWithType("Cannot add or update a child row: a foreign key constraint fails")
-		for i := range tableDef.Fkeys {
-			colExpr := &plan.Expr{
-				Typ: makePlan2Type(&rowIdTyp),
-				Expr: &plan.Expr_Col{
-					Col: &plan.ColRef{
-						ColPos: int32(beginIdx + i),
-						//Name:   catalog.Row_ID,
+			//get filter exprs
+			rowIdTyp := types.T_Rowid.ToType()
+			filters := make([]*Expr, len(tableDef.Fkeys))
+			errExpr := makePlan2StringConstExprWithType("Cannot add or update a child row: a foreign key constraint fails")
+			for i := range tableDef.Fkeys {
+				colExpr := &plan.Expr{
+					Typ: makePlan2Type(&rowIdTyp),
+					Expr: &plan.Expr_Col{
+						Col: &plan.ColRef{
+							ColPos: int32(beginIdx + i),
+							//Name:   catalog.Row_ID,
+						},
 					},
-				},
+				}
+				nullCheckExpr, err := bindFuncExprImplByPlanExpr(builder.GetContext(), "isnotnull", []*Expr{colExpr})
+				if err != nil {
+					return err
+				}
+				filterExpr, err := bindFuncExprImplByPlanExpr(builder.GetContext(), "assert", []*Expr{nullCheckExpr, errExpr})
+				if err != nil {
+					return err
+				}
+				filters[i] = filterExpr
 			}
-			nullCheckExpr, err := bindFuncExprImplByPlanExpr(builder.GetContext(), "isnotnull", []*Expr{colExpr})
-			if err != nil {
-				return err
-			}
-			filterExpr, err := bindFuncExprImplByPlanExpr(builder.GetContext(), "assert", []*Expr{nullCheckExpr, errExpr})
-			if err != nil {
-				return err
-			}
-			filters[i] = filterExpr
-		}
 
-		// append filter node
-		filterNode := &Node{
-			NodeType:    plan.Node_FILTER,
-			Children:    []int32{lastNodeId},
-			FilterList:  filters,
-			ProjectList: getProjectionByLastNode(builder, lastNodeId),
-		}
-		lastNodeId = builder.appendNode(filterNode, bindCtx)
+			// append filter node
+			filterNode := &Node{
+				NodeType:    plan.Node_FILTER,
+				Children:    []int32{lastNodeId},
+				FilterList:  filters,
+				ProjectList: getProjectionByLastNode(builder, lastNodeId),
+			}
+			lastNodeId = builder.appendNode(filterNode, bindCtx)
 
-		builder.appendStep(lastNodeId)
+			builder.appendStep(lastNodeId)
+		}
 	}
 
 	isUpdate := updateColLength > 0
@@ -1805,7 +1809,7 @@ func appendPreDeleteNode(builder *QueryBuilder, bindCtx *BindContext, objRef *Ob
 	return builder.appendNode(preDeleteNode, bindCtx)
 }
 
-func appendJoinNodeForParentFkCheck(builder *QueryBuilder, bindCtx *BindContext, tableDef *TableDef, baseNodeId int32) (int32, error) {
+func appendJoinNodeForParentFkCheck(builder *QueryBuilder, bindCtx *BindContext, objRef *ObjectRef, tableDef *TableDef, baseNodeId int32) (int32, error) {
 	typMap := make(map[string]*plan.Type)
 	id2name := make(map[uint64]string)
 	name2pos := make(map[string]int)
@@ -1856,6 +1860,11 @@ func appendJoinNodeForParentFkCheck(builder *QueryBuilder, bindCtx *BindContext,
 
 	lastNodeId := baseNodeId
 	for _, fk := range tableDef.Fkeys {
+		if IsFkSelfRefer(fk.ParentTable.DatabaseName, fk.ParentTable.TableName, objRef.SchemaName, tableDef.Name) {
+			//
+			continue
+		}
+
 		fkeyId2Idx := make(map[uint64]int)
 		for i, colId := range fk.ForeignCols {
 			fkeyId2Idx[colId] = i
@@ -1945,6 +1954,11 @@ func appendJoinNodeForParentFkCheck(builder *QueryBuilder, bindCtx *BindContext,
 			OnList:      joinConds,
 			ProjectList: projectList,
 		}, bindCtx)
+	}
+
+	if lastNodeId == baseNodeId {
+		//no fk
+		return -1, nil
 	}
 
 	return lastNodeId, nil
