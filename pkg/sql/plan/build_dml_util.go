@@ -1860,7 +1860,7 @@ func appendJoinNodeForParentFkCheck(builder *QueryBuilder, bindCtx *BindContext,
 
 	lastNodeId := baseNodeId
 	for _, fk := range tableDef.Fkeys {
-		if IsFkSelfRefer(fk.ParentTable.DatabaseName, fk.ParentTable.TableName, objRef.SchemaName, tableDef.Name) {
+		if TableIdIsFkSelfRefer(fk.ForeignTbl) {
 			//
 			continue
 		}

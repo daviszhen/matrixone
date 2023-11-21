@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -728,20 +729,34 @@ func (s *Scope) CreateTable(c *Compile) error {
 				ForeignCols: make([]uint64, len(fkey.ForeignCols)),
 				OnDelete:    fkey.OnDelete,
 				OnUpdate:    fkey.OnUpdate,
-				ParentTable: &plan.ParentTable{
-					DatabaseName: fkey.ParentTable.DatabaseName,
-					TableName:    fkey.ParentTable.TableName,
-					ColNames:     make([]string, len(fkey.ParentTable.ColNames)),
-				},
-				ColNames: make([]string, len(fkey.ColNames)),
 			}
-			copy(newDef.ForeignCols, fkey.ForeignCols)
+			if plan2.TableIdIsFkSelfRefer(fkey.ForeignTbl) {
+				//fk self refer
+				//cn will add rowid ahead. so the column id will be changed.
+				//so, the foreign cols should be changed correspondingly.
+				colIdToNameBeforeChanged := make(map[uint64]string)
+				for _, col := range qry.GetTableDef().GetCols() {
+					fmt.Fprintf(os.Stderr, "colId %v -> colName %v\n", col.ColId, col.Name)
+					colIdToNameBeforeChanged[col.ColId] = col.Name
+				}
+				fmt.Fprintf(os.Stderr, "colNameToId: %v\n", colNameToId)
+				fmt.Fprintf(os.Stderr, "colIdToNameBeforeChanged: %v\n", colIdToNameBeforeChanged)
+				//old fk self refer column id -> new fk self refer column id
+				for i2, fkColIdBeforeChanged := range fkey.ForeignCols {
+					fmt.Fprintf(os.Stderr, "fkColIdBeforeChanged: %v\n", fkColIdBeforeChanged)
+					fmt.Fprintf(os.Stderr, "colIdToNameBeforeChanged[fkColIdBeforeChanged]: %v\n", colIdToNameBeforeChanged[fkColIdBeforeChanged])
+					fmt.Fprintf(os.Stderr, "colNameToId[colIdToNameBeforeChanged[fkColIdBeforeChanged]]: %v\n", colNameToId[colIdToNameBeforeChanged[fkColIdBeforeChanged]])
+					//colIdToNameBeforeChanged[fkColIdBeforeChanged]: column name of old fk self refer
+					//colNameToId[colIdToNameBeforeChanged[fkColIdBeforeChanged]]: new column id of column name
+					newDef.ForeignCols[i2] = colNameToId[colIdToNameBeforeChanged[fkColIdBeforeChanged]]
+				}
+			} else {
+				//just copy when the fk refers to other tables.
+				copy(newDef.ForeignCols, fkey.ForeignCols)
+			}
 			for idx, colName := range qry.GetFkCols()[i].Cols {
 				newDef.Cols[idx] = colNameToId[colName]
 			}
-			//copy
-			copy(newDef.ColNames, fkey.ColNames)
-			copy(newDef.ParentTable.ColNames, fkey.ParentTable.ColNames)
 			newFkeys[i] = newDef
 		}
 		// remove old fk settings
@@ -1215,10 +1230,6 @@ func (s *Scope) addRefChildTbl(c *Compile, fkRelation engine.Relation, tblId uin
 		oldRefChildDef = &engine.RefChildTableDef{}
 	}
 	oldRefChildDef.Tables = append(oldRefChildDef.Tables, tblId)
-	oldRefChildDef.ChildrenTables = append(oldRefChildDef.ChildrenTables, &plan.ChildTable{
-		DatabaseName: dbName,
-		TableName:    tableName,
-	})
 	newCt, err := makeNewCreateConstraint(oldCt, oldRefChildDef)
 	if err != nil {
 		return err
@@ -1352,6 +1363,10 @@ func (s *Scope) TruncateTable(c *Compile) error {
 
 	// update tableDef of foreign key's table with new table id
 	for _, ftblId := range tqry.ForeignTbl {
+		//skip fk self refer
+		if plan2.TableIdIsFkSelfRefer(ftblId) {
+			continue
+		}
 		_, _, fkRelation, err := c.e.GetRelationById(c.ctx, c.proc.TxnOperator, ftblId)
 		if err != nil {
 			return err
@@ -1507,6 +1522,10 @@ func (s *Scope) DropTable(c *Compile) error {
 
 	// update tableDef of foreign key's table
 	for _, fkTblId := range qry.ForeignTbl {
+		//skip fk self refer
+		if plan2.TableIdIsFkSelfRefer(fkTblId) {
+			continue
+		}
 		err := s.removeRefChildTbl(c, fkTblId, tblId)
 		if err != nil {
 			return err
@@ -1654,7 +1673,6 @@ func planDefsToExeDefs(tableDef *plan.TableDef) ([]engine.TableDef, error) {
 	if len(tableDef.RefChildTbls) > 0 {
 		c.Cts = append(c.Cts, &engine.RefChildTableDef{
 			Tables: tableDef.RefChildTbls,
-			ChildrenTables: tableDef.ChildrenTables,
 		})
 	}
 

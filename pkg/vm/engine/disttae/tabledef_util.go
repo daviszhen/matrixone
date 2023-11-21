@@ -45,7 +45,6 @@ func GetTableDef(ctx context.Context, table engine.Relation, dbName, tableName s
 	var primarykey *plan2.PrimaryKeyDef
 	var indexes []*plan2.IndexDef
 	var refChildTbls []uint64
-	var childrenTables []*plan.ChildTable
 
 	for _, def := range engineDefs {
 		if attr, ok := def.(*engine.AttributeDef); ok {
@@ -109,7 +108,6 @@ func GetTableDef(ctx context.Context, table engine.Relation, dbName, tableName s
 					foreignKeys = k.Fkeys
 				case *engine.RefChildTableDef:
 					refChildTbls = k.Tables
-					childrenTables = k.ChildrenTables
 				case *engine.PrimaryKeyDef:
 					primarykey = k.Pkey
 				case *engine.StreamConfigsDef:
@@ -192,7 +190,6 @@ func GetTableDef(ctx context.Context, table engine.Relation, dbName, tableName s
 		Indexes:      indexes,
 		Version:      schemaVersion,
 		IsTemporary:  table.GetEngineType() == engine.Memory,
-		ChildrenTables: childrenTables,
 	}
 	return obj, tableDef
 }

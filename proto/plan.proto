@@ -307,21 +307,6 @@ message IndexDef {
 	string index_algo_params=12;
 }
 
-// the table referenced as the foreign key in some other tables
-message ParentTable{	// the database name that the foreign table is in
-	string database_name = 1;
-	// the table name of the parent table
-	string table_name = 2;
-	// the column names in parent table referenced as foreign key
-	repeated string col_names = 3;
-}
-
-// the table referencing the parent table
-message ChildTable {
-	string database_name = 1;
-	string table_name = 2;
-}
-
 message ForeignKeyDef {
 	enum RefAction {
 		RESTRICT	= 0;
@@ -339,9 +324,6 @@ message ForeignKeyDef {
 	repeated uint64 foreign_cols	= 4;
 	RefAction on_delete				= 5;
 	RefAction on_update				= 6;
-	ParentTable parent_table = 7;
-	//column names of the foreign key
-	repeated string col_names = 8;
 }
 
 message CheckDef {
@@ -459,7 +441,6 @@ message TableDef {
 	bool is_temporary = 29;
 
 	uint64 auto_incr_offset = 30;
-	repeated ChildTable children_tables = 31;
 }
 
 message TableFunction{

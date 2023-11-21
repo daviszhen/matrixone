@@ -1775,16 +1775,25 @@ func detectedExprWhetherTimeRelated(expr *plan.Expr) bool {
 	return false
 }
 
+const (
+	FkSelfReferTableId uint64 = 0
+)
+
 // IsFkSelfRefer checks the foreign key referencing itself
 func IsFkSelfRefer(fkDbName, fkTableName, curDbName, curTableName string) bool {
 	return fkDbName == curDbName && fkTableName == curTableName
 }
 
+// TableIdIsFkSelfRefer checks the table is foreign key referencing itself
+func TableIdIsFkSelfRefer(fkTableId uint64) bool {
+	return fkTableId == FkSelfReferTableId
+}
+
 // HasFkSelfReferOnly checks the foreign key referencing itself only.
 // If there is no children tables, it also returns true
-func HasFkSelfReferOnly(tableDef *TableDef, dbName, tableName string) bool {
-	for _, child := range tableDef.GetChildrenTables() {
-		if !IsFkSelfRefer(child.DatabaseName, child.TableName, dbName, tableName) {
+func HasFkSelfReferOnly(refChildTbls []uint64) bool {
+	for _, child := range refChildTbls {
+		if !TableIdIsFkSelfRefer(child) {
 			return false
 		}
 	}

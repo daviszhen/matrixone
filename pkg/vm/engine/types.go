@@ -153,7 +153,6 @@ type PrimaryKeyDef struct {
 
 type RefChildTableDef struct {
 	Tables         []uint64
-	ChildrenTables []*plan.ChildTable
 }
 
 type StreamConfigsDef struct {
