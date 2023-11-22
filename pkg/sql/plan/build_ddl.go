@@ -1173,21 +1173,6 @@ func buildTableDefs(stmt *tree.CreateTable, ctx CompilerContext, createTable *pl
 		}
 	}
 
-	//process self reference foreign keys after colDefs are processed.
-	if len(fkSelfReferDatas) > 0 {
-		//pre fill colId.
-		//evaluateFkCols needs right colId.
-		for i, col := range createTable.TableDef.Cols {
-			col.ColId = uint64(i)
-		}
-		for _, selfRefer := range fkSelfReferDatas {
-			if err := evaluateFkCols(ctx, selfRefer, createTable.TableDef); err != nil {
-				return err
-			}
-		}
-	}
-
-
 	// check index invalid on the type
 	// for example, the text type don't support index
 	for _, str := range indexs {
@@ -1222,6 +1207,20 @@ func buildTableDefs(stmt *tree.CreateTable, ctx CompilerContext, createTable *pl
 		err = buildSecondaryIndexDef(createTable, secondaryIndexInfos, colMap, pkeyName, ctx)
 		if err != nil {
 			return err
+		}
+	}
+
+	//process self reference foreign keys after colDefs are processed.
+	if len(fkSelfReferDatas) > 0 {
+		//pre fill colId.
+		//evaluateFkCols needs right colId.
+		for i, col := range createTable.TableDef.Cols {
+			col.ColId = uint64(i)
+		}
+		for _, selfRefer := range fkSelfReferDatas {
+			if err := evaluateFkCols(ctx, selfRefer, createTable.TableDef); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -2631,6 +2630,7 @@ func evaluateFkCols(ctx CompilerContext, fkData *fkData, fkTableRef *TableDef) e
 
 	//there is at least one unique key or primary key should have the columns in the foreign keys.
 	matchCol := make([]uint64, 0, len(fkData.FkReferColumns))
+	fmt.Fprintf(os.Stderr, "uniqueColumns %v\n", uniqueColumns)
 	for _, uniqueColumn := range uniqueColumns {
 		for i, colName := range fkData.FkReferColumns {
 			if _, exists := columnNamePos[colName]; exists { // column exists in parent table
