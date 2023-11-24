@@ -1238,8 +1238,8 @@ var gSysVarsDefs = map[string]SystemVariable{
 		Scope:             ScopeBoth,
 		Dynamic:           true,
 		SetVarHintApplies: true,
-		Type:              InitSystemVariableIntType("interactive_timeout", 1, 31536000, false),
-		Default:           int64(28800),
+		Type:    InitSystemVariableIntType("interactive_timeout", 1, 86400, false),
+		Default: int64(86400),
 	},
 	"lower_case_table_names": {
 		Name:              "lower_case_table_names",
@@ -1278,8 +1278,8 @@ var gSysVarsDefs = map[string]SystemVariable{
 		Scope:             ScopeBoth,
 		Dynamic:           true,
 		SetVarHintApplies: false,
-		Type:              InitSystemVariableIntType("wait_timeout", 1, 2147483, false),
-		Default:           int64(28800),
+		Type:    InitSystemVariableIntType("wait_timeout", 1, 86400, false),
+		Default: int64(86400),
 	},
 	"sql_safe_updates": {
 		Name:              "sql_safe_updates",
@@ -3566,4 +3566,27 @@ func valueIsBoolTrue(value interface{}) (bool, error) {
 		return false, err2
 	}
 	return svbt.IsTrue(newValue), nil
+}
+
+func valueIsInt64(value interface{}) (int64, error) {
+	svbt := SystemVariableIntType{}
+	newValue, err2 := svbt.Convert(value)
+	if err2 != nil {
+		return 0, err2
+	}
+	if v, ok := newValue.(int64); ok {
+		return v, nil
+	}
+	return 0, nil
+}
+
+func getSessionTimeout(ses *Session, varName string) (int64, error) {
+	value, err := ses.GetSessionVar(varName)
+	if err != nil {
+		return 0, err
+	}
+	if v, ok := value.(int64); ok {
+		return v, nil
+	}
+	return 0, nil
 }

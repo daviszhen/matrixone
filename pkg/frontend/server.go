@@ -16,8 +16,11 @@ package frontend
 
 import (
 	"context"
+	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"go.uber.org/zap"
 	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -126,9 +129,52 @@ func NewMOServer(
 
 // handleMessage receives the message from the client and executes it
 func (mo *MOServer) handleMessage(rs goetty.IOSession) error {
+	var err error
 	received := uint64(0)
 	option := goetty.ReadOptions{Timeout: mo.readTimeout}
+	routine := mo.rm.getRoutine(rs)
+	connectionInfo := getConnectionInfo(rs)
+	if routine == nil {
+		err = moerr.NewInternalErrorNoCtx("routine does not exist")
+		logutil.Errorf("%s error:%v", connectionInfo, err)
+		return err
+	}
+
+	timeout := mo.readTimeout
+	ses := routine.getSession()
+	proto := routine.getProtocol()
+	waitTimeoutVar := "wait_timeout"
+	interactiveTimeoutVar := "interactive_timeout"
+
+	//overwrite the session.wait_timeout by global.interactive_timeout for the first time after login.
+	if proto.isInteractiveClient() {
+		//get sysvar from mo_mysql_compatibility_mode
+		doGetGlobalSystemVariable(ctx, ses)
+		itVar, err := ses.GetGlobalVar(interactiveTimeoutVar)
+		if err != nil {
+			return err
+		}
+		err = ses.SetSessionVar(waitTimeoutVar, itVar)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "%v set wait_timeout to %v\n", ses.GetDebugString(), itVar)
+	}
+
 	for {
+		//get session.wait_timeout before every reading.
+		//because session vars should be effective instantly.
+		tval, err := getSessionTimeout(ses, waitTimeoutVar)
+		if err != nil {
+			return err
+		}
+		timeout = maxTimeout(time.Second, minTimeout(timeout, time.Duration(tval)*time.Second))
+
+		//if sesVar == "interactive_timeout" {
+		ses.UpdateDebugString()
+		fmt.Fprintf(os.Stderr, "%v tval %v read_timeout:%v\n", ses.GetDebugString(), tval, timeout)
+		//}
+		option.Timeout = timeout
 		msg, err := rs.Read(option)
 		if err != nil {
 			if err == io.EOF {

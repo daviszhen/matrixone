@@ -725,3 +725,17 @@ func needConvertedToAccessDeniedError(errMsg string) bool {
 const (
 	quitStr = "!!!COM_QUIT!!!"
 )
+
+func minTimeout(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxTimeout(a, b time.Duration) time.Duration {
+	if a < b {
+		return b
+	}
+	return a
+}

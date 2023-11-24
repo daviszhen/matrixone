@@ -198,6 +198,15 @@ type MysqlProtocol interface {
 	ParseExecuteData(ctx context.Context, proc *process.Process, stmt *PrepareStmt, data []byte, pos int) error
 
 	ParseSendLongData(ctx context.Context, proc *process.Process, stmt *PrepareStmt, data []byte, pos int) error
+
+	// hasClientCapability checks the client has the capability bits or not
+	hasClientCapability(c uint32) bool
+
+	// isInteractiveClient checks the client is interactive or not.
+	// the client is interactive if it has CLIENT_INTERACTIVE capability.
+	// interactive_client examples: mysql client
+	// non-interactive_client examples: jdbc
+	isInteractiveClient() bool
 }
 
 var _ MysqlProtocol = &MysqlProtocolImpl{}
@@ -2731,6 +2740,19 @@ func (mp *MysqlProtocolImpl) receiveExtraInfo(rs goetty.IOSession) {
 			mp.GetSession().connType = ConnTypeExternal
 		}
 	}
+}
+
+// hasClientCapability checks the client has the capability bits or not
+func (mp *MysqlProtocolImpl) hasClientCapability(c uint32) bool {
+	return mp.capability&c != 0
+}
+
+// isInteractiveClient checks the client is interactive or not.
+// the client is interactive if it has CLIENT_INTERACTIVE capability.
+// interactive_client examples: mysql client
+// non-interactive_client examples: jdbc
+func (mp *MysqlProtocolImpl) isInteractiveClient() bool {
+	return mp.hasClientCapability(CLIENT_INTERACTIVE)
 }
 
 /*

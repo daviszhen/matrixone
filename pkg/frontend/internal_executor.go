@@ -224,6 +224,14 @@ type internalProtocol struct {
 	username    string
 }
 
+func (ip *internalProtocol) hasClientCapability(uint32) bool {
+	return false
+}
+
+func (ip *internalProtocol) isInteractiveClient() bool {
+	return false
+}
+
 func (ip *internalProtocol) GetCapability() uint32 {
 	return DefaultCapability
 }

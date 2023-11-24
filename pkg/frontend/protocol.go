@@ -414,6 +414,14 @@ type FakeProtocol struct {
 	ioses    goetty.IOSession
 }
 
+func (fp *FakeProtocol) hasClientCapability(uint32) bool {
+	return false
+}
+
+func (fp *FakeProtocol) isInteractiveClient() bool {
+	return false
+}
+
 func (fp *FakeProtocol) GetCapability() uint32 {
 	return DefaultCapability
 }
