@@ -225,13 +225,23 @@ func tableItemLess(a, b *TableItem) bool {
 			Then the item x3 will be lost. The TN will not know the table x3. It is wrong!
 			With sort on the table id, the item x3,x2,x1 will be reserved.
 		*/
-		if a.deleted && !b.deleted { //deleted item head first
-			return true
-		} else if !a.deleted && b.deleted {
-			return false
-		} else { //a.deleted && b.deleted || !a.deleted && !b.deleted
+		if a.Id != b.Id {
 			return a.Id < b.Id
+		} else {
+			if a.deleted && !b.deleted { //deleted item head first
+				return true
+			} else if !a.deleted && b.deleted {
+				return false
+			}
+			return false
 		}
+		// if a.deleted && !b.deleted { //deleted item head first
+		// 	return true
+		// } else if !a.deleted && b.deleted {
+		// 	return false
+		// } else { //a.deleted && b.deleted || !a.deleted && !b.deleted
+		// 	return a.Id < b.Id
+		// }
 	}
 	return a.Ts.Greater(b.Ts)
 }
