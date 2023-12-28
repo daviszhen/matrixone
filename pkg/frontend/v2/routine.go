@@ -227,7 +227,7 @@ func (rt *Routine) reportSystemStatus() (r bool) {
 	return
 }
 
-func (rt *Routine) handleRequest(req *Request) error {
+func (rt *Routine) handleRequest(req *mysqlPayload) error {
 	var ses *Session
 	var routineCtx context.Context
 	var err error

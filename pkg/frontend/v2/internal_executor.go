@@ -192,7 +192,7 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 		logutil.Fatalf("internalExecutor cannot create mpool in newCmdSession")
 		panic(err)
 	}
-	sess := NewSession(ie.proto, mp, ie.pu, GSysVariables, true, ie.aicm, nil)
+	sess := NewSession(nil, mp, ie.pu, GSysVariables, true, ie.aicm, nil)
 	sess.SetRequestContext(ctx)
 	sess.SetConnectContext(ctx)
 
@@ -283,7 +283,7 @@ func (ip *internalProtocol) SendPrepareResponse(ctx context.Context, stmt *Prepa
 
 func (ip *internalProtocol) SetEstablished() {}
 
-func (ip *internalProtocol) GetRequest(payload []byte) *Request {
+func (ip *internalProtocol) GetRequest(payload []byte) *mysqlPayload {
 	panic("not impl")
 }
 

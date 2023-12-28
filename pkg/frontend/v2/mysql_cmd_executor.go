@@ -286,7 +286,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	stm.Account = tenant.GetTenant()
 	stm.RoleId = proc.SessionInfo.RoleId
 	stm.User = tenant.GetUser()
-	stm.Host = ses.protocol.Peer()
+	stm.Host = ses.conn.peerAddress
 	stm.Database = ses.GetDatabaseName()
 	stm.Statement = text
 	stm.StatementFingerprint = "" // fixme= (Reserved)
@@ -4030,7 +4030,7 @@ func (mce *MysqlCmdExecutor) setResponse(cwIndex, cwsLen int, rspLen uint64) *Re
 }
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
-func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
+func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Session, req *mysqlPayload) (resp *Response, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			moe, ok := e.(*moerr.Error)
@@ -4062,7 +4062,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		)*/
 		return resp, moerr.NewInternalError(requestCtx, quitStr)
 	case COM_QUERY:
-		var query = string(req.GetData().([]byte))
+		var query = string(req.GetData())
 		mce.addSqlCount(1)
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))))
 		err = doComQuery(requestCtx, &UserInput{sql: query})
@@ -4071,7 +4071,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		}
 		return resp, nil
 	case COM_INIT_DB:
-		var dbname = string(req.GetData().([]byte))
+		var dbname = string(req.GetData())
 		mce.addSqlCount(1)
 		query := "use `" + dbname + "`"
 		err = doComQuery(requestCtx, &UserInput{sql: query})
@@ -4081,7 +4081,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 
 		return resp, nil
 	case COM_FIELD_LIST:
-		var payload = string(req.GetData().([]byte))
+		var payload = string(req.GetData())
 		mce.addSqlCount(1)
 		query := makeCmdFieldListSql(payload)
 		err = doComQuery(requestCtx, &UserInput{sql: query})
@@ -4097,7 +4097,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 
 	case COM_STMT_PREPARE:
 		ses.SetCmd(COM_STMT_PREPARE)
-		sql = string(req.GetData().([]byte))
+		sql = string(req.GetData())
 		mce.addSqlCount(1)
 
 		// rewrite to "Prepare stmt_name from 'xxx'"
@@ -4114,7 +4114,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 
 	case COM_STMT_EXECUTE:
 		ses.SetCmd(COM_STMT_EXECUTE)
-		data := req.GetData().([]byte)
+		data := req.GetData()
 		var prepareStmt *PrepareStmt
 		sql, prepareStmt, err = mce.parseStmtExecute(requestCtx, data)
 		if err != nil {
@@ -4134,7 +4134,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 
 	case COM_STMT_SEND_LONG_DATA:
 		ses.SetCmd(COM_STMT_SEND_LONG_DATA)
-		data := req.GetData().([]byte)
+		data := req.GetData()
 		err = mce.parseStmtSendLongData(requestCtx, data)
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, mce.ses.GetServerStatus(), err)
@@ -4143,7 +4143,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		return nil, nil
 
 	case COM_STMT_CLOSE:
-		data := req.GetData().([]byte)
+		data := req.GetData()
 
 		// rewrite to "deallocate Prepare stmt_name"
 		stmtID := binary.LittleEndian.Uint32(data[0:4])
@@ -4158,7 +4158,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		return resp, nil
 
 	case COM_STMT_RESET:
-		data := req.GetData().([]byte)
+		data := req.GetData()
 
 		//Payload of COM_STMT_RESET
 		stmtID := binary.LittleEndian.Uint32(data[0:4])

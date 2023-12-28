@@ -207,8 +207,8 @@ var _ MysqlProtocol = &MysqlProtocolImpl{}
 func (ses *Session) GetMysqlProtocol() MysqlProtocol {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	if ses.protocol != nil {
-		return ses.protocol.(MysqlProtocol)
+	if ses.conn != nil {
+		return nil
 	}
 	return nil
 }
@@ -438,15 +438,16 @@ func (mp *MysqlProtocolImpl) SetSession(ses *Session) {
 
 // handshake response 41
 type response41 struct {
-	capabilities      uint32
-	maxPacketSize     uint32
-	collationID       uint8
-	username          string
-	authResponse      []byte
-	database          string
-	clientPluginName  string
-	isAskForTlsHeader bool
-	connectAttrs      map[string]string
+	capabilities        uint32
+	maxPacketSize       uint32
+	collationID         uint8
+	username            string
+	authResponse        []byte
+	needChangAuthMethod bool
+	database            string
+	clientPluginName    string
+	isAskForTlsHeader   bool
+	connectAttrs        map[string]string
 }
 
 // handshake response 320
@@ -1159,7 +1160,7 @@ func (mp *MysqlProtocolImpl) authenticateUser(ctx context.Context, authResponse 
 	ses := mp.GetSession()
 	if !mp.SV.SkipCheckUser {
 		logDebugf(mp.getDebugStringUnsafe(), "authenticate user 1")
-		psw, err = ses.AuthenticateUser(mp.GetUserName(), mp.GetDatabaseName(), mp.authResponse, mp.GetSalt(), mp.checkPassword)
+		psw, err = ses.AuthenticateUser(ctx, mp.GetUserName(), mp.GetDatabaseName(), mp.authResponse, mp.GetSalt(), mp.checkPassword)
 		if err != nil {
 			return err
 		}

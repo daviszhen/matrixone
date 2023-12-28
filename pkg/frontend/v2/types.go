@@ -1,4 +1,4 @@
-// Copyright 2021 Matrix Origin
+// Copyright 2023 Matrix Origin
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,15 @@ package v2
 
 import (
 	"context"
+	"crypto/tls"
+	"sync"
+	"sync/atomic"
 
 	"github.com/fagongzi/goetty/v2"
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
+	"github.com/matrixorigin/matrixone/pkg/txn/client"
 )
 
 // ======= Transaction =======
@@ -29,7 +33,7 @@ type TxnOptions struct{}
 type TxnOpt func(*TxnOptions)
 
 type Txn struct {
-	txnOperator TxnOperator
+	txnOperator client.TxnOperator
 	txnCtx      context.Context
 	txnCancel   context.CancelFunc
 
@@ -53,8 +57,8 @@ type QueryExecutor interface {
 	Close(context.Context) error
 }
 
-// MyqlExecutor executes the sql regularly.
-type MyqlExecutor struct{}
+// GeneralExecutor executes the sql regularly.
+type GeneralExecutor struct{}
 
 // BackgroundExecutor executes the sql using different structure.
 // it is triggered in the mo with none client.
@@ -68,12 +72,29 @@ type ExecutorOpt func(*ExecutorOptions)
 type ExecutorTxnKind uint32
 
 const (
-	ExecDoesNotNeedTxn        ExecutorTxnKind = 1 << 0
-	KeepTxnUnchangedAfterExec                 = 1 << 1
-	KeepTxnNotNilAfterExec                    = 1 << 2
-	CommitTxnBeforeExec                       = 1 << 3 //for begin
-	TxnExistsAferExc                          = 1 << 4 //for begin
-	TxnDisappearAferExec                      = 1 << 5 //for commit or rollback
+	// can have or not have the active txn
+	ExecDoesNotNeedTxn ExecutorTxnKind = 1 << 0
+
+	/*
+		before			after
+		nil				nil
+		not nil			not nil (same txn)
+	*/
+	KeepTxnUnchangedAfterExec = 1 << 1
+
+	/*
+		before			after
+		not nil			not nil
+	*/
+	KeepTxnNotNilAfterExec = 1 << 2
+	CommitTxnBeforeExec    = 1 << 3 //for begin
+	TxnExistsAferExc       = 1 << 4 //for begin
+	/*
+		before			after
+		nil				nil
+		not nil			nil
+	*/
+	TxnDisappearAferExec = 1 << 5 //for commit or rollback
 )
 
 type Executor interface {
@@ -90,21 +111,47 @@ type Executor interface {
 
 // ======= Connection Related =======
 
-type RequestCtx struct {
+type Request struct {
 	reqCtx    context.Context
 	reqCancel context.CancelFunc
+	payload   *mysqlPayload
+	userInput *UserInput
 }
 
 type Connection struct {
-	client      goetty.IOSession
+	client goetty.IOSession
+	//The sequence-id is incremented with each packet and may wrap around.
+	//It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
+	sequenceId atomic.Uint32
+	//joint capability shared by the server and the client
+	capability  uint32
 	ses         *Session
 	peerAddress string
 	thisAddress string
 	// the id of goroutine that executes the request
 	goroutineID uint64
 	connCtx     context.Context
-	connCancel  context.CancelFunc
+
+	//the count of sql has been processed
+	sqlCount uint64
+	connId   uint32
+
+	mu struct {
+		sync.Mutex
+		requestCancel    context.CancelFunc
+		connCancel       context.CancelFunc
+		inProcessRequest bool
+	}
+
+	printInfoOnce       bool
+	restricted          atomic.Bool
+	connectionBeCounted atomic.Bool
+	closeOnce           sync.Once
+	cancelled           atomic.Bool
+	salt                []byte
 }
+
+var _ goetty.IOSessionAware = &Connections{}
 
 /*
 Connections holds all client conns in the cn.
@@ -112,12 +159,21 @@ Connections holds all client conns in the cn.
 	the KILL statement use the connectionid to kill connection or query on it.
 */
 type Connections struct {
-	connId2Conn map[uint32]*Connection
-	conns       map[goetty.IOSession]*Connection
+	mu struct {
+		sync.RWMutex
+		connId2Conn map[uint32]*Connection
+		conns       map[goetty.IOSession]*Connection
+	}
+
+	ctx       context.Context
+	tlsConfig *tls.Config
 }
 
 type Sessions struct {
-	ses map[uuid.UUID]*Session
+	mu struct {
+		sync.RWMutex
+		seses map[uuid.UUID]*Session
+	}
 }
 
 // ======= Bussiness Related =======
@@ -125,40 +181,53 @@ type Sessions struct {
 type Account struct{}
 
 type Accounts struct {
-	accountId2Conn      map[int64]map[*Connection]uint64
-	accountId2Account   map[int64]*Account
-	accountName2Account map[string]*Account
-	killIdQueue         map[int64]KillRecord
+	accountMu struct {
+		sync.RWMutex
+		accountId2Conn map[int64]map[*Connection]uint64
+		//
+		accountId2Account   map[int64]*Account
+		accountName2Account map[string]*Account
+	}
+
+	queueMu struct {
+		sync.RWMutex
+		killIdQueue map[int64]KillRecord
+	}
 }
 
 // ======= WriteBuffer =======
 
-type WriteBufferOptions struct{}
+type WriteBufferOptions struct {
+	conn       goetty.IOSession
+	sequenceId *atomic.Uint32
+}
 type WriteBufferOpt func(*WriteBufferOptions)
+
+func WithConn(conn goetty.IOSession) WriteBufferOpt {
+	return func(o *WriteBufferOptions) {
+		o.conn = conn
+	}
+}
+
+func WithSequenceId(id *atomic.Uint32) WriteBufferOpt {
+	return func(o *WriteBufferOptions) {
+		o.sequenceId = id
+	}
+}
 
 type WriteBuffer interface {
 	Open(context.Context, ...WriteBufferOpt) error
 	Write(context.Context, []byte) error
-	Close(context.Context) error
 	Flush(context.Context) error
+	Close(context.Context) error
 }
 
-/*
-BytesWriteBuffer holds bytes.
-The default implementation of the WriteBuffer.
-*/
-type BytesWriteBuffer struct {
-	buf []byte
-}
+var _ WriteBuffer = &MysqlPayloadWriteBuffer{}
 
 /*
 ConnWriteBuffer holds the bytes that will be written into the connection.
 */
 type ConnWriteBuffer struct {
-	*BytesWriteBuffer
-	//TODO: conn
-	clientAddr string
-	thisAddr   string
 }
 
 /*
@@ -166,14 +235,118 @@ MysqlPayloadWriteBuffer holds the bytes that will be encoded and written into th
 the data will split into mysql payloads.
 */
 type MysqlPayloadWriteBuffer struct {
-	*BytesWriteBuffer
-
-	out WriteBuffer
+	rowHandler
+	conn       goetty.IOSession
+	clientAddr string
+	thisAddr   string
+	//The sequence-id is incremented with each packet and may wrap around.
+	//It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
+	sequenceId *atomic.Uint32
 }
 
 // ======= packets =======
-type MysqlWritePacketOptions struct{}
+type MysqlWritePacketOptions struct {
+	serverVersionPrefix string
+	salt                []byte
+	//the id of the connection
+	connectionID uint32
+
+	//joint capability shared by the server and the client
+	capability uint32
+
+	affectedRows, lastInsertId uint64
+	statusFlags, warnings      uint16
+	message                    string
+
+	status uint16
+
+	errorCode              uint16
+	sqlState, errorMessage string
+
+	number uint64
+
+	column *MysqlColumn
+	cmd    int
+
+	colDef        []*MysqlColumn
+	colData       []any
+	lenEncBuffer  []byte
+	strconvBuffer []byte
+}
+
 type MysqlWritePacketOpt func(*MysqlWritePacketOptions)
+
+func WithVersionPrefix(prefix string) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.serverVersionPrefix = prefix
+	}
+}
+
+func WithSalt(salt []byte) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.salt = salt
+	}
+}
+
+func WithConnectionID(id uint32) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.connectionID = id
+	}
+}
+
+func WithCapability(capability uint32) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.capability = capability
+	}
+}
+
+func WithAffectedRows(rows uint64) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.affectedRows = rows
+	}
+}
+
+func WithLastInsertId(id uint64) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.lastInsertId = id
+	}
+}
+
+func WithStatusFlags(flags uint16) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.statusFlags = flags
+	}
+}
+
+func WithWarnings(warnings uint16) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.warnings = warnings
+	}
+}
+
+func WithMessage(message string) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.message = message
+	}
+}
+
+func WithErrorCode(code uint16) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.errorCode = code
+	}
+}
+
+func WithSqlState(state string) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.sqlState = state
+	}
+}
+
+func WithErrorMessage(message string) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.errorMessage = message
+	}
+}
 
 /*
 MysqlWritePacket denotes the mysql packets.
@@ -183,6 +356,18 @@ type MysqlWritePacket interface {
 	Write(context.Context, WriteBuffer) error
 	Close(context.Context) error
 }
+
+var _ MysqlWritePacket = &Handshake{}
+var _ MysqlWritePacket = &OKPacket{}
+var _ MysqlWritePacket = &OKPacketWithEOF{}
+var _ MysqlWritePacket = &EOFPacket{}
+var _ MysqlWritePacket = &EOFPacketIf{}
+var _ MysqlWritePacket = &EOFOrOkPacket{}
+var _ MysqlWritePacket = &ERRPacket{}
+var _ MysqlWritePacket = &LengthEncodedNumber{}
+var _ MysqlWritePacket = &ColumnDefinition{}
+var _ MysqlWritePacket = &ResultSetRowText{}
+var _ MysqlWritePacket = &ResultSetRowBinary{}
 
 type MysqlReadPacketOptions struct{}
 type MysqlReadPacketOpt func(*MysqlReadPacketOptions)
@@ -196,6 +381,8 @@ type MysqlReadPacket interface {
 	Close(context.Context) error
 }
 
+var _ MysqlReadPacket = &HandshakeResponse{}
+
 // packets implement both
 
 // packets implement MysqlReadPacket
@@ -204,41 +391,122 @@ type SSLRequest struct{}
 type AuthSwitchPacket struct{}
 
 // packets implement MysqlWritePacket
-type OKPacket struct{}
+type OKPacket struct {
+	capability uint32
+	data       []byte
+}
 
-type EOFPacket struct{}
+type OKPacketWithEOF struct {
+	capability uint32
+	data       []byte
+}
 
-type ERRPacket struct{}
+type EOFPacket struct {
+	capability uint32
+	data       []byte
+}
 
-type LengthEncodedNumber struct{}
+type EOFPacketIf struct {
+	data []byte
+}
 
-type Handshake struct{}
+type EOFOrOkPacket struct {
+	data []byte
+}
 
-type HandshakeResponse struct{}
+type ERRPacket struct {
+	capability uint32
+	data       []byte
+}
+
+type LengthEncodedNumber struct {
+	data []byte
+}
+
+type Handshake struct {
+	serverVersionPrefix string
+
+	//random bytes
+	salt []byte
+
+	//the id of the connection
+	connectionID uint32
+
+	//joint capability shared by the server and the client
+	capability uint32
+
+	data []byte
+}
+
+type HandshakeResponse struct {
+	// opaque authentication response data generated by Authentication Method
+	// indicated by the plugin name field.
+	authResponse []byte
+
+	//joint capability shared by the server and the client
+	capability uint32
+
+	//collation id
+	collationID int
+
+	//collation name
+	collationName string
+
+	//character set
+	charset string
+
+	//max packet size of the client
+	maxClientPacketSize uint32
+
+	//the user of the client
+	username string
+
+	//the default database for the client
+	database string
+
+	// Connection attributes are key-value pairs that application programs
+	// can pass to the server at connect time.
+	connectAttrs map[string]string
+
+	isAskForTlsHeader bool
+
+	//TODO: change authe method later
+	needChangAuthMethod bool
+}
 
 type AuthSwitchRequest struct{}
 
 type AuthMoreData struct{}
 
-type ResultSetRowText struct{}
+type ResultSetRowText struct {
+	colDef        []*MysqlColumn
+	colData       []any
+	lenEncBuffer  []byte
+	strconvBuffer []byte
+}
 
-type ResultSetRowBinary struct{}
+type ResultSetRowBinary struct {
+	colDef           []*MysqlColumn
+	colData          []any
+	lenEncBuffer     []byte
+	strconvBuffer    []byte
+	binaryNullBuffer []byte
+}
 
-type ColumnDefinition struct{}
+type ColumnDefinition struct {
+	data []byte
+}
 
 /*
 PacketEndPoint reads & writes the packets.
 */
 type PacketEndPoint struct {
-	out WriteBuffer
-}
-
-/*
-SendPacket sends the packet to the mysql client.
-*/
-func (*PacketEndPoint) SendPacket(context.Context, MysqlWritePacket, bool) error {
-
-	return nil
+	option goetty.ReadOptions
+	conn   goetty.IOSession
+	out    WriteBuffer
+	//The sequence-id is incremented with each packet and may wrap around.
+	//It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
+	sequenceId *atomic.Uint32
 }
 
 // ======= reader & writer =======

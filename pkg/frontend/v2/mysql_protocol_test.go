@@ -1311,7 +1311,7 @@ func (tRM *TestRoutineManager) resultsetHandler(rs goetty.IOSession, msg interfa
 		return nil
 	}
 
-	var req *Request
+	var req *mysqlPayload
 	var resp *Response
 	req = pro.GetRequest(payload)
 	switch req.GetCmd() {

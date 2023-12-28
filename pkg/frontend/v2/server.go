@@ -16,18 +16,25 @@ package v2
 
 import (
 	"context"
-	"io"
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/fagongzi/goetty/v2"
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/queryservice"
+)
+
+// ======= Configs =======
+var (
+	fePu             *config.ParameterUnit
+	feAicm           *defines.AutoIncrCacheManager
+	feBaseService    BaseService
+	feSessionManager *queryservice.SessionManager
+	// reportSystemStatusTime is the time when report system status last time.
+	feReportSystemStatusTime atomic.Pointer[time.Time]
 )
 
 // RelationName counter for the new connection
@@ -41,7 +48,6 @@ type MOServer struct {
 	addr        string
 	uaddr       string
 	app         goetty.NetApplication
-	rm          *RoutineManager
 	readTimeout time.Duration
 }
 
@@ -54,10 +60,6 @@ type BaseService interface {
 	SQLAddress() string
 	// SessionMgr returns the session manager instance of the service.
 	SessionMgr() *queryservice.SessionManager
-}
-
-func (mo *MOServer) GetRoutineManager() *RoutineManager {
-	return mo.rm
 }
 
 func (mo *MOServer) Start() error {
@@ -81,14 +83,12 @@ func NewMOServer(
 	baseService BaseService,
 ) *MOServer {
 	codec := NewSqlCodec()
-	rm, err := NewRoutineManager(ctx, pu, aicm)
-	if err != nil {
-		logutil.Panicf("start server failed with %+v", err)
-	}
-	rm.setBaseService(baseService)
-	if baseService != nil {
-		rm.setSessionMgr(baseService.SessionMgr())
-	}
+	fePu = pu
+	feAicm = aicm
+	feBaseService = baseService
+	feSessionManager = baseService.SessionMgr()
+	feConns.ctx = ctx
+
 	// TODO asyncFlushBatch
 	addresses := []string{addr}
 	unixAddr := pu.SV.GetUnixSocketAddress()
@@ -98,12 +98,11 @@ func NewMOServer(
 	mo := &MOServer{
 		addr:        addr,
 		uaddr:       pu.SV.UnixSocketAddress,
-		rm:          rm,
 		readTimeout: pu.SV.SessionTimeout.Duration,
 	}
 	app, err := goetty.NewApplicationWithListenAddress(
 		addresses,
-		rm.Handler,
+		feConns.Handler,
 		goetty.WithAppLogger(logutil.GetGlobalLogger()),
 		goetty.WithAppHandleSessionFunc(mo.handleMessage),
 		goetty.WithAppSessionOptions(
@@ -111,7 +110,7 @@ func NewMOServer(
 			goetty.WithSessionLogger(logutil.GetGlobalLogger()),
 			goetty.WithSessionRWBUfferSize(DefaultRpcBufferSize, DefaultRpcBufferSize),
 			goetty.WithSessionAllocator(NewSessionAllocator(pu))),
-		goetty.WithAppSessionAware(rm),
+		goetty.WithAppSessionAware(feConns),
 		//when the readTimeout expires the goetty will close the tcp connection.
 		goetty.WithReadTimeout(pu.SV.SessionTimeout.Duration))
 	if err != nil {
@@ -127,32 +126,8 @@ func NewMOServer(
 
 // handleMessage receives the message from the client and executes it
 func (mo *MOServer) handleMessage(rs goetty.IOSession) error {
-	received := uint64(0)
-	option := goetty.ReadOptions{Timeout: mo.readTimeout}
-	for {
-		msg, err := rs.Read(option)
-		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-
-			logutil.Error("session read failed",
-				zap.Error(err))
-			return err
-		}
-
-		received++
-
-		err = mo.rm.Handler(rs, msg, received)
-		if err != nil {
-			if strings.Contains(err.Error(), quitStr) {
-				return nil
-			} else {
-				logutil.Error("session handle failed, close this session", zap.Error(err))
-			}
-			return err
-		}
-	}
+	conn := feConns.getConn(rs)
+	return conn.run()
 }
 
 func initVarByConfig(ctx context.Context, pu *config.ParameterUnit) error {

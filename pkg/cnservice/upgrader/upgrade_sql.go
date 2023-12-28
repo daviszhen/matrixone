@@ -16,7 +16,7 @@ package upgrader
 
 import (
 	"github.com/matrixorigin/matrixone/pkg/catalog"
-	"github.com/matrixorigin/matrixone/pkg/frontend"
+	frontend "github.com/matrixorigin/matrixone/pkg/frontend/v2"
 	"github.com/matrixorigin/matrixone/pkg/util/export/table"
 )
 

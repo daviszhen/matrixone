@@ -63,13 +63,17 @@
 
             (c). execute the statement.
 
-                (A) setup the statement executor
+                (A) (maybe) prepare the transaction
+
+                (B) setup the statement executor
                 
                     executor = xxxExecutor.Open(...)
 
-                (B) run the statement executor
+                (C) run the statement executor
 
                     executor.Next(...)
+
+                (D) (maybe) cleanup the transaction.
     }
 
 3. Statement Executor
@@ -142,7 +146,7 @@
 
         i. based on the Executor kind, it decides whether to start/commit a transaction.
 
-        ii. in the Executor.Open(...), it inherits the existed transaction. 
+        ii. in the Executor.Open(...), it uses the existed transaction. 
 
         iii. in the Executor.Next(...) and Executor.Close(...), 
             they do not create/drop/commit/rollback the transaction.
@@ -153,6 +157,55 @@
 
         iv. it commits/rollbacks the transaction if needed.
             it also may update the states of the transaction module.
+
+5. logic in Executor.Next
+
+    for different statement, the logic differs.
+
+    the statement handled in the frontend:
+
+        i. (maybe) rewrite statement first.
+
+            analyze, explain analyze
+
+        ii. execute the statement.
+
+        iii. composite the result set packet or just status packet.
+
+        iv. send the packet to the client.
+
+    the statement handled in the computation engine:
+
+        i. build plan for the statement.
+
+        ii. compile.Compile.
+
+        iii. compile.Run.
+
+            (a). start the pipeline
+
+            (b). pipeline outputs results.
+
+                the writers writes the result rows to different destinations.
+
+        iv. sends end packet to the client.
+
+6. logic in the background executor
+
+    the background executor is almost the same as the query executor.
+    but, there is no client conn, no packet endpoint,session, logging in it, etc.
+    there are multiple categories of the background executor
+
+
+    rules to seperate them :
+
+    (i). share the same transaction or not.
+
+        it needs an txn before execution.
+
+    (ii). outputs the binary result set or text result set or just status.
+
+
 
 ## input data
 
@@ -225,7 +278,7 @@
                 |                               |                   |
         MysqlPayloadWriteBuffer                 |                   |
                 |                               |                   |
-        ConnWriteBuffer                         |                   |
+                |                               |                   |
                 |                               |                   |
                 |                               |                   |
             TCPConn                       Fileservice            Fileservice

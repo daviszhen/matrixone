@@ -16,6 +16,7 @@ package cnservice
 
 import (
 	"context"
+
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/lockservice"
 	pblock "github.com/matrixorigin/matrixone/pkg/pb/lock"
@@ -54,16 +55,16 @@ func (s *service) handleKillConn(ctx context.Context, req *query.Request, resp *
 	if req == nil || req.KillConnRequest == nil {
 		return moerr.NewInternalError(ctx, "bad request")
 	}
-	rm := s.mo.GetRoutineManager()
-	if rm == nil {
-		return moerr.NewInternalError(ctx, "routine manager not initialized")
-	}
-	accountMgr := rm.GetAccountRoutineManager()
-	if accountMgr == nil {
-		return moerr.NewInternalError(ctx, "account routine manager not initialized")
-	}
+	// rm := s.mo.GetRoutineManager()
+	// if rm == nil {
+	// 	return moerr.NewInternalError(ctx, "routine manager not initialized")
+	// }
+	// accountMgr := rm.GetAccountRoutineManager()
+	// if accountMgr == nil {
+	// 	return moerr.NewInternalError(ctx, "account routine manager not initialized")
+	// }
 
-	accountMgr.EnKillQueue(req.KillConnRequest.AccountID, req.KillConnRequest.Version)
+	// accountMgr.EnKillQueue(req.KillConnRequest.AccountID, req.KillConnRequest.Version)
 	return nil
 }
 
@@ -71,16 +72,16 @@ func (s *service) handleAlterAccount(ctx context.Context, req *query.Request, re
 	if req == nil || req.AlterAccountRequest == nil {
 		return moerr.NewInternalError(ctx, "bad request")
 	}
-	rm := s.mo.GetRoutineManager()
-	if rm == nil {
-		return moerr.NewInternalError(ctx, "routine manager not initialized")
-	}
-	accountMgr := rm.GetAccountRoutineManager()
-	if accountMgr == nil {
-		return moerr.NewInternalError(ctx, "account routine manager not initialized")
-	}
+	// rm := s.mo.GetRoutineManager()
+	// if rm == nil {
+	// 	return moerr.NewInternalError(ctx, "routine manager not initialized")
+	// }
+	// accountMgr := rm.GetAccountRoutineManager()
+	// if accountMgr == nil {
+	// 	return moerr.NewInternalError(ctx, "account routine manager not initialized")
+	// }
 
-	accountMgr.AlterRoutineStatue(req.AlterAccountRequest.TenantId, req.AlterAccountRequest.Status)
+	// accountMgr.AlterRoutineStatue(req.AlterAccountRequest.TenantId, req.AlterAccountRequest.Status)
 	return nil
 }
 

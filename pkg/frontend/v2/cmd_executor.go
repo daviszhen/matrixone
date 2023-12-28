@@ -36,7 +36,7 @@ type CmdExecutor interface {
 	GetSession() *Session
 
 	// ExecRequest execute the request and get the response
-	ExecRequest(context.Context, *Session, *Request) (*Response, error)
+	ExecRequest(context.Context, *Session, *mysqlPayload) (*Response, error)
 
 	//SetCancelFunc saves a cancel function for active request.
 	SetCancelFunc(context.CancelFunc)

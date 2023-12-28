@@ -34,7 +34,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
-	"github.com/matrixorigin/matrixone/pkg/frontend"
+	frontend "github.com/matrixorigin/matrixone/pkg/frontend/v2"
 	"github.com/matrixorigin/matrixone/pkg/gossip"
 	"github.com/matrixorigin/matrixone/pkg/incrservice"
 	"github.com/matrixorigin/matrixone/pkg/lockservice"

@@ -42,28 +42,28 @@ const (
 	LocalInfileRequest
 )
 
-type Request struct {
+type mysqlPayload struct {
 	//the command type from the client
 	cmd CommandType
 	// sequence num
 	seq uint8
 	//the data from the client
-	data interface{}
+	data []byte
 }
 
-func (req *Request) GetData() interface{} {
+func (req *mysqlPayload) GetData() []byte {
 	return req.data
 }
 
-func (req *Request) SetData(data interface{}) {
+func (req *mysqlPayload) SetData(data []byte) {
 	req.data = data
 }
 
-func (req *Request) GetCmd() CommandType {
+func (req *mysqlPayload) GetCmd() CommandType {
 	return req.cmd
 }
 
-func (req *Request) SetCmd(cmd CommandType) {
+func (req *mysqlPayload) SetCmd(cmd CommandType) {
 	req.cmd = cmd
 }
 
@@ -137,8 +137,8 @@ type Protocol interface {
 
 	SetEstablished()
 
-	// GetRequest gets Request from Packet
-	GetRequest(payload []byte) *Request
+	// GetRequest gets mysqlPayload from Packet
+	GetRequest(payload []byte) *mysqlPayload
 
 	// SendResponse sends a response to the client for the application request
 	SendResponse(context.Context, *Response) error
@@ -320,8 +320,8 @@ func (pi *ProtocolImpl) Peer() string {
 	return tcp.RemoteAddress()
 }
 
-func (mp *MysqlProtocolImpl) GetRequest(payload []byte) *Request {
-	req := &Request{
+func (mp *MysqlProtocolImpl) GetRequest(payload []byte) *mysqlPayload {
+	req := &mysqlPayload{
 		cmd:  CommandType(payload[0]),
 		data: payload[1:],
 	}
@@ -507,7 +507,7 @@ func (fp *FakeProtocol) IsEstablished() bool {
 
 func (fp *FakeProtocol) SetEstablished() {}
 
-func (fp *FakeProtocol) GetRequest(payload []byte) *Request {
+func (fp *FakeProtocol) GetRequest(payload []byte) *mysqlPayload {
 	return nil
 }
 

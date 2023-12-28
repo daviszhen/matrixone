@@ -17,14 +17,15 @@ package cnservice
 import (
 	"context"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/cnservice/upgrader"
 	"strings"
 	"time"
+
+	"github.com/matrixorigin/matrixone/pkg/cnservice/upgrader"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/runtime"
 	"github.com/matrixorigin/matrixone/pkg/config"
-	"github.com/matrixorigin/matrixone/pkg/frontend"
+	frontend "github.com/matrixorigin/matrixone/pkg/frontend/v2"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	logservicepb "github.com/matrixorigin/matrixone/pkg/pb/logservice"
 	"github.com/matrixorigin/matrixone/pkg/pb/task"
@@ -132,7 +133,7 @@ func (s *service) upgrade() {
 
 	ug := &upgrader.Upgrader{
 		IEFactory: func() ie.InternalExecutor {
-			return frontend.NewInternalExecutor(pu, s.mo.GetRoutineManager().GetAutoIncrCacheManager())
+			return frontend.NewInternalExecutor(pu, s.aicm)
 		},
 	}
 	ug.Upgrade(moServerCtx)
@@ -320,7 +321,7 @@ func (s *service) registerExecutorsLocked() {
 	pu.LockService = s.lockService
 	moServerCtx := context.WithValue(context.Background(), config.ParameterUnitKey, pu)
 	ieFactory := func() ie.InternalExecutor {
-		return frontend.NewInternalExecutor(pu, s.mo.GetRoutineManager().GetAutoIncrCacheManager())
+		return frontend.NewInternalExecutor(pu, s.aicm)
 	}
 
 	ts, ok := s.task.holder.Get()
@@ -329,7 +330,7 @@ func (s *service) registerExecutorsLocked() {
 	}
 	s.task.runner.RegisterExecutor(task.TaskCode_SystemInit,
 		func(ctx context.Context, t task.Task) error {
-			if err := frontend.InitSysTenant(moServerCtx, s.mo.GetRoutineManager().GetAutoIncrCacheManager()); err != nil {
+			if err := frontend.InitSysTenant(moServerCtx, s.aicm); err != nil {
 				return err
 			}
 			if err := sysview.InitSchema(moServerCtx, ieFactory); err != nil {

@@ -51,6 +51,20 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
+var (
+	cnSessions *Sessions
+)
+
+func init() {
+	cnSessions = NewSessions()
+}
+
+func NewSessions() *Sessions {
+	sess := &Sessions{}
+	sess.mu.seses = make(map[uuid.UUID]*Session)
+	return sess
+}
+
 var MaxPrepareNumberInOneSession int = 100000
 
 // TODO: this variable should be configure by set variable
@@ -105,9 +119,6 @@ type Session struct {
 	conn *Connection
 	// account id
 	accountId uint32
-
-	//protocol layer
-	protocol Protocol
 
 	//cmd from the client
 	cmd CommandType
@@ -536,7 +547,7 @@ func (e *errInfo) length() int {
 	return len(e.codes)
 }
 
-func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
+func NewSession(conn *Connection, mp *mpool.MPool, pu *config.ParameterUnit,
 	gSysVars *GlobalSystemVariables, isNotBackgroundSession bool,
 	aicm *defines.AutoIncrCacheManager, sharedTxnHandler *TxnHandler) *Session {
 	//if the sharedTxnHandler exists,we use its txnCtx and txnOperator in this session.
@@ -552,12 +563,12 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, txnCtx, txnOp)
 
 	ses := &Session{
-		protocol:   proto,
+		conn:       conn,
 		mp:         mp,
 		pu:         pu,
 		txnHandler: txnHandler,
 		//TODO:fix database name after the catalog is ready
-		txnCompileCtx: InitTxnCompilerContext(txnHandler, proto.GetDatabaseName()),
+		txnCompileCtx: InitTxnCompilerContext(txnHandler, ""),
 		storage:       &engine.EntireEngine{Engine: pu.StorageEngine},
 		gSysVars:      gSysVars,
 
@@ -707,7 +718,7 @@ func NewBackgroundSession(reqCtx context.Context, upstream *Session, mp *mpool.M
 			panic("invalid shared txn handler")
 		}
 	}
-	ses = NewSession(&FakeProtocol{}, mp, PU, gSysVars, false, aicm, sharedTxnHandler)
+	ses = NewSession(nil, mp, PU, gSysVars, false, aicm, sharedTxnHandler)
 	ses.upstream = upstream
 	ses.SetOutputCallback(fakeDataSetFetcher)
 	if stmt := motrace.StatementFromContext(reqCtx); stmt != nil {
@@ -798,10 +809,10 @@ func (ses *Session) UpdateDebugString() {
 	defer ses.mu.Unlock()
 	sb := bytes.Buffer{}
 	//option connection id , ip
-	if ses.protocol != nil {
-		sb.WriteString(fmt.Sprintf("connectionId %d", ses.protocol.ConnectionID()))
+	if ses.conn != nil {
+		sb.WriteString(fmt.Sprintf("connectionId %d", ses.conn.connId))
 		sb.WriteByte('|')
-		sb.WriteString(ses.protocol.Peer())
+		sb.WriteString(ses.conn.peerAddress)
 	}
 	sb.WriteByte('|')
 	//account info
@@ -1099,11 +1110,11 @@ func (ses *Session) GetMysqlResultSet() *MysqlResultSet {
 	return ses.mrs
 }
 
-func (ses *Session) ReplaceProtocol(proto Protocol) Protocol {
+func (ses *Session) ReplaceProtocol(conn *Connection) *Connection {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	old := ses.protocol
-	ses.protocol = proto
+	old := ses.conn
+	ses.conn = conn
 	return old
 }
 
@@ -1480,7 +1491,7 @@ func (ses *Session) skipAuthForSpecialUser() bool {
 }
 
 // AuthenticateUser Verify the user's password, and if the login information contains the database name, verify if the database exists
-func (ses *Session) AuthenticateUser(userInput string, dbName string, authResponse []byte, salt []byte, checkPassword func(pwd, salt, auth []byte) bool) ([]byte, error) {
+func (ses *Session) AuthenticateUser(ctx context.Context, userInput string, dbName string, authResponse []byte, salt []byte, checkPassword func(pwd, salt, auth []byte) bool) ([]byte, error) {
 	var defaultRoleID int64
 	var defaultRole string
 	var tenant *TenantInfo
@@ -1495,7 +1506,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	var specialAccount *TenantInfo
 
 	//Get tenant info
-	tenant, err = GetTenantInfo(ses.GetRequestContext(), userInput)
+	tenant, err = GetTenantInfo(ctx, userInput)
 	if err != nil {
 		return nil, err
 	}
@@ -1516,7 +1527,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 
 	//step1 : check tenant exists or not in SYS tenant context
 	ses.timestampMap[TSCheckTenantStart] = time.Now()
-	sysTenantCtx := context.WithValue(ses.GetRequestContext(), defines.TenantIDKey{}, uint32(sysAccountID))
+	sysTenantCtx := context.WithValue(ctx, defines.TenantIDKey{}, uint32(sysAccountID))
 	sysTenantCtx = context.WithValue(sysTenantCtx, defines.UserIDKey{}, uint32(rootID))
 	sysTenantCtx = context.WithValue(sysTenantCtx, defines.RoleIDKey{}, uint32(moAdminRoleID))
 	sqlForCheckTenant, err := getSqlForCheckTenant(sysTenantCtx, tenant.GetTenant())
@@ -1575,7 +1586,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	//step3 : get the password of the user
 
 	ses.timestampMap[TSCheckUserStart] = time.Now()
-	tenantCtx := context.WithValue(ses.GetRequestContext(), defines.TenantIDKey{}, uint32(tenantID))
+	tenantCtx := context.WithValue(ctx, defines.TenantIDKey{}, uint32(tenantID))
 
 	logDebugf(sessionInfo, "check user of %s exists", tenant)
 	//Get the password of the user in an independent session
@@ -1983,7 +1994,7 @@ func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *S
 	//2. replace protocol by FakeProtocol.
 	// Any response yielded during running query will be dropped by the FakeProtocol.
 	// The client will not receive any response from the FakeProtocol.
-	prevProto := ses.ReplaceProtocol(&FakeProtocol{})
+	prevProto := ses.ReplaceProtocol(nil)
 	// inherit database
 	ses.SetDatabaseName(prevDB)
 	//restore normal protocol and output callback

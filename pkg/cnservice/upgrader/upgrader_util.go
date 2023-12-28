@@ -21,7 +21,7 @@ import (
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/defines"
-	"github.com/matrixorigin/matrixone/pkg/frontend"
+	frontend "github.com/matrixorigin/matrixone/pkg/frontend/v2"
 	"github.com/matrixorigin/matrixone/pkg/util/export/table"
 	ie "github.com/matrixorigin/matrixone/pkg/util/internalExecutor"
 )

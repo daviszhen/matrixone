@@ -7506,7 +7506,6 @@ func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err
 	upstream := &Session{
 		connectCtx:           ctx,
 		autoIncrCacheManager: aicm,
-		protocol:             &FakeProtocol{},
 		seqCurValues:         make(map[uint64]string),
 		seqLastValue:         new(string),
 	}

@@ -29,7 +29,7 @@ import (
 
 func Test_protocol(t *testing.T) {
 	convey.Convey("test protocol.go succ", t, func() {
-		req := &Request{}
+		req := &mysqlPayload{}
 		req.SetCmd(1)
 		convey.So(req.cmd, convey.ShouldEqual, 1)
 

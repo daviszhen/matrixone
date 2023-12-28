@@ -252,7 +252,7 @@ func Test_mce(t *testing.T) {
 		mce.SetRoutineManager(rm)
 		mce.SetSession(ses)
 
-		req := &Request{
+		req := &mysqlPayload{
 			cmd:  COM_QUERY,
 			data: []byte("test anywhere"),
 		}
@@ -261,7 +261,7 @@ func Test_mce(t *testing.T) {
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp, convey.ShouldBeNil)
 
-		req = &Request{
+		req = &mysqlPayload{
 			cmd:  COM_INIT_DB,
 			data: []byte("test anywhere"),
 		}
@@ -269,7 +269,7 @@ func Test_mce(t *testing.T) {
 		_, err = mce.ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 
-		req = &Request{
+		req = &mysqlPayload{
 			cmd:  COM_PING,
 			data: []byte("test anywhere"),
 		}
@@ -278,7 +278,7 @@ func Test_mce(t *testing.T) {
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp.category, convey.ShouldEqual, OkResponse)
 
-		req = &Request{
+		req = &mysqlPayload{
 			cmd:  COM_QUIT,
 			data: []byte("test anywhere"),
 		}
@@ -444,7 +444,7 @@ func Test_mce_selfhandle(t *testing.T) {
 		err = mce.handleSetVar(ctx, setVar.(*tree.SetVar), "")
 		convey.So(err, convey.ShouldBeNil)
 
-		req := &Request{
+		req := &mysqlPayload{
 			cmd:  COM_FIELD_LIST,
 			data: []byte{'A', 0},
 		}
