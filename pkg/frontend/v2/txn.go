@@ -747,3 +747,639 @@ func (ses *Session) setAutocommitOn() {
 	ses.ClearOptionBits(OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT)
 	ses.SetServerStatus(SERVER_STATUS_AUTOCOMMIT)
 }
+
+// createTxnCtx creates a new txn context. unsafe
+func (txn *Txn) createTxnCtx() context.Context {
+	if txn.mu.txnCtx == nil {
+		txn.mu.txnCtx, txn.mu.txnCancel = context.WithTimeout(txn.ses.conn.connCtx, fePu.SV.SessionTimeout.Duration)
+	}
+
+	reqCtx, _ := txn.ses.conn.req.ctx.Ctx()
+	retTxnCtx := txn.mu.txnCtx
+
+	if v := reqCtx.Value(defines.TenantIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.TenantIDKey{}, v)
+	}
+	if v := reqCtx.Value(defines.UserIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.UserIDKey{}, v)
+	}
+	if v := reqCtx.Value(defines.RoleIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.RoleIDKey{}, v)
+	}
+	if v := reqCtx.Value(defines.NodeIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.NodeIDKey{}, v)
+	}
+	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(reqCtx))
+	if txn.ses != nil && txn.ses.tenant != nil && txn.ses.tenant.User == db_holder.MOLoggerUser {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.IsMoLogger{}, true)
+	}
+
+	if storage, ok := reqCtx.Value(defines.TemporaryTN{}).(*memorystorage.Storage); ok {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, storage)
+	} else if txn.ses.IfInitedTempEngine() {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, txn.ses.GetTempTableStorage())
+	}
+	return retTxnCtx
+}
+
+func (txn *Txn) AttachTempStorageToTxnCtx() {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.mu.txnCtx = context.WithValue(txn.createTxnCtx(), defines.TemporaryTN{}, txn.ses.GetTempTableStorage())
+}
+
+func (txn *Txn) SetTempEngine(te engine.Engine) {
+	ee := txn.storage.(*engine.EntireEngine)
+	ee.TempEngine = te
+}
+
+// NewTxnOperator creates a new txn operator using TxnClient
+func (txn *Txn) NewTxnOperator() (context.Context, TxnOperator, error) {
+	var err error
+	if feTxnClient == nil {
+		panic("must set txn client")
+	}
+
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	if txn.mu.shareTxn {
+		return nil, nil, moerr.NewInternalError(txn.ses.GetRequestContext(), "NewTxnOperator: the share txn is not allowed to create new txn")
+	}
+
+	var opts []client.TxnOption
+	rt := moruntime.ProcessLevelRuntime()
+	if rt != nil {
+		if v, ok := rt.GetGlobalVariables(moruntime.TxnOptions); ok {
+			opts = v.([]client.TxnOption)
+		}
+	}
+
+	txnCtx := txn.createTxnCtx()
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+	opts = append(opts,
+		client.WithTxnCreateBy(fmt.Sprintf("frontend-session-%p", txn.ses)))
+
+	if txn.ses != nil && txn.ses.fromRealUser {
+		opts = append(opts,
+			client.WithUserTxn())
+	}
+
+	if txn.ses != nil {
+		varVal, err := txn.ses.GetSessionVar("transaction_operator_open_log")
+		if err != nil {
+			return nil, nil, err
+		}
+		if gsv, ok := GSysVariables.GetDefinitionOfSysVar("transaction_operator_open_log"); ok {
+			if svbt, ok2 := gsv.GetType().(SystemVariableBoolType); ok2 {
+				if svbt.IsTrue(varVal) {
+					opts = append(opts, client.WithTxnOpenLog())
+				}
+			}
+		}
+
+	}
+
+	txn.mu.txnOp, err = feTxnClient.New(
+		txnCtx,
+		txn.ses.getLastCommitTS(),
+		opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if txn.mu.txnOp == nil {
+		return nil, nil, moerr.NewInternalError(txn.ses.GetRequestContext(), "NewTxnOperator: txnClient new a null txn")
+	}
+	return txnCtx, txn.mu.txnOp, err
+}
+
+func (txn *Txn) enableStartStmt(txnId []byte) {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.mu.hasCalledStartStmt = true
+	txn.mu.prevTxnId = txnId
+}
+
+func (txn *Txn) disableStartStmt() {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.mu.hasCalledStartStmt = false
+	txn.mu.prevTxnId = nil
+}
+
+func (txn *Txn) calledStartStmt() (bool, []byte) {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	return txn.mu.hasCalledStartStmt, txn.mu.prevTxnId
+}
+
+// NewTxn commits the old transaction if it existed.
+// Then it creates the new transaction by Engin.New.
+func (txn *Txn) NewTxn() (context.Context, TxnOperator, error) {
+	var err error
+	var txnCtx context.Context
+	var txnOp TxnOperator
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	reqCtx, _ := txn.ses.conn.req.ctx.Ctx()
+	if txn.mu.shareTxn {
+		return nil, nil, moerr.NewInternalError(reqCtx, "NewTxn: the share txn is not allowed to create new txn")
+	}
+	if txn.isValidTxnOperatorUnsafe() {
+		err = txn.CommitTxn()
+		if err != nil {
+			/*
+				fix issue 6024.
+				When we get a w-w conflict during commit the txn,
+				we convert the error into a readable error.
+			*/
+			if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
+				return nil, nil, moerr.NewInternalError(reqCtx, writeWriteConflictsErrorInfo())
+			}
+			return nil, nil, err
+		}
+	}
+	txn.SetTxnOperatorInvalid()
+	defer func() {
+		if err != nil {
+			tenant := txn.ses.GetTenantName()
+			incTransactionErrorsCounter(tenant, metric.SQLTypeBegin)
+		}
+	}()
+	txnCtx, txnOp, err = txn.NewTxnOperator()
+	if err != nil {
+		return nil, nil, err
+	}
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+
+	err = txn.storage.New(txnCtx, txnOp)
+	//if txnOp != nil && !txn.GetSession().IsDerivedStmt() {
+	//	fmt.Println("===> start statement 1", txnOp.Txn().DebugString())
+	//	txnOp.GetWorkspace().StartStatement()
+	//	txn.enableStartStmt()
+	//}
+	if err != nil {
+		txn.ses.SetTxnId(dumpUUID[:])
+	} else {
+		txn.ses.SetTxnId(txnOp.Txn().ID)
+	}
+	return txnCtx, txnOp, err
+}
+
+// isValidTxnOperatorUnsafe checks the txn operator is valid
+func (txn *Txn) isValidTxnOperatorUnsafe() bool {
+	return txn.mu.txnOp != nil && txn.mu.txnCtx != nil
+}
+
+// IsValidTxnOperator checks the txn operator is valid
+func (txn *Txn) IsValidTxnOperator() bool {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	return txn.isValidTxnOperatorUnsafe()
+}
+
+func (txn *Txn) SetTxnOperatorInvalid() {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.setTxnOperatorInvalidUnsafe()
+}
+
+func (txn *Txn) setTxnOperatorInvalidUnsafe() {
+	txn.mu.txnOp = nil
+	if txn.mu.txnCancel != nil {
+		txn.mu.txnCancel()
+		txn.mu.txnCancel = nil
+	}
+	txn.mu.txnCtx = nil
+}
+
+func (txn *Txn) GetTxnOperator() (context.Context, TxnOperator) {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	return txn.getTxnOperatorUnsafe()
+}
+
+func (txn *Txn) getTxnOperatorUnsafe() (context.Context, TxnOperator) {
+	return txn.createTxnCtx(), txn.mu.txnOp
+}
+
+func (txn *Txn) CommitTxn() error {
+	reqCtx, _ := txn.ses.conn.req.ctx.Ctx()
+	_, span := trace.Start(reqCtx, "TxnHandler.CommitTxn",
+		trace.WithKind(trace.SpanKindStatement))
+	defer span.End(trace.WithStatementExtra(txn.ses.GetTxnId(), txn.ses.GetStmtId(), txn.ses.GetSqlOfStmt()))
+
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	if !txn.isValidTxnOperatorUnsafe() || txn.mu.shareTxn {
+		return nil
+	}
+	ses := txn.ses
+	sessionInfo := ses.GetDebugString()
+	txnCtx, txnOp := txn.getTxnOperatorUnsafe()
+	if txnOp == nil {
+		txn.setTxnOperatorInvalidUnsafe()
+		logError(ses, sessionInfo, "CommitTxn: txn operator is null")
+	}
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+	if ses.tempTablestorage != nil {
+		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.tempTablestorage)
+	}
+	storage := txn.storage
+	ctx2, cancel := context.WithTimeout(
+		txnCtx,
+		storage.Hints().CommitOrRollbackTimeout,
+	)
+	defer cancel()
+	val, e := ses.GetSessionVar("mo_pk_check_by_dn")
+	if e != nil {
+		return e
+	}
+	if val != nil {
+		ctx2 = context.WithValue(ctx2, defines.PkCheckByTN{}, val.(int8))
+	}
+	var err error
+	defer func() {
+		// metric count
+		tenant := ses.GetTenantName()
+		incTransactionCounter(tenant)
+		if err != nil {
+			incTransactionErrorsCounter(tenant, metric.SQLTypeCommit)
+		}
+	}()
+
+	if logutil.GetSkip1Logger().Core().Enabled(zap.DebugLevel) {
+		txnId := txnOp.Txn().DebugString()
+		logDebugf(sessionInfo, "CommitTxn txnId:%s", txnId)
+		defer func() {
+			logDebugf(sessionInfo, "CommitTxn exit txnId:%s", txnId)
+		}()
+	}
+	if txnOp != nil {
+		txn.ses.SetTxnId(txnOp.Txn().ID)
+		err = txnOp.Commit(ctx2)
+		if err != nil {
+			txnId := txnOp.Txn().DebugString()
+			txn.setTxnOperatorInvalidUnsafe()
+			logError(ses, sessionInfo,
+				"CommitTxn: txn operator commit failed",
+				zap.String("txnId", txnId),
+				zap.Error(err))
+		}
+		ses.updateLastCommitTS(txnOp.Txn().CommitTS)
+	}
+	txn.setTxnOperatorInvalidUnsafe()
+	txn.ses.SetTxnId(dumpUUID[:])
+	return err
+}
+
+func (txn *Txn) RollbackTxn() error {
+	reqCtx, _ := txn.ses.conn.req.ctx.Ctx()
+	_, span := trace.Start(reqCtx, "TxnHandler.RollbackTxn",
+		trace.WithKind(trace.SpanKindStatement))
+	defer span.End(trace.WithStatementExtra(txn.ses.GetTxnId(), txn.ses.GetStmtId(), txn.ses.GetSqlOfStmt()))
+
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	if !txn.isValidTxnOperatorUnsafe() || txn.mu.shareTxn {
+		return nil
+	}
+	ses := txn.ses
+	sessionInfo := ses.GetDebugString()
+	txnCtx, txnOp := txn.getTxnOperatorUnsafe()
+	if txnOp == nil {
+		txn.setTxnOperatorInvalidUnsafe()
+		logError(ses, ses.GetDebugString(),
+			"RollbackTxn: txn operator is null",
+			zap.String("sessionInfo", sessionInfo))
+	}
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+	if ses.tempTablestorage != nil {
+		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.tempTablestorage)
+	}
+	storage := txn.storage
+	ctx2, cancel := context.WithTimeout(
+		txnCtx,
+		storage.Hints().CommitOrRollbackTimeout,
+	)
+	defer cancel()
+	var err error
+	defer func() {
+		// metric count
+		tenant := ses.GetTenantName()
+		incTransactionCounter(tenant)
+		incTransactionErrorsCounter(tenant, metric.SQLTypeOther) // exec rollback cnt
+		if err != nil {
+			incTransactionErrorsCounter(tenant, metric.SQLTypeRollback)
+		}
+	}()
+	if logutil.GetSkip1Logger().Core().Enabled(zap.DebugLevel) {
+		txnId := txnOp.Txn().DebugString()
+		logDebugf(sessionInfo, "RollbackTxn txnId:%s", txnId)
+		defer func() {
+			logDebugf(sessionInfo, "RollbackTxn exit txnId:%s", txnId)
+		}()
+	}
+	if txnOp != nil {
+		txn.ses.SetTxnId(txnOp.Txn().ID)
+		err = txnOp.Rollback(ctx2)
+		if err != nil {
+			txnId := txnOp.Txn().DebugString()
+			txn.setTxnOperatorInvalidUnsafe()
+			logError(ses, ses.GetDebugString(),
+				"RollbackTxn: txn operator commit failed",
+				zap.String("txnId", txnId),
+				zap.Error(err))
+		}
+	}
+	txn.setTxnOperatorInvalidUnsafe()
+	txn.ses.SetTxnId(dumpUUID[:])
+	return err
+}
+
+func (txn *Txn) cancelTxnCtx() {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	if txn.mu.txnCancel != nil {
+		txn.mu.txnCancel()
+	}
+}
+
+func (txn *Txn) setOptionBits(bit uint32) {
+	txn.mu.optionBits |= bit
+}
+
+func (txn *Txn) clearOptionBits(bit uint32) {
+	txn.mu.optionBits &= ^bit
+}
+
+func (txn *Txn) optionBitsIsSet(bit uint32) bool {
+	return txn.mu.optionBits&bit != 0
+}
+
+func (txn *Txn) getOptionBits() uint32 {
+	return txn.mu.optionBits
+}
+
+func (txn *Txn) setServerStatus(bit uint16) {
+	txn.mu.serverStatus |= bit
+}
+
+func (txn *Txn) clearServerStatus(bit uint16) {
+	txn.mu.serverStatus &= ^bit
+}
+
+func (txn *Txn) serverStatusIsSet(bit uint16) bool {
+	return txn.mu.serverStatus&bit != 0
+}
+
+func (txn *Txn) getServerStatus() uint16 {
+	return txn.mu.serverStatus
+}
+
+/*
+InMultiStmtTransactionMode checks the session is in multi-statement transaction mode.
+OPTION_NOT_AUTOCOMMIT: After the autocommit is off, the multi-statement transaction is
+started implicitly by the first statement of the transaction.
+OPTION_BEGIN: Whenever the autocommit is on or off, the multi-statement transaction is
+started explicitly by the BEGIN statement.
+
+But it does not denote the transaction is active or not.
+
+Cases    | set Autocommit = 1/0 | BEGIN statement |
+---------------------------------------------------
+Case1      1                       Yes
+Case2      1                       No
+Case3      0                       Yes
+Case4      0                       No
+---------------------------------------------------
+
+If it is Case1,Case3,Cass4, Then
+
+	inMultiStmtTransactionMode returns true.
+	Also, the bit SERVER_STATUS_IN_TRANS will be set.
+
+If it is Case2, Then
+
+	inMultiStmtTransactionMode returns false
+*/
+func (txn *Txn) inMultiStmtTransactionMode() bool {
+	return txn.optionBitsIsSet(OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)
+}
+
+/*
+InActiveMultiStmtTransaction checks the session is in multi-statement transaction mode
+and there is an active transaction.
+
+But sometimes, the session does not start an active transaction even if it is in multi-
+statement transaction mode.
+
+For example: there is no active transaction.
+set autocommit = 0;
+select 1;
+
+For example: there is an active transaction.
+begin;
+select 1;
+
+When the statement starts the multi-statement transaction(select * from table), this flag
+won't be set until we access the tables.
+*/
+func (txn *Txn) inActiveMultiStmtTransaction() bool {
+	return txn.serverStatusIsSet(SERVER_STATUS_IN_TRANS)
+}
+
+/*
+TxnCreate creates the transaction implicitly and idempotent
+
+When it is in multi-statement transaction mode:
+
+	Set SERVER_STATUS_IN_TRANS bit;
+	Starts a new transaction if there is none. returns erros if there is one.
+
+When it is not in single statement transaction mode:
+
+	Starts a new transaction if there is none. returns erros if there is one.
+*/
+func (txn *Txn) TxnCreate() (context.Context, TxnOperator, error) {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	if txn.isValidTxnOperatorUnsafe() {
+		txnCtx, txnOp := txn.getTxnOperatorUnsafe()
+		return txnCtx, txnOp, nil
+	}
+	if txn.inMultiStmtTransactionMode() {
+		txn.setServerStatus(SERVER_STATUS_IN_TRANS)
+	}
+	return txn.NewTxn()
+}
+
+/*
+TxnBegin begins a new transaction.
+It commits the current transaction implicitly.
+*/
+func (txn *Txn) TxnBegin() error {
+	var err error
+	if txn.InMultiStmtTransactionMode() {
+		txn.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		err = txn.GetTxnHandler().CommitTxn()
+	}
+	txn.ClearOptionBits(OPTION_BEGIN)
+	if err != nil {
+		/*
+			fix issue 6024.
+			When we get a w-w conflict during commit the txn,
+			we convert the error into a readable error.
+		*/
+		if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
+			return moerr.NewInternalError(txn.GetRequestContext(), writeWriteConflictsErrorInfo())
+		}
+		return err
+	}
+	txn.SetOptionBits(OPTION_BEGIN)
+	txn.SetServerStatus(SERVER_STATUS_IN_TRANS)
+	_, _, err = txn.GetTxnHandler().NewTxn()
+	return err
+}
+
+// TxnCommit commits the current transaction.
+func (txn *Txn) TxnCommit() error {
+	var err error
+	txn.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
+	err = txn.GetTxnHandler().CommitTxn()
+	txn.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+	txn.ClearOptionBits(OPTION_BEGIN)
+	return err
+}
+
+// TxnRollback rollbacks the current transaction.
+func (txn *Txn) TxnRollback() error {
+	var err error
+	txn.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
+	err = txn.GetTxnHandler().RollbackTxn()
+	txn.ClearOptionBits(OPTION_BEGIN)
+	return err
+}
+
+/*
+TxnCommitSingleStatement commits the single statement transaction.
+
+Cases    | set Autocommit = 1/0 | BEGIN statement |
+---------------------------------------------------
+Case1      1                       Yes
+Case2      1                       No
+Case3      0                       Yes
+Case4      0                       No
+---------------------------------------------------
+
+If it is Case1,Case3,Cass4, Then
+
+	InMultiStmtTransactionMode returns true.
+	Also, the bit SERVER_STATUS_IN_TRANS will be set.
+
+If it is Case2, Then
+
+	InMultiStmtTransactionMode returns false
+*/
+func (txn *Txn) TxnCommitSingleStatement(stmt tree.Statement) error {
+	var err error
+	/*
+		Commit Rules:
+		1, if it is in single-statement mode:
+			it commits.
+		2, if it is in multi-statement mode:
+			if the statement is the one can be executed in the active transaction,
+				the transaction need to be committed at the end of the statement.
+	*/
+	if !txn.InMultiStmtTransactionMode() ||
+		txn.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) {
+		err = txn.GetTxnHandler().CommitTxn()
+		txn.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		txn.ClearOptionBits(OPTION_BEGIN)
+	}
+	return err
+}
+
+/*
+TxnRollbackSingleStatement rollbacks the single statement transaction.
+
+Cases    | set Autocommit = 1/0 | BEGIN statement |
+---------------------------------------------------
+Case1      1                       Yes
+Case2      1                       No
+Case3      0                       Yes
+Case4      0                       No
+---------------------------------------------------
+
+If it is Case1,Case3,Cass4, Then
+
+	InMultiStmtTransactionMode returns true.
+	Also, the bit SERVER_STATUS_IN_TRANS will be set.
+
+If it is Case2, Then
+
+	InMultiStmtTransactionMode returns false
+*/
+func (txn *Txn) TxnRollbackSingleStatement(stmt tree.Statement) error {
+	var err error
+	/*
+			Rollback Rules:
+			1, if it is in single-statement mode (Case2):
+				it rollbacks.
+			2, if it is in multi-statement mode (Case1,Case3,Case4):
+		        the transaction need to be rollback at the end of the statement.
+				(every error will abort the transaction.)
+	*/
+	if !txn.InMultiStmtTransactionMode() || txn.InActiveTransaction() {
+		err = txn.GetTxnHandler().RollbackTxn()
+		txn.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		txn.ClearOptionBits(OPTION_BEGIN)
+	}
+	return err
+}
+
+/*
+InActiveTransaction checks if it is in an active transaction.
+*/
+func (txn *Txn) InActiveTransaction() bool {
+	if txn.InActiveMultiStmtTransaction() {
+		return true
+	} else {
+		return txn.GetTxnHandler().IsValidTxnOperator()
+	}
+}
+
+/*
+SetAutocommit sets the value of the system variable 'autocommit'.
+
+The rule is that we can not execute the statement 'set parameter = value' in
+an active transaction whichever it is started by BEGIN or in 'set autocommit = 0;'.
+*/
+func (txn *Txn) SetAutocommit(on bool) error {
+	if txn.InActiveTransaction() {
+		return moerr.NewInternalError(txn.requestCtx, parameterModificationInTxnErrorInfo())
+	}
+	if on {
+		txn.ClearOptionBits(OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT)
+		txn.SetServerStatus(SERVER_STATUS_AUTOCOMMIT)
+	} else {
+		txn.ClearServerStatus(SERVER_STATUS_AUTOCOMMIT)
+		txn.SetOptionBits(OPTION_NOT_AUTOCOMMIT)
+	}
+	return nil
+}
+
+func (txn *Txn) setAutocommitOn() {
+	txn.ClearOptionBits(OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT)
+	txn.SetServerStatus(SERVER_STATUS_AUTOCOMMIT)
+}

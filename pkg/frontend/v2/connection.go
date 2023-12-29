@@ -70,12 +70,11 @@ func (conns *Connections) Created(rs goetty.IOSession) {
 	// XXX MPOOL can choose to use a Mid sized mpool, if, we know
 	// this mpool will be deleted.  Maybe in the following Closed method.
 	ses := NewSession(nil, nil, fePu, GSysVariables, true, feAicm, nil)
+	ses.SetFromRealUser(true)
 	conn.ses = ses
 	if feBaseService != nil {
 		conn.connCtx = context.WithValue(conn.connCtx, defines.NodeIDKey{}, feBaseService.ID())
 	}
-	ses.SetFromRealUser(true)
-
 	ses.timestampMap[TSCreatedStart] = time.Now()
 	defer func() {
 		ses.timestampMap[TSCreatedEnd] = time.Now()
@@ -164,6 +163,18 @@ func getConnID(ctx context.Context, hkClient logservice.CNHAKeeperClient) (uint3
 	return uint32(connID), nil
 }
 
+func (conn *Connection) consumeHandshakeRsp(handrsp *HandshakeResponse) {
+	conn.capability = handrsp.capability
+	conn.maxClientPacketSize = handrsp.maxClientPacketSize
+	conn.connectAttrs = handrsp.connectAttrs
+
+	conn.ses.collationID = handrsp.collationID
+	conn.ses.collationName = handrsp.collationName
+	conn.ses.charset = handrsp.charset
+	conn.ses.SetUserName(handrsp.username)
+	conn.ses.SetDatabaseName(handrsp.database)
+}
+
 func (conn *Connection) run() error {
 	payloadWriter := &MysqlPayloadWriteBuffer{}
 	err := payloadWriter.Open(conn.connCtx,
@@ -211,10 +222,10 @@ func (conn *Connection) run() error {
 	}
 
 	//update conn
-	conn.capability = handrsp.capability
+	conn.consumeHandshakeRsp(handrsp)
 
 	//authen user
-	err = conn.authen(endPoint, handrsp)
+	err = conn.authen(endPoint, handrsp.authResponse)
 	if err != nil {
 		return err
 	}
@@ -234,11 +245,18 @@ func (conn *Connection) run() error {
 			break
 		}
 
-		req := &Request{}
-		req.reqCtx, req.reqCancel = context.WithCancel(conn.connCtx)
-		req.payload = payload
+		reqCtx, reqCancel := context.WithTimeout(conn.connCtx, fePu.SV.SessionTimeout.Duration)
+		if feBaseService != nil {
+			reqCtx = context.WithValue(reqCtx, defines.NodeIDKey{}, feBaseService.ID())
+		}
+		tenant := conn.ses.GetTenantInfo()
+		reqCtx = context.WithValue(reqCtx, defines.TenantIDKey{}, tenant.GetTenantID())
+		reqCtx = context.WithValue(reqCtx, defines.UserIDKey{}, tenant.GetUserID())
+		reqCtx = context.WithValue(reqCtx, defines.RoleIDKey{}, tenant.GetDefaultRoleID())
+		conn.req.ctx.SetCtx(reqCtx, reqCancel)
+		conn.req.payload = payload
 
-		err = conn.handleCommand(req, endPoint)
+		err = conn.handleCommand(endPoint)
 		if err != nil {
 			return err
 		}
@@ -279,7 +297,7 @@ func checkPassword(pwd, salt, auth []byte) bool {
 }
 
 // the server authenticate that the client can connect and use the database
-func (conn *Connection) authenticateUser(handrsp *HandshakeResponse) error {
+func (conn *Connection) authenticateUser(authrsp []byte) error {
 	var psw []byte
 	var err error
 	var tenant *TenantInfo
@@ -287,14 +305,14 @@ func (conn *Connection) authenticateUser(handrsp *HandshakeResponse) error {
 	ses := conn.ses
 	if !fePu.SV.SkipCheckUser {
 		// logDebugf(mp.getDebugStringUnsafe(), "authenticate user 1")
-		psw, err = ses.AuthenticateUser(conn.connCtx, handrsp.username, handrsp.database, handrsp.authResponse, conn.salt, checkPassword)
+		psw, err = ses.AuthenticateUser(conn.connCtx, ses.GetUserName(), ses.GetDatabaseName(), authrsp, conn.salt, checkPassword)
 		if err != nil {
 			return err
 		}
 		// logDebugf(mp.getDebugStringUnsafe(), "authenticate user 2")
 
 		//TO Check password
-		if checkPassword(psw, conn.salt, handrsp.authResponse) {
+		if checkPassword(psw, conn.salt, authrsp) {
 			// logDebugf(mp.getDebugStringUnsafe(), "check password succeeded")
 			ses.InitGlobalSystemVariables()
 		} else {
@@ -303,7 +321,7 @@ func (conn *Connection) authenticateUser(handrsp *HandshakeResponse) error {
 	} else {
 		// logDebugf(mp.getDebugStringUnsafe(), "skip authenticate user")
 		//Get tenant info
-		tenant, err = GetTenantInfo(conn.connCtx, handrsp.username)
+		tenant, err = GetTenantInfo(conn.connCtx, ses.GetUserName())
 		if err != nil {
 			return err
 		}
@@ -312,7 +330,7 @@ func (conn *Connection) authenticateUser(handrsp *HandshakeResponse) error {
 			ses.SetTenantInfo(tenant)
 
 			//TO Check password
-			if len(psw) == 0 || checkPassword(psw, conn.salt, handrsp.authResponse) {
+			if len(psw) == 0 || checkPassword(psw, conn.salt, authrsp) {
 				// logInfo(mp.ses, mp.ses.GetDebugString(), "check password succeeded")
 			} else {
 				return moerr.NewInternalError(conn.connCtx, "check password failed")
@@ -354,7 +372,7 @@ func (conn *Connection) sendErrPacket(endPoint *PacketEndPoint, errorCode uint16
 	return endPoint.SendPacket(conn.connCtx, &errPkt, true)
 }
 
-func (conn *Connection) authen(endPoint *PacketEndPoint, handrsp *HandshakeResponse) (err error) {
+func (conn *Connection) authen(endPoint *PacketEndPoint, authrsp []byte) (err error) {
 	ses := conn.ses
 	ses.timestampMap[TSAuthenticateStart] = time.Now()
 	defer func() {
@@ -363,9 +381,9 @@ func (conn *Connection) authen(endPoint *PacketEndPoint, handrsp *HandshakeRespo
 	}()
 
 	// logDebugf(mp.getDebugStringUnsafe(), "authenticate user")
-	if err := conn.authenticateUser(handrsp); err != nil {
+	if err := conn.authenticateUser(authrsp); err != nil {
 		logutil.Errorf("authenticate user failed.error:%v", err)
-		errorCode, sqlState, msg := RewriteError(err, handrsp.username)
+		errorCode, sqlState, msg := RewriteError(err, ses.GetUserName())
 		err2 := conn.sendErrPacket(endPoint, errorCode, sqlState, msg)
 		if err2 != nil {
 			logutil.Errorf("send err packet failed.error:%v", err2)
@@ -392,43 +410,43 @@ func (conn *Connection) authen(endPoint *PacketEndPoint, handrsp *HandshakeRespo
 	return err
 }
 
-func (conn *Connection) handleCommand(req *Request, endPoint *PacketEndPoint) (err error) {
-	switch req.payload.GetCmd() {
+func (conn *Connection) handleCommand(endPoint *PacketEndPoint) (err error) {
+	switch conn.req.payload.GetCmd() {
 	case COM_QUIT:
 		break
 	case COM_QUERY:
-		var query = string(req.payload.GetData())
+		var query = string(conn.req.payload.GetData())
 		conn.addSqlCount(1)
-		req.userInput = &UserInput{sql: query}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: query}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			return err
 		}
 	case COM_INIT_DB:
-		var dbname = string(req.payload.GetData())
+		var dbname = string(conn.req.payload.GetData())
 		conn.addSqlCount(1)
 		query := "use `" + dbname + "`"
-		req.userInput = &UserInput{sql: query}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: query}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			return err
 		}
 	case COM_FIELD_LIST:
-		var payload = string(req.payload.GetData())
+		var payload = string(conn.req.payload.GetData())
 		conn.addSqlCount(1)
 		query := makeCmdFieldListSql(payload)
-		req.userInput = &UserInput{sql: query}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: query}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			return err
 		}
 	case COM_PING:
-		err = conn.doComPing(req, endPoint)
+		err = conn.doComPing(endPoint)
 		if err != nil {
 			return err
 		}
 	case COM_STMT_PREPARE:
-		sql := string(req.payload.GetData())
+		sql := string(conn.req.payload.GetData())
 		conn.addSqlCount(1)
 
 		// rewrite to "Prepare stmt_name from 'xxx'"
@@ -436,22 +454,23 @@ func (conn *Connection) handleCommand(req *Request, endPoint *PacketEndPoint) (e
 		newStmtName := getPrepareStmtName(newLastStmtID)
 		sql = fmt.Sprintf("prepare %s from %s", newStmtName, sql)
 		// logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
-		req.userInput = &UserInput{sql: sql}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: sql}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			return err
 		}
 	case COM_STMT_EXECUTE:
-		data := req.payload.GetData()
+		data := conn.req.payload.GetData()
 		var prepareStmt *PrepareStmt
 		var sql string
-		sql, prepareStmt, err = conn.parseStmtExecute(req.reqCtx, data)
+		reqCtx, _ := conn.req.ctx.Ctx()
+		sql, prepareStmt, err = conn.parseStmtExecute(reqCtx, data)
 		if err != nil {
 			// return NewGeneralErrorResponse(COM_STMT_EXECUTE, conn.ses.GetServerStatus(), err)
 			return err
 		}
-		req.userInput = &UserInput{sql: sql}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: sql}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			// resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.GetServerStatus(), err)
 			return err
@@ -463,38 +482,39 @@ func (conn *Connection) handleCommand(req *Request, endPoint *PacketEndPoint) (e
 			}
 		}
 	case COM_STMT_SEND_LONG_DATA:
-		data := req.payload.GetData()
-		err = conn.parseStmtSendLongData(req.reqCtx, data)
+		data := conn.req.payload.GetData()
+		reqCtx, _ := conn.req.ctx.Ctx()
+		err = conn.parseStmtSendLongData(reqCtx, data)
 		if err != nil {
 			// resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, mce.ses.GetServerStatus(), err)
 			// return resp, nil
 			return err
 		}
 	case COM_STMT_CLOSE:
-		data := req.payload.GetData()
+		data := conn.req.payload.GetData()
 
 		// rewrite to "deallocate Prepare stmt_name"
 		stmtID := binary.LittleEndian.Uint32(data[0:4])
 		stmtName := getPrepareStmtName(stmtID)
 		sql := fmt.Sprintf("deallocate prepare %s", stmtName)
 		// logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
-		req.userInput = &UserInput{sql: sql}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: sql}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			// resp = NewGeneralErrorResponse(COM_STMT_CLOSE, mce.ses.GetServerStatus(), err)
 			return err
 		}
 
 	case COM_STMT_RESET:
-		data := req.payload.GetData()
+		data := conn.req.payload.GetData()
 
 		//Payload of COM_STMT_RESET
 		stmtID := binary.LittleEndian.Uint32(data[0:4])
 		stmtName := getPrepareStmtName(stmtID)
 		sql := fmt.Sprintf("reset prepare %s", stmtName)
 		//logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
-		req.userInput = &UserInput{sql: sql}
-		err = conn.doComQuery(req, endPoint)
+		conn.req.userInput = &UserInput{sql: sql}
+		err = conn.doComQuery(endPoint)
 		if err != nil {
 			// resp = NewGeneralErrorResponse(COM_STMT_RESET, mce.ses.GetServerStatus(), err)
 			return err
@@ -557,20 +577,21 @@ func (conn *Connection) parseStmtSendLongData(requestCtx context.Context, data [
 	return nil
 }
 
-func (conn *Connection) doComQuery(req *Request, endPoint *PacketEndPoint) (err error) {
+func (conn *Connection) doComQuery(endPoint *PacketEndPoint) (err error) {
 	return err
 }
 
-func (conn *Connection) doComPing(req *Request, endPoint *PacketEndPoint) (err error) {
+func (conn *Connection) doComPing(endPoint *PacketEndPoint) (err error) {
 	ok := &OKPacket{}
-	err = ok.Open(req.reqCtx, WithCapability(conn.capability))
+	reqCtx, _ := conn.req.ctx.Ctx()
+	err = ok.Open(reqCtx, WithCapability(conn.capability))
 	if err != nil {
 		return err
 	}
 	defer func() {
-		_ = ok.Close(req.reqCtx)
+		_ = ok.Close(reqCtx)
 	}()
-	err = endPoint.SendPacket(req.reqCtx, ok, true)
+	err = endPoint.SendPacket(reqCtx, ok, true)
 	if err != nil {
 		return err
 	}
@@ -587,11 +608,11 @@ func (conn *Connection) getNextProcessId() string {
 }
 
 func (conn *Connection) getSqlCount() uint64 {
-	return conn.sqlCount
+	return conn.ses.sqlCount
 }
 
 func (conn *Connection) addSqlCount(a uint64) {
-	conn.sqlCount += a
+	conn.ses.sqlCount += a
 }
 
 func (conn *Connection) needPrintSessionInfo() bool {
@@ -674,17 +695,10 @@ func (conn *Connection) updateGoroutineId() {
 	}
 }
 
-func (conn *Connection) setRequestCancel(cf context.CancelFunc) {
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
-	conn.mu.requestCancel = cf
-}
-
 func (conn *Connection) cancelRequestCtx() {
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
-	if conn.mu.requestCancel != nil {
-		conn.mu.requestCancel()
+	_, reqCancel := conn.req.ctx.Ctx()
+	if reqCancel != nil {
+		reqCancel()
 	}
 }
 

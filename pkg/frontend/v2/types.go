@@ -24,7 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"github.com/matrixorigin/matrixone/pkg/txn/client"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 )
 
 // ======= Transaction =======
@@ -33,15 +33,25 @@ type TxnOptions struct{}
 type TxnOpt func(*TxnOptions)
 
 type Txn struct {
-	txnOperator client.TxnOperator
-	txnCtx      context.Context
-	txnCancel   context.CancelFunc
+	storage engine.Engine
+	mu      struct {
+		sync.Mutex
+		//the server status
+		serverStatus uint16
 
-	//the server status
-	serverStatus uint16
+		//the option bits
+		optionBits uint32
 
-	//the option bits
-	optionBits uint32
+		txnCtx    context.Context
+		txnCancel context.CancelFunc
+		txnOp     TxnOperator
+
+		shareTxn           bool
+		hasCalledStartStmt bool
+		prevTxnId          []byte
+	}
+
+	ses *Session
 }
 
 // ======= Query Executor =======
@@ -112,33 +122,61 @@ type Executor interface {
 // ======= Connection Related =======
 
 type Request struct {
-	reqCtx    context.Context
-	reqCancel context.CancelFunc
+	ctx       Ctx
 	payload   *mysqlPayload
 	userInput *UserInput
 }
 
+type Ctx struct {
+	sync.Mutex
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (ctx *Ctx) Ctx() (context.Context, context.CancelFunc) {
+	ctx.Lock()
+	defer ctx.Unlock()
+	return ctx.ctx, ctx.cancel
+}
+
+func (ctx *Ctx) SetCtx(cctx context.Context, cancel context.CancelFunc) {
+	ctx.Lock()
+	defer ctx.Unlock()
+	ctx.ctx, ctx.cancel = cctx, cancel
+}
+
 type Connection struct {
-	client goetty.IOSession
+	//====== conn ======
+	connId      uint32
+	client      goetty.IOSession
+	peerAddress string
+	thisAddress string
+
+	// the id of goroutine that runs this conn
+	goroutineID uint64
+
+	//====== mysql protocol payload & handshake ======
 	//The sequence-id is incremented with each packet and may wrap around.
 	//It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
 	sequenceId atomic.Uint32
 	//joint capability shared by the server and the client
-	capability  uint32
-	ses         *Session
-	peerAddress string
-	thisAddress string
-	// the id of goroutine that executes the request
-	goroutineID uint64
-	connCtx     context.Context
+	capability uint32
+	salt       []byte
 
-	//the count of sql has been processed
-	sqlCount uint64
-	connId   uint32
+	//max packet size of the client
+	maxClientPacketSize uint32
+
+	// Connection attributes are key-value pairs that application programs
+	// can pass to the server at connect time.
+	connectAttrs map[string]string
+
+	//====== ======
+
+	connCtx context.Context
+	req     Request
 
 	mu struct {
 		sync.Mutex
-		requestCancel    context.CancelFunc
 		connCancel       context.CancelFunc
 		inProcessRequest bool
 	}
@@ -148,7 +186,9 @@ type Connection struct {
 	connectionBeCounted atomic.Bool
 	closeOnce           sync.Once
 	cancelled           atomic.Bool
-	salt                []byte
+
+	//====== business ======
+	ses *Session
 }
 
 var _ goetty.IOSessionAware = &Connections{}

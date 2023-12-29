@@ -116,7 +116,25 @@ const (
 )
 
 type Session struct {
-	conn *Connection
+	conn     *Connection
+	database atomic.Value
+	username atomic.Value
+
+	//collation id
+	collationID int
+
+	//collation name
+	collationName string
+
+	//character set
+	charset string
+
+	//business related ?
+	//the count of sql has been processed
+	sqlCount uint64
+
+	//====== previous design ======
+
 	// account id
 	accountId uint32
 
@@ -1447,11 +1465,11 @@ func (ses *Session) SetTempEngine(ctx context.Context, te engine.Engine) error {
 }
 
 func (ses *Session) GetDatabaseName() string {
-	return ses.GetMysqlProtocol().GetDatabaseName()
+	return ses.database.Load().(string)
 }
 
 func (ses *Session) SetDatabaseName(db string) {
-	ses.GetMysqlProtocol().SetDatabaseName(db)
+	ses.database.Store(db)
 	ses.GetTxnCompileCtx().SetDatabase(db)
 }
 
@@ -1461,11 +1479,11 @@ func (ses *Session) DatabaseNameIsEmpty() bool {
 
 // GetUserName returns the user_ame and the account_name
 func (ses *Session) GetUserName() string {
-	return ses.GetMysqlProtocol().GetUserName()
+	return ses.username.Load().(string)
 }
 
 func (ses *Session) SetUserName(uname string) {
-	ses.GetMysqlProtocol().SetUserName(uname)
+	ses.username.Store(uname)
 }
 
 func (ses *Session) GetConnectionID() uint32 {

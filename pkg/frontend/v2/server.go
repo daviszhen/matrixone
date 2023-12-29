@@ -35,6 +35,7 @@ var (
 	feSessionManager *queryservice.SessionManager
 	// reportSystemStatusTime is the time when report system status last time.
 	feReportSystemStatusTime atomic.Pointer[time.Time]
+	feTxnClient              TxnClient
 )
 
 // RelationName counter for the new connection
