@@ -320,3 +320,47 @@ func (endPoint *PacketEndPoint) SendPacket(ctx context.Context, packet MysqlWrit
 	}
 	return err
 }
+
+func (endPoint *PacketEndPoint) SendOkPacket(ctx context.Context, conn *Connection, affectedRows, lastInsertId uint64, status, warnings uint16, message string) (err error) {
+	ok := &OKPacket{}
+	reqCtx, _ := conn.req.ctx.Ctx()
+	err = ok.Open(reqCtx,
+		WithCapability(conn.capability),
+		WithAffectedRows(affectedRows),
+		WithLastInsertId(lastInsertId),
+		WithStatus(status),
+		WithWarnings(warnings),
+		WithMessage(message),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = ok.Close(reqCtx)
+	}()
+	err = endPoint.SendPacket(reqCtx, ok, true)
+	if err != nil {
+		return err
+	}
+	return err
+}
+
+func (endPoint *PacketEndPoint) SendErrorPacket(ctx context.Context, conn *Connection, err error) error {
+	if err == nil {
+		// return mp.sendOKPacket(0, 0, uint16(resp.status), 0, "")
+	}
+	switch myerr := err.(type) {
+	case *moerr.Error:
+		var code uint16
+		if myerr.MySQLCode() != moerr.ER_UNKNOWN_ERROR {
+			code = myerr.MySQLCode()
+		} else {
+			code = myerr.ErrorCode()
+		}
+		errMsg := myerr.Error()
+		return conn.sendErrPacket(endPoint, code, myerr.SqlState(), errMsg)
+	}
+	errMsg := ""
+	errMsg = fmt.Sprintf("%v", err)
+	return conn.sendErrPacket(endPoint, moerr.ER_UNKNOWN_ERROR, DefaultMySQLState, errMsg)
+}

@@ -527,7 +527,7 @@ func constructByte(obj interface{}, bat *batch.Batch, index int32, ByteChan chan
 					"Failed to construct byte due to unsupported type",
 					zap.Int("typeOid", int(vec.GetType().Oid)))
 				ByteChan <- &BatchByte{
-					err: moerr.NewInternalError(ses.requestCtx, "constructByte : unsupported type %d", vec.GetType().Oid),
+					err: moerr.NewInternalError(ses.GetRequestContext(), "constructByte : unsupported type %d", vec.GetType().Oid),
 				}
 				bat.Clean(ses.GetMemPool())
 				return

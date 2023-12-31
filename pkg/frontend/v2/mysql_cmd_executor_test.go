@@ -234,7 +234,7 @@ func Test_mce(t *testing.T) {
 
 		ses := NewSession(proto, nil, pu, &gSys, true, nil, nil)
 		proto.SetSession(ses)
-		ses.txnHandler = &TxnHandler{
+		ses.txnHandler = &Txn{
 			storage:   &engine.EntireEngine{Engine: pu.StorageEngine},
 			txnClient: pu.TxnClient,
 		}

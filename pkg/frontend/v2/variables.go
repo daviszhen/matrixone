@@ -3528,50 +3528,50 @@ func updateTimeZone(sess *Session, vars map[string]interface{}, name string, val
 		sess.SetTimeZone(time.Local)
 	} else if len(tzStr) > 0 && (tzStr[0] == '-' || tzStr[0] == '+') {
 		if len(tzStr) != 5 && len(tzStr) != 6 {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 		}
 
 		minIdx := 3
 		if tzStr[1] < '0' || tzStr[1] > '9' {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 		}
 		hour := int(tzStr[1] - '0')
 		if tzStr[2] != ':' {
 			if tzStr[2] < '0' || tzStr[2] > '9' {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 			}
 			hour = hour*10 + int(tzStr[2]-'0')
 			minIdx = 4
 			if tzStr[3] != ':' {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 			}
 		}
 
 		if minIdx != len(tzStr)-2 {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 		}
 		if tzStr[minIdx] < '0' || tzStr[minIdx] > '9' {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 		}
 		minute := int(tzStr[minIdx]-'0') * 10
 		if tzStr[minIdx+1] < '0' || tzStr[minIdx+1] > '9' {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 		}
 		minute += int(tzStr[minIdx+1] - '0')
 		if minute >= 60 {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 		}
 
 		minute += hour * 60
 
 		if tzStr[0] == '-' {
 			if minute >= 14*60 {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 			}
 			sess.SetTimeZone(time.FixedZone("FixedZone", -minute*60))
 		} else {
 			if minute > 14*60 {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(sess.GetRequestContext(), tzStr)
 			}
 			sess.SetTimeZone(time.FixedZone("FixedZone", minute*60))
 		}

@@ -24,13 +24,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
+	"github.com/matrixorigin/matrixone/pkg/pb/plan"
+	"github.com/matrixorigin/matrixone/pkg/sql/compile"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+	util2 "github.com/matrixorigin/matrixone/pkg/util"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 )
 
 // ======= Transaction =======
 
-type TxnOptions struct{}
+type TxnOptions struct {
+	begin bool //txn created by the BEGIN statement
+}
 type TxnOpt func(*TxnOptions)
+
+func WithBegin(begin bool) TxnOpt {
+	return func(o *TxnOptions) {
+		o.begin = begin
+	}
+}
 
 type Txn struct {
 	storage engine.Engine
@@ -42,13 +54,12 @@ type Txn struct {
 		//the option bits
 		optionBits uint32
 
+		//start a new statement
+		inStmt bool
+
 		txnCtx    context.Context
 		txnCancel context.CancelFunc
 		txnOp     TxnOperator
-
-		shareTxn           bool
-		hasCalledStartStmt bool
-		prevTxnId          []byte
 	}
 
 	ses *Session
@@ -56,34 +67,92 @@ type Txn struct {
 
 // ======= Query Executor =======
 
-type QueryExecutorOptions struct{}
+type Stmt struct {
+	uuid      uuid.UUID
+	stmt      tree.Statement
+	plan      *plan.Plan
+	compile   *compile.Compile
+	runResult *util2.RunResult
+}
+
+type QueryExecutorOptions struct {
+	conn     *Connection
+	endPoint *PacketEndPoint
+
+	bSes *BackgroundSession
+}
+
+func WithConnection(conn *Connection) QueryExecutorOpt {
+	return func(o *QueryExecutorOptions) {
+		o.conn = conn
+	}
+}
+
+func WithEndPoint(endPoint *PacketEndPoint) QueryExecutorOpt {
+	return func(o *QueryExecutorOptions) {
+		o.endPoint = endPoint
+	}
+}
+
+func WithBackgroundSession(ses *BackgroundSession) QueryExecutorOpt {
+	return func(o *QueryExecutorOptions) {
+		o.bSes = ses
+	}
+}
+
 type QueryExecutorOpt func(*QueryExecutorOptions)
 
 // QueryExecutor denotes the executing environment for the query.
 // It can be an explicit executor, or an implicit executor.
 type QueryExecutor interface {
 	Open(context.Context, ...QueryExecutorOpt) error
-	Exec(context.Context, string) error
+	Exec(context.Context, *UserInput) error
 	Close(context.Context) error
 }
 
 // GeneralExecutor executes the sql regularly.
-type GeneralExecutor struct{}
+type GeneralExecutor struct {
+	opts QueryExecutorOptions
+}
 
 // BackgroundExecutor executes the sql using different structure.
 // it is triggered in the mo with none client.
 // it does not maintain some states also.
-type BackgroundExecutor struct{}
+type BackgroundExecutor struct {
+	opts QueryExecutorOptions
+}
 
 // ======= Statement Executor =======
-type ExecutorOptions struct{}
+type ExecutorOptions struct {
+	isLastStmt bool
+	ses        *Session
+	endPoint   *PacketEndPoint
+}
 type ExecutorOpt func(*ExecutorOptions)
 
-type ExecutorTxnKind uint32
+func WithSession(ses *Session) ExecutorOpt {
+	return func(o *ExecutorOptions) {
+		o.ses = ses
+	}
+}
+
+func WithEndPointToExec(endPoint *PacketEndPoint) ExecutorOpt {
+	return func(o *ExecutorOptions) {
+		o.endPoint = endPoint
+	}
+}
+
+func WithIsLastStmt(isLastStmt bool) ExecutorOpt {
+	return func(o *ExecutorOptions) {
+		o.isLastStmt = isLastStmt
+	}
+}
+
+type Label uint32
 
 const (
-	// can have or not have the active txn
-	ExecDoesNotNeedTxn ExecutorTxnKind = 1 << 0
+	// can be executed in the uncommitted txn
+	CanExecInUncommittedTxnTxn Label = 1 << 0
 
 	/*
 		before			after
@@ -104,13 +173,15 @@ const (
 		nil				nil
 		not nil			nil
 	*/
-	TxnDisappearAferExec = 1 << 5 //for commit or rollback
+	TxnDisappearsAferExec = 1 << 5 //for commit or rollback
+	CommitTxnAfterExec    = 1 << 6 //some statement must commit
+	SkipStmt              = 1 << 7 //skip start/end statement
 )
 
 type Executor interface {
 	// Open prepares the transaction, PacketEndpoint, etc.
 	Open(context.Context, ...ExecutorOpt) error
-	Label() ExecutorTxnKind
+	Label() Label
 	Next(context.Context) error
 	Close(context.Context) error
 }
@@ -352,7 +423,7 @@ func WithLastInsertId(id uint64) MysqlWritePacketOpt {
 	}
 }
 
-func WithStatusFlags(flags uint16) MysqlWritePacketOpt {
+func WithStatus(flags uint16) MysqlWritePacketOpt {
 	return func(o *MysqlWritePacketOptions) {
 		o.statusFlags = flags
 	}
@@ -385,6 +456,24 @@ func WithSqlState(state string) MysqlWritePacketOpt {
 func WithErrorMessage(message string) MysqlWritePacketOpt {
 	return func(o *MysqlWritePacketOptions) {
 		o.errorMessage = message
+	}
+}
+
+func WithNumber(number uint64) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.number = number
+	}
+}
+
+func WithColumn(column *MysqlColumn) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.column = column
+	}
+}
+
+func WithCmd(cmd int) MysqlWritePacketOpt {
+	return func(o *MysqlWritePacketOptions) {
+		o.cmd = cmd
 	}
 }
 

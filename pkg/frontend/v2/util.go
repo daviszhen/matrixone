@@ -501,7 +501,7 @@ func logStatementStatus(ctx context.Context, ses *Session, stmt tree.Statement, 
 }
 
 func logStatementStringStatus(ctx context.Context, ses *Session, stmtStr string, status statementStatus, err error) {
-	str := SubStringFromBegin(stmtStr, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+	str := SubStringFromBegin(stmtStr, int(fePu.SV.LengthOfQueryPrinted))
 	outBytes := ses.GetMysqlProtocol().CalculateOutTrafficBytes()
 	if status == success {
 		logDebug(ses, ses.GetDebugString(), "query trace status", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.StatementField(str), logutil.StatusField(status.String()), trace.ContextField(ctx))

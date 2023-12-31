@@ -233,13 +233,13 @@ func (mce *MysqlCmdExecutor) handleDropConnector(ctx context.Context, st *tree.D
 }
 
 func (mce *MysqlCmdExecutor) handleDropDynamicTable(ctx context.Context, st *tree.DropTable) error {
-	if mce.routineMgr == nil || mce.routineMgr.getParameterUnit() == nil || mce.routineMgr.getParameterUnit().TaskService == nil {
+	if mce.routineMgr == nil || fePu == nil || fePu.TaskService == nil {
 		return moerr.NewInternalError(ctx, "task service not ready yet")
 	}
-	ts := mce.routineMgr.getParameterUnit().TaskService
+	ts := fePu.TaskService
 
 	// Query all relevant tasks belonging to the current tenant
-	tasks, err := ts.QueryDaemonTask(mce.ses.requestCtx,
+	tasks, err := ts.QueryDaemonTask(mce.ses.GetRequestContext(),
 		taskservice.WithTaskType(taskservice.EQ, pb.TaskType_TypeKafkaSinkConnector.String()),
 		taskservice.WithAccountID(taskservice.EQ, mce.ses.accountId),
 		taskservice.WithTaskStatusCond(pb.TaskStatus_Running, pb.TaskStatus_Created, pb.TaskStatus_Paused, pb.TaskStatus_PauseRequested),
@@ -276,8 +276,8 @@ func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, cwIndex, 
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed, error: %v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
 	}
 	return err
 }
@@ -358,12 +358,12 @@ var connectorCols = []Column{
 }
 
 func showConnectors(ses *Session) error {
-	ts := ses.pu.TaskService
+	ts := fePu.TaskService
 	if ts == nil {
-		return moerr.NewInternalError(ses.requestCtx,
+		return moerr.NewInternalError(ses.GetRequestContext(),
 			"task service not ready yet, please try again later.")
 	}
-	tasks, err := ts.QueryDaemonTask(ses.requestCtx,
+	tasks, err := ts.QueryDaemonTask(ses.GetRequestContext(),
 		taskservice.WithTaskType(taskservice.EQ,
 			pb.TaskType_TypeKafkaSinkConnector.String()),
 		taskservice.WithAccountID(taskservice.EQ,

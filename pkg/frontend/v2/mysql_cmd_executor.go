@@ -28,13 +28,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/matrixorigin/matrixone/pkg/common/runtime"
 
 	"github.com/matrixorigin/matrixone/pkg/config"
-	"github.com/matrixorigin/matrixone/pkg/fileservice"
 	"github.com/matrixorigin/matrixone/pkg/frontend/constant"
 	"go.uber.org/zap"
 
@@ -57,7 +54,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan/explain"
-	util2 "github.com/matrixorigin/matrixone/pkg/util"
 	"github.com/matrixorigin/matrixone/pkg/util/metric"
 	v2 "github.com/matrixorigin/matrixone/pkg/util/metric/v2"
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
@@ -66,7 +62,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"golang.org/x/sync/errgroup"
 )
 
 func createDropDatabaseErrorInfo() string {
@@ -149,11 +144,7 @@ func (mce *MysqlCmdExecutor) CancelRequest() {
 func (mce *MysqlCmdExecutor) ChooseDoQueryFunc(choice bool) {
 	mce.mu.Lock()
 	defer mce.mu.Unlock()
-	if choice {
-		mce.doQueryFunc = mce.doComQueryInProgress
-	} else {
-		mce.doQueryFunc = mce.doComQuery
-	}
+	mce.doQueryFunc = mce.doComQuery
 }
 
 func (mce *MysqlCmdExecutor) GetDoQueryFunc() doComQueryFunc {
@@ -224,14 +215,14 @@ func transferSessionConnType2StatisticConnType(c ConnType) statistic.ConnType {
 	}
 }
 
-var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, cw ComputationWrapper, envBegin time.Time, envStmt, sqlType string, useEnv bool) context.Context {
+var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Process, stmt *Stmt, envBegin time.Time, envStmt, sqlType string, useEnv bool) context.Context {
 	// set StatementID
 	var stmID uuid.UUID
 	var statement tree.Statement = nil
 	var text string
-	if cw != nil {
-		copy(stmID[:], cw.GetUUID())
-		statement = cw.GetAst()
+	if stmt != nil {
+		copy(stmID[:], stmt.uuid[:])
+		statement = stmt.stmt
 
 		ses.ast = statement
 
@@ -241,13 +232,13 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 			bb.WriteString(envStmt)
 			bb.WriteString(" // ")
 			bb.WriteString(execSql)
-			text = SubStringFromBegin(bb.String(), int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+			text = SubStringFromBegin(bb.String(), int(fePu.SV.LengthOfQueryPrinted))
 		} else {
-			text = SubStringFromBegin(envStmt, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+			text = SubStringFromBegin(envStmt, int(fePu.SV.LengthOfQueryPrinted))
 		}
 	} else {
 		stmID = uuid.New()
-		text = SubStringFromBegin(envStmt, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+		text = SubStringFromBegin(envStmt, int(fePu.SV.LengthOfQueryPrinted))
 	}
 	ses.SetStmtId(stmID)
 	ses.SetStmtType(getStatementType(statement).GetStatementType())
@@ -377,22 +368,22 @@ var RecordStatementTxnID = func(ctx context.Context, ses *Session) {
 }
 
 func handleShowTableStatus(ses *Session, stmt *tree.ShowTableStatus, proc *process.Process) error {
-	db, err := ses.GetStorage().Database(ses.requestCtx, stmt.DbName, proc.TxnOperator)
+	db, err := ses.GetStorage().Database(ses.GetRequestContext(), stmt.DbName, proc.TxnOperator)
 	if err != nil {
 		return err
 	}
 	mrs := ses.GetMysqlResultSet()
 	for _, row := range ses.data {
 		tableName := string(row[0].([]byte))
-		r, err := db.Relation(ses.requestCtx, tableName, nil)
+		r, err := db.Relation(ses.GetRequestContext(), tableName, nil)
 		if err != nil {
 			return err
 		}
-		err = r.UpdateObjectInfos(ses.requestCtx)
+		err = r.UpdateObjectInfos(ses.GetRequestContext())
 		if err != nil {
 			return err
 		}
-		row[3], err = r.Rows(ses.requestCtx)
+		row[3], err = r.Rows(ses.GetRequestContext())
 		if err != nil {
 			return err
 		}
@@ -503,12 +494,9 @@ func doUse(ctx context.Context, ses *Session, db string) error {
 	var txn TxnOperator
 	var err error
 	var dbMeta engine.Database
-	txnCtx, txn, err = txnHandler.GetTxn()
-	if err != nil {
-		return err
-	}
+	txnCtx, txn = txnHandler.GetTxnOperator()
 	//TODO: check meta data
-	if dbMeta, err = ses.GetParameterUnit().StorageEngine.Database(txnCtx, db, txn); err != nil {
+	if dbMeta, err = fePu.StorageEngine.Database(txnCtx, db, txn); err != nil {
 		//echo client. no such database
 		return moerr.NewBadDB(ctx, db)
 	}
@@ -682,7 +670,7 @@ func (mce *MysqlCmdExecutor) handleCmdFieldList(requestCtx context.Context, icfl
 		mysql CMD_FIELD_LIST response: End after the column has been sent.
 		send EOF packet
 	*/
-	err = proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
+	err = proto.sendEOFOrOkPacket(0, ses.txn.GetServerStatus())
 	if err != nil {
 		return err
 	}
@@ -720,7 +708,7 @@ func doSetVar(ctx context.Context, mce *MysqlCmdExecutor, ses *Session, sv *tree
 				if err2 != nil {
 					return err2
 				}
-				err = ses.SetAutocommit(newValue)
+				err = ses.txn.SetAutocommit(newValue)
 				if err != nil {
 					return err
 				}
@@ -887,8 +875,8 @@ func (mce *MysqlCmdExecutor) handleShowErrors(cwIndex, cwsLen int) error {
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
 
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -1028,8 +1016,8 @@ func (mce *MysqlCmdExecutor) handleShowVariables(sv *tree.ShowVariables, proc *p
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
 
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -1137,7 +1125,7 @@ func (mce *MysqlCmdExecutor) handleExplainStmt(requestCtx context.Context, stmt 
 
 	//	mysql COM_QUERY response: End after the column has been sent.
 	//	send EOF packet
-	err = protocol.SendEOFPacketIf(0, ses.GetServerStatus())
+	err = protocol.SendEOFPacketIf(0, ses.txn.GetServerStatus())
 	if err != nil {
 		return err
 	}
@@ -1147,7 +1135,7 @@ func (mce *MysqlCmdExecutor) handleExplainStmt(requestCtx context.Context, stmt 
 		return err
 	}
 
-	err = protocol.sendEOFOrOkPacket(0, ses.GetServerStatus())
+	err = protocol.sendEOFOrOkPacket(0, ses.txn.GetServerStatus())
 	if err != nil {
 		return err
 	}
@@ -1346,18 +1334,18 @@ func (mce *MysqlCmdExecutor) handleCallProcedure(ctx context.Context, call *tree
 		return err
 	}
 
-	resp := NewGeneralOkResponse(COM_QUERY, mce.ses.GetServerStatus())
+	resp := NewGeneralOkResponse(COM_QUERY, mce.ses.txn.GetServerStatus())
 
 	if len(results) == 0 {
-		if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-			return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
+		if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+			return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 		}
 	} else {
 		for i, result := range results {
 			mer := NewMysqlExecutionResult(0, 0, 0, 0, result.(*MysqlResultSet))
 			resp = mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, i, len(results))
-			if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-				return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
+			if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+				return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 			}
 		}
 	}
@@ -1411,7 +1399,7 @@ func (mce *MysqlCmdExecutor) handleKill(ctx context.Context, k *tree.Kill) error
 	if err != nil {
 		return err
 	}
-	resp := NewGeneralOkResponse(COM_QUERY, mce.ses.GetServerStatus())
+	resp := NewGeneralOkResponse(COM_QUERY, mce.ses.txn.GetServerStatus())
 	if err = proto.SendResponse(ctx, resp); err != nil {
 		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}
@@ -1541,8 +1529,8 @@ func (mce *MysqlCmdExecutor) handleShowBackendServers(ctx context.Context, cwInd
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed, error: %v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
 	}
 	return err
 }
@@ -1552,7 +1540,7 @@ func (mce *MysqlCmdExecutor) handleEmptyStmt(ctx context.Context, stmt *tree.Emp
 	ses := mce.GetSession()
 	proto := ses.GetMysqlProtocol()
 
-	resp := NewGeneralOkResponse(COM_QUERY, mce.ses.GetServerStatus())
+	resp := NewGeneralOkResponse(COM_QUERY, mce.ses.txn.GetServerStatus())
 	if err = proto.SendResponse(ctx, resp); err != nil {
 		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}
@@ -1712,7 +1700,7 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	return ret, err
 }
 
-func checkColModify(plan2 *plan.Plan, proc *process.Process, ses *Session) bool {
+func checkColModify(plan2 *plan.Plan, ses *Session) bool {
 	switch p := plan2.Plan.(type) {
 	case *plan.Plan_Query:
 		for i := range p.Query.Nodes {
@@ -1761,21 +1749,21 @@ GetComputationWrapper gets the execs from the computation engine
 var GetComputationWrapper = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 	var cw []ComputationWrapper = nil
 	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
-		modify := false
-		for i, stmt := range cached.stmts {
-			tcw := InitTxnComputationWrapper(ses, stmt, proc)
-			tcw.plan = cached.plans[i]
-			if checkColModify(tcw.plan, proc, ses) {
-				modify = true
-				break
-			}
-			cw = append(cw, tcw)
-		}
-		if modify {
-			cw = nil
-		} else {
-			return cw, nil
-		}
+		// modify := false
+		// for i, stmt := range cached.stmts {
+		// 	// tcw := InitTxnComputationWrapper(ses, stmt, proc)
+		// 	tcw.plan = cached.plans[i]
+		// 	if checkColModify(tcw.plan, proc, ses) {
+		// 		modify = true
+		// 		break
+		// 	}
+		// 	cw = append(cw, tcw)
+		// }
+		// if modify {
+		// 	cw = nil
+		// } else {
+		// 	return cw, nil
+		// }
 	}
 
 	var stmts []tree.Statement = nil
@@ -1802,560 +1790,10 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 		}
 	}
 
-	for _, stmt := range stmts {
-		cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
-	}
+	// for _, stmt := range stmts {
+	// 	cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
+	// }
 	return cw, nil
-}
-
-func getStmtExecutor(ses *Session, proc *process.Process, base *baseStmtExecutor, stmt tree.Statement) (StmtExecutor, error) {
-	var err error
-	var ret StmtExecutor
-	switch st := stmt.(type) {
-	//PART 1: the statements with the result set
-	case *tree.Select:
-		ret = &SelectExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sel: st,
-		}
-	case *tree.ValuesStatement:
-		ret = &ValuesStmtExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sel: st,
-		}
-	case *tree.ShowCreateTable:
-		ret = &ShowCreateTableExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sct: st,
-		}
-	case *tree.ShowCreateDatabase:
-		ret = &ShowCreateDatabaseExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			scd: st,
-		}
-	case *tree.ShowTables:
-		ret = &ShowTablesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			st: st,
-		}
-	case *tree.ShowSequences:
-		ret = &ShowSequencesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ss: st,
-		}
-	case *tree.ShowDatabases:
-		ret = &ShowDatabasesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sd: st,
-		}
-	case *tree.ShowColumns:
-		ret = &ShowColumnsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sc: st,
-		}
-	case *tree.ShowProcessList:
-		ret = &ShowProcessListExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			spl: st,
-		}
-	case *tree.ShowStatus:
-		ret = &ShowStatusExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ss: st,
-		}
-	case *tree.ShowTableStatus:
-		ret = &ShowTableStatusExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sts: st,
-		}
-	case *tree.ShowGrants:
-		ret = &ShowGrantsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sg: st,
-		}
-	case *tree.ShowIndex:
-		ret = &ShowIndexExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			si: st,
-		}
-	case *tree.ShowCreateView:
-		ret = &ShowCreateViewExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			scv: st,
-		}
-	case *tree.ShowTarget:
-		ret = &ShowTargetExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			st: st,
-		}
-	case *tree.ExplainFor:
-		ret = &ExplainForExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ef: st,
-		}
-	case *tree.ExplainStmt:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ExplainStmtExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			es: st,
-		}
-	case *tree.ShowVariables:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ShowVariablesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sv: st,
-		}
-	case *tree.ShowErrors:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ShowErrorsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			se: st,
-		}
-	case *tree.ShowWarnings:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ShowWarningsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sw: st,
-		}
-	case *tree.AnalyzeStmt:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &AnalyzeStmtExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			as: st,
-		}
-	case *tree.ExplainAnalyze:
-		ret = &ExplainAnalyzeExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ea: st,
-		}
-	case *InternalCmdFieldList:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &InternalCmdFieldListExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			icfl: st,
-		}
-	//PART 2: the statement with the status only
-	case *tree.BeginTransaction:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &BeginTxnExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			bt: st,
-		}
-	case *tree.CommitTransaction:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CommitTxnExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ct: st,
-		}
-	case *tree.RollbackTransaction:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &RollbackTxnExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			rt: st,
-		}
-	case *tree.SetRole:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &SetRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sr: st,
-		}
-	case *tree.Use:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &UseExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			u: st,
-		}
-	case *tree.MoDump:
-		//TODO:
-		err = moerr.NewInternalError(proc.Ctx, "needs to add modump")
-	case *tree.DropDatabase:
-		ret = &DropDatabaseExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dd: st,
-		}
-	case *tree.PrepareStmt:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &PrepareStmtExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ps: st,
-		}
-	case *tree.PrepareString:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &PrepareStringExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ps: st,
-		}
-	case *tree.Deallocate:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DeallocateExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			d: st,
-		}
-	case *tree.SetVar:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &SetVarExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sv: st,
-		}
-	case *tree.Delete:
-		ret = &DeleteExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			d: st,
-		}
-	case *tree.Update:
-		ret = &UpdateExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			u: st,
-		}
-	case *tree.CreatePublication:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreatePublicationExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cp: st,
-		}
-	case *tree.AlterPublication:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &AlterPublicationExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ap: st,
-		}
-	case *tree.DropPublication:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropPublicationExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dp: st,
-		}
-	case *tree.CreateAccount:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreateAccountExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ca: st,
-		}
-	case *tree.DropAccount:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropAccountExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			da: st,
-		}
-	case *tree.AlterAccount:
-		ret = &AlterAccountExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			aa: st,
-		}
-	case *tree.CreateUser:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreateUserExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cu: st,
-		}
-	case *tree.DropUser:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropUserExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			du: st,
-		}
-	case *tree.AlterUser:
-		ret = &AlterUserExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			au: st,
-		}
-	case *tree.CreateRole:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreateRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cr: st,
-		}
-	case *tree.DropRole:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dr: st,
-		}
-	case *tree.Grant:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &GrantExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			g: st,
-		}
-	case *tree.Revoke:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &RevokeExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			r: st,
-		}
-	case *tree.CreateTable:
-		ret = &CreateTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ct: st,
-		}
-	case *tree.DropTable:
-		ret = &DropTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dt: st,
-		}
-	case *tree.CreateDatabase:
-		ret = &CreateDatabaseExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cd: st,
-		}
-	case *tree.CreateIndex:
-		ret = &CreateIndexExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ci: st,
-		}
-	case *tree.DropIndex:
-		ret = &DropIndexExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			di: st,
-		}
-	case *tree.CreateSequence:
-		ret = &CreateSequenceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cs: st,
-		}
-	case *tree.DropSequence:
-		ret = &DropSequenceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ds: st,
-		}
-	case *tree.AlterSequence:
-		ret = &AlterSequenceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cs: st,
-		}
-	case *tree.CreateView:
-		ret = &CreateViewExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cv: st,
-		}
-	case *tree.AlterView:
-		ret = &AlterViewExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			av: st,
-		}
-	case *tree.AlterTable:
-		ret = &AlterTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			at: st,
-		}
-	case *tree.DropView:
-		ret = &DropViewExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dv: st,
-		}
-	case *tree.Insert:
-		ret = &InsertExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			i: st,
-		}
-	case *tree.Replace:
-		ret = &ReplaceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			r: st,
-		}
-	case *tree.Load:
-		ret = &LoadExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			l: st,
-		}
-	case *tree.SetDefaultRole:
-		ret = &SetDefaultRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sdr: st,
-		}
-	case *tree.SetPassword:
-		ret = &SetPasswordExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sp: st,
-		}
-	case *tree.TruncateTable:
-		ret = &TruncateTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			tt: st,
-		}
-	//PART 3: hybrid
-	case *tree.Execute:
-		ret = &ExecuteExecutor{
-			baseStmtExecutor: base,
-			e:                st,
-		}
-	default:
-		return nil, moerr.NewInternalError(proc.Ctx, "no such statement %s", stmt.String())
-	}
-	return ret, err
-}
-
-var GetStmtExecList = func(db, sql, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]StmtExecutor, error) {
-	var stmtExecList []StmtExecutor = nil
-	var stmtExec StmtExecutor
-	var stmts []tree.Statement = nil
-	var cmdFieldStmt *InternalCmdFieldList
-	var err error
-
-	appendStmtExec := func(se StmtExecutor) {
-		stmtExecList = append(stmtExecList, se)
-	}
-
-	if isCmdFieldListSql(sql) {
-		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, sql)
-		if err != nil {
-			return nil, err
-		}
-		stmts = append(stmts, cmdFieldStmt)
-	} else {
-		v, err := ses.GetGlobalVar("lower_case_table_names")
-		if err != nil {
-			return nil, err
-		}
-		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, sql, v.(int64))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for _, stmt := range stmts {
-		cw := InitTxnComputationWrapper(ses, stmt, proc)
-		base := &baseStmtExecutor{}
-		base.ComputationWrapper = cw
-		stmtExec, err = getStmtExecutor(ses, proc, base, stmt)
-		if err != nil {
-			return nil, err
-		}
-		appendStmtExec(stmtExec)
-	}
-	return stmtExecList, nil
 }
 
 func incStatementCounter(tenant string, stmt tree.Statement) {
@@ -2381,7 +1819,7 @@ func incStatementErrorsCounter(tenant string, stmt tree.Statement) {
 func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Session, stmt tree.Statement) error {
 	requestCtx, span := trace.Debug(requestCtx, "authenticateUserCanExecuteStatement")
 	defer span.End()
-	if ses.pu.SV.SkipCheckPrivilege {
+	if fePu.SV.SkipCheckPrivilege {
 		return nil
 	}
 
@@ -2425,7 +1863,7 @@ func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Sessio
 func authenticateCanExecuteStatementAndPlan(requestCtx context.Context, ses *Session, stmt tree.Statement, p *plan.Plan) error {
 	_, task := gotrace.NewTask(context.TODO(), "frontend.authenticateCanExecuteStatementAndPlan")
 	defer task.End()
-	if ses.pu.SV.SkipCheckPrivilege {
+	if fePu.SV.SkipCheckPrivilege {
 		return nil
 	}
 
@@ -2446,7 +1884,7 @@ func authenticateCanExecuteStatementAndPlan(requestCtx context.Context, ses *Ses
 func authenticateUserCanExecutePrepareOrExecute(requestCtx context.Context, ses *Session, stmt tree.Statement, p *plan.Plan) error {
 	_, task := gotrace.NewTask(context.TODO(), "frontend.authenticateUserCanExecutePrepareOrExecute")
 	defer task.End()
-	if ses.pu.SV.SkipCheckPrivilege {
+	if fePu.SV.SkipCheckPrivilege {
 		return nil
 	}
 	err := authenticateUserCanExecuteStatement(requestCtx, ses, stmt)
@@ -2613,1313 +2051,1313 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	userName string,
 	sql string,
 ) (err error) {
-	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.executeStmt",
-		trace.WithKind(trace.SpanKindStatement))
-	defer span.End(trace.WithStatementExtra(ses.GetTxnId(), ses.GetStmtId(), ses.GetSqlOfStmt()))
-
-	ses.SetQueryInProgress(true)
-	ses.SetQueryStart(time.Now())
-	ses.SetQueryInExecute(true)
-	defer ses.SetQueryEnd(time.Now())
-	defer ses.SetQueryInProgress(false)
-
-	// per statement profiler
-	requestCtx, endStmtProfile := fileservice.NewStatementProfiler(requestCtx)
-	if endStmtProfile != nil {
-		defer endStmtProfile(func() string {
-			// use sql string as file name suffix
-			formatCtx := tree.NewFmtCtx(dialect.MYSQL)
-			stmt.Format(formatCtx)
-			sql := formatCtx.String()
-			if len(sql) > 128 {
-				sql = sql[:128]
-			}
-			sql = strings.TrimSpace(sql)
-			sql = strings.Map(func(r rune) rune {
-				if unicode.IsSpace(r) {
-					return '-'
-				}
-				return r
-			}, sql)
-			return sql
-		})
-	}
-
-	// record goroutine info when ddl stmt run timeout
-	switch stmt.(type) {
-	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase:
-		_, span := trace.Start(requestCtx, "executeStmtHung",
-			trace.WithHungThreshold(time.Minute), // be careful with this options
-			trace.WithProfileGoroutine(),
-			trace.WithProfileTraceSecs(10*time.Second),
-		)
-		defer span.End()
-	default:
-	}
-
-	// end of preamble.
-
-	// deferred functions.
-
-	var runResult *util2.RunResult
-	var prepareStmt *PrepareStmt
-
-	var cmpBegin time.Time
-	var ret interface{}
-	var runner ComputationRunner
-	var selfHandle bool
-	var columns []interface{}
-	var mrs *MysqlResultSet
-	var loadLocalErrGroup *errgroup.Group
-	var loadLocalWriter *io.PipeWriter
-
-	//response the client
-	respClientFunc := func() error {
-		var rspLen uint64
-		if runResult != nil {
-			rspLen = runResult.AffectRows
-		}
-
-		switch stmt.(type) {
-		case *tree.Select:
-			if len(proc.SessionInfo.SeqAddValues) != 0 {
-				ses.AddSeqValues(proc)
-			}
-			ses.SetSeqLastValue(proc)
-		case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-			*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update, *tree.Replace,
-			*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.Load, *tree.MoDump,
-			*tree.CreateSequence, *tree.DropSequence,
-			*tree.CreateAccount, *tree.DropAccount, *tree.AlterAccount, *tree.AlterDataBaseConfig, *tree.CreatePublication, *tree.AlterPublication, *tree.DropPublication,
-			*tree.CreateFunction, *tree.DropFunction,
-			*tree.CreateProcedure, *tree.DropProcedure,
-			*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-			*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
-			*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete, *tree.TruncateTable, *tree.Use,
-			*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
-			*tree.LockTableStmt, *tree.UnLockTableStmt,
-			*tree.CreateStage, *tree.DropStage, *tree.AlterStage, *tree.CreateSource, *tree.AlterSequence:
-			resp := mce.setResponse(i, len(cws), rspLen)
-			if _, ok := stmt.(*tree.Insert); ok {
-				resp.lastInsertId = proc.GetLastInsertID()
-				if proc.GetLastInsertID() != 0 {
-					ses.SetLastInsertID(proc.GetLastInsertID())
-				}
-			}
-			if len(proc.SessionInfo.SeqDeleteKeys) != 0 {
-				ses.DeleteSeqValues(proc)
-			}
-
-			if st, ok := cw.GetAst().(*tree.CreateTable); ok {
-				_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
-			}
-
-			if st, ok := cw.GetAst().(*tree.DropTable); ok {
-				// handle dynamic table drop, cancel all the running daemon task
-				_ = mce.handleDropDynamicTable(requestCtx, st)
-
-				_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
-			}
-
-			if st, ok := cw.GetAst().(*tree.CreateDatabase); ok {
-				_ = insertRecordToMoMysqlCompatibilityMode(requestCtx, ses, stmt)
-				_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
-			}
-
-			if st, ok := cw.GetAst().(*tree.DropDatabase); ok {
-				_ = deleteRecordToMoMysqlCompatbilityMode(requestCtx, ses, stmt)
-				_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
-			}
-
-			if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
-				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
-				logStatementStatus(requestCtx, ses, stmt, fail, err)
-				return err
-			}
-
-		case *tree.PrepareStmt, *tree.PrepareString:
-			if ses.GetCmd() == COM_STMT_PREPARE {
-				if err2 := mce.GetSession().GetMysqlProtocol().SendPrepareResponse(requestCtx, prepareStmt); err2 != nil {
-					err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
-					logStatementStatus(requestCtx, ses, stmt, fail, err)
-					return err
-				}
-			} else {
-				resp := mce.setResponse(i, len(cws), rspLen)
-				if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
-					err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
-					logStatementStatus(requestCtx, ses, stmt, fail, err)
-					return err
-				}
-			}
-
-		case *tree.SetVar, *tree.SetTransaction, *tree.BackupStart, *tree.CreateConnector, *tree.DropConnector,
-			*tree.PauseDaemonTask, *tree.ResumeDaemonTask, *tree.CancelDaemonTask:
-			resp := mce.setResponse(i, len(cws), rspLen)
-			if err2 := proto.SendResponse(requestCtx, resp); err2 != nil {
-				return moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
-			}
-		case *tree.Deallocate:
-			//we will not send response in COM_STMT_CLOSE command
-			if ses.GetCmd() != COM_STMT_CLOSE {
-				resp := mce.setResponse(i, len(cws), rspLen)
-				if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
-					err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
-					logStatementStatus(requestCtx, ses, stmt, fail, err)
-					return err
-				}
-			}
-
-		case *tree.Reset:
-			resp := mce.setResponse(i, len(cws), rspLen)
-			if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
-				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
-				logStatementStatus(requestCtx, ses, stmt, fail, err)
-				return err
-			}
-		}
-		if ses.GetQueryInExecute() {
-			logStatementStatus(requestCtx, ses, stmt, success, nil)
-		} else {
-			logStatementStatus(requestCtx, ses, stmt, fail, moerr.NewInternalError(requestCtx, "query is killed"))
-		}
-		return err
-	}
-
-	//get errors during the transaction. rollback the transaction
-	rollbackTxnFunc := func() error {
-		incStatementCounter(tenant, stmt)
-		incStatementErrorsCounter(tenant, stmt)
-		/*
-			Cases    | set Autocommit = 1/0 | BEGIN statement |
-			---------------------------------------------------
-			Case1      1                       Yes
-			Case2      1                       No
-			Case3      0                       Yes
-			Case4      0                       No
-			---------------------------------------------------
-			update error message in Case1,Case3,Case4.
-		*/
-		if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
-			ses.cleanCache()
-			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
-		}
-		logError(ses, ses.GetDebugString(), err.Error())
-		txnErr := ses.TxnRollbackSingleStatement(stmt)
-		if txnErr != nil {
-			logStatementStatus(requestCtx, ses, stmt, fail, txnErr)
-			return txnErr
-		}
-		logStatementStatus(requestCtx, ses, stmt, fail, err)
-		return err
-	}
-
-	//execution succeeds during the transaction. commit the transaction
-	commitTxnFunc := func() (retErr error) {
-		// Call a defer function -- if TxnCommitSingleStatement paniced, we
-		// want to catch it and convert it to an error.
-		defer func() {
-			if r := recover(); r != nil {
-				retErr = moerr.ConvertPanicError(requestCtx, r)
-			}
-		}()
-
-		//load data handle txn failure internally
-		incStatementCounter(tenant, stmt)
-		retErr = ses.TxnCommitSingleStatement(stmt)
-		if retErr != nil {
-			logStatementStatus(requestCtx, ses, stmt, fail, retErr)
-		}
-		return
-	}
-
-	//finish the transaction
-	finishTxnFunc := func() error {
-		// First recover all panics.   If paniced, we will abort.
-		if r := recover(); r != nil {
-			err = moerr.ConvertPanicError(requestCtx, r)
-		}
-
-		if err == nil {
-			err = commitTxnFunc()
-			if err == nil {
-				err = respClientFunc()
-				return err
-			}
-			// if commitTxnFunc failed, we will rollback the transaction.
-		}
-
-		err = rollbackTxnFunc()
-		return err
-	}
-
-	_, txnOp := ses.GetTxnHandler().GetTxnOperator()
-	ses.GetTxnHandler().disableStartStmt()
-	if txnOp != nil && !ses.IsDerivedStmt() {
-		txnOp.GetWorkspace().StartStatement()
-		ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
-	}
-
-	// defer Start/End Statement management, called after finishTxnFunc()
-	defer func() {
-		// move finishTxnFunc() out to another defer so that if finishTxnFunc
-		// paniced, the following is still called.
-		_, txnOp := ses.GetTxnHandler().GetTxnOperator()
-		if txnOp != nil && !ses.IsDerivedStmt() {
-			ok, id := ses.GetTxnHandler().calledStartStmt()
-			if ok && bytes.Equal(txnOp.Txn().ID, id) {
-				txnOp.GetWorkspace().EndStatement()
-			}
-		}
-		ses.GetTxnHandler().disableStartStmt()
-	}()
-
-	// defer transaction state mangagement.
-	defer func() {
-		err = finishTxnFunc()
-	}()
-
-	// XXX XXX
-	// I hope I can break the following code into several functions, but I can't.
-	// After separating the functions, the system cannot boot, due to mo_account
-	// not exists.  No clue why, the closure/capture must do some magic.
-
-	//check transaction states
-	switch stmt.(type) {
-	case *tree.BeginTransaction:
-		err = ses.TxnBegin()
-		if err != nil {
-			return
-		}
-		RecordStatementTxnID(requestCtx, ses)
-	case *tree.CommitTransaction:
-		err = ses.TxnCommit()
-		if err != nil {
-			return
-		}
-	case *tree.RollbackTransaction:
-		err = ses.TxnRollback()
-		if err != nil {
-			return
-		}
-	}
-
-	switch st := stmt.(type) {
-	case *tree.Select:
-		if st.Ep != nil {
-			if ses.pu.SV.DisableSelectInto {
-				err = moerr.NewSyntaxError(requestCtx, "Unsupport select statement")
-				return
-			}
-			ses.InitExportConfig(st.Ep)
-			defer func() {
-				ses.ClearExportParam()
-			}()
-			err = doCheckFilePath(requestCtx, ses, st.Ep)
-			if err != nil {
-				return
-			}
-		}
-	}
-
-	selfHandle = false
-
-	switch st := stmt.(type) {
-	case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-		selfHandle = true
-	case *tree.SetRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		//switch role
-		err = mce.handleSwitchRole(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.Use:
-		selfHandle = true
-		var v interface{}
-		v, err = ses.GetGlobalVar("lower_case_table_names")
-		if err != nil {
-			return
-		}
-		st.Name.SetConfig(v.(int64))
-		//use database
-		err = mce.handleChangeDB(requestCtx, st.Name.Compare())
-		if err != nil {
-			return
-		}
-		err = changeVersion(requestCtx, ses, st.Name.Compare())
-		if err != nil {
-			return
-		}
-	case *tree.MoDump:
-		selfHandle = true
-		//dump
-		err = mce.handleDump(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.CreateDatabase:
-		err = inputNameIsInvalid(proc.Ctx, string(st.Name))
-		if err != nil {
-			return
-		}
-		if st.SubscriptionOption != nil && ses.GetTenantInfo() != nil && !ses.GetTenantInfo().IsAdminRole() {
-			err = moerr.NewInternalError(proc.Ctx, "only admin can create subscription")
-			return
-		}
-		st.Sql = sql
-	case *tree.DropDatabase:
-		err = inputNameIsInvalid(proc.Ctx, string(st.Name))
-		if err != nil {
-			return
-		}
-		ses.InvalidatePrivilegeCache()
-		// if the droped database is the same as the one in use, database must be reseted to empty.
-		if string(st.Name) == ses.GetDatabaseName() {
-			ses.SetDatabaseName("")
-		}
-	case *tree.PrepareStmt:
-		selfHandle = true
-		prepareStmt, err = mce.handlePrepareStmt(requestCtx, st, sql)
-		if err != nil {
-			return
-		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, prepareStmt.PrepareStmt, prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
-		if err != nil {
-			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
-			return
-		}
-	case *tree.PrepareString:
-		selfHandle = true
-		prepareStmt, err = mce.handlePrepareString(requestCtx, st)
-		if err != nil {
-			return
-		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, prepareStmt.PrepareStmt, prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
-		if err != nil {
-			mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
-			return
-		}
-	case *tree.CreateConnector:
-		selfHandle = true
-		err = mce.handleCreateConnector(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.PauseDaemonTask:
-		selfHandle = true
-		err = mce.handlePauseDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.CancelDaemonTask:
-		selfHandle = true
-		err = mce.handleCancelDaemonTask(requestCtx, st.TaskID)
-		if err != nil {
-			return
-		}
-	case *tree.ResumeDaemonTask:
-		selfHandle = true
-		err = mce.handleResumeDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.DropConnector:
-		selfHandle = true
-		err = mce.handleDropConnector(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.ShowConnectors:
-		selfHandle = true
-		if err = mce.handleShowConnectors(requestCtx, i, len(cws)); err != nil {
-			return
-		}
-	case *tree.Deallocate:
-		selfHandle = true
-		err = mce.handleDeallocate(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.Reset:
-		selfHandle = true
-		err = mce.handleReset(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.SetVar:
-		selfHandle = true
-		err = mce.handleSetVar(requestCtx, st, sql)
-		if err != nil {
-			return
-		}
-	case *tree.ShowVariables:
-		selfHandle = true
-		err = mce.handleShowVariables(st, proc, i, len(cws))
-		if err != nil {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		selfHandle = true
-		err = mce.handleShowErrors(i, len(cws))
-		if err != nil {
-			return
-		}
-	case *tree.AnalyzeStmt:
-		selfHandle = true
-		if err = mce.handleAnalyzeStmt(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.ExplainStmt:
-		selfHandle = true
-		if err = mce.handleExplainStmt(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.ExplainAnalyze:
-		ses.SetData(nil)
-	case *tree.ShowTableStatus:
-		ses.SetShowStmtType(ShowTableStatus)
-		ses.SetData(nil)
-	case *InternalCmdFieldList:
-		selfHandle = true
-		if err = mce.handleCmdFieldList(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreatePublication:
-		selfHandle = true
-		if err = mce.handleCreatePublication(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterPublication:
-		selfHandle = true
-		if err = mce.handleAlterPublication(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropPublication:
-		selfHandle = true
-		if err = mce.handleDropPublication(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.ShowSubscriptions:
-		selfHandle = true
-		if err = mce.handleShowSubscriptions(requestCtx, st, i, len(cws)); err != nil {
-			return
-		}
-	case *tree.CreateStage:
-		selfHandle = true
-		if err = mce.handleCreateStage(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropStage:
-		selfHandle = true
-		if err = mce.handleDropStage(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterStage:
-		selfHandle = true
-		if err = mce.handleAlterStage(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateAccount:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleCreateAccount(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropAccount:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleDropAccount(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterAccount:
-		ses.InvalidatePrivilegeCache()
-		selfHandle = true
-		if err = mce.handleAlterAccount(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterDataBaseConfig:
-		ses.InvalidatePrivilegeCache()
-		selfHandle = true
-		if st.IsAccountLevel {
-			if err = mce.handleAlterAccountConfig(requestCtx, ses, st); err != nil {
-				return
-			}
-		} else {
-			if err = mce.handleAlterDataBaseConfig(requestCtx, ses, st); err != nil {
-				return
-			}
-		}
-	case *tree.CreateUser:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleCreateUser(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropUser:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleDropUser(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterUser: //TODO
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleAlterUser(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleCreateRole(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleDropRole(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateFunction:
-		selfHandle = true
-		if err = st.Valid(); err != nil {
-			return err
-		}
-		if err = mce.handleCreateFunction(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropFunction:
-		selfHandle = true
-		if err = mce.handleDropFunction(requestCtx, st, proc); err != nil {
-			return
-		}
-	case *tree.CreateProcedure:
-		selfHandle = true
-		if err = mce.handleCreateProcedure(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropProcedure:
-		selfHandle = true
-		if err = mce.handleDropProcedure(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CallStmt:
-		selfHandle = true
-		if err = mce.handleCallProcedure(requestCtx, st, proc, i, len(cws)); err != nil {
-			return
-		}
-	case *tree.Grant:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		switch st.Typ {
-		case tree.GrantTypeRole:
-			if err = mce.handleGrantRole(requestCtx, &st.GrantRole); err != nil {
-				return
-			}
-		case tree.GrantTypePrivilege:
-			if err = mce.handleGrantPrivilege(requestCtx, &st.GrantPrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Revoke:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		switch st.Typ {
-		case tree.RevokeTypeRole:
-			if err = mce.handleRevokeRole(requestCtx, &st.RevokeRole); err != nil {
-				return
-			}
-		case tree.RevokeTypePrivilege:
-			if err = mce.handleRevokePrivilege(requestCtx, &st.RevokePrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Kill:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleKill(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.ShowAccounts:
-		selfHandle = true
-		if err = mce.handleShowAccounts(requestCtx, st, i, len(cws)); err != nil {
-			return
-		}
-	case *tree.Load:
-		if st.Local {
-			proc.LoadLocalReader, loadLocalWriter = io.Pipe()
-		}
-	case *tree.ShowBackendServers:
-		selfHandle = true
-		if err = mce.handleShowBackendServers(requestCtx, i, len(cws)); err != nil {
-			return
-		}
-	case *tree.SetTransaction:
-		selfHandle = true
-		//TODO: handle set transaction
-	case *tree.LockTableStmt:
-		selfHandle = true
-	case *tree.UnLockTableStmt:
-		selfHandle = true
-	case *tree.ShowGrants:
-		if len(st.Username) == 0 {
-			st.Username = userName
-		}
-		if len(st.Hostname) == 0 || st.Hostname == "%" {
-			st.Hostname = rootHost
-		}
-	case *tree.BackupStart:
-		selfHandle = true
-		if err = mce.handleStartBackup(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.EmptyStmt:
-		selfHandle = true
-		if err = mce.handleEmptyStmt(requestCtx, st); err != nil {
-			return
-		}
-	}
-
-	if selfHandle {
-		return
-	}
-
-	cmpBegin = time.Now()
-
-	if ret, err = cw.Compile(requestCtx, ses, ses.GetOutputCallback()); err != nil {
-		return
-	}
-	stmt = cw.GetAst()
-	// reset some special stmt for execute statement
-	switch st := stmt.(type) {
-	case *tree.SetVar:
-		err = mce.handleSetVar(requestCtx, st, sql)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowVariables:
-		err = mce.handleShowVariables(st, proc, i, len(cws))
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = mce.handleShowErrors(i, len(cws))
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	}
-
-	runner = ret.(ComputationRunner)
-
-	// only log if build time is longer than 1s
-	if time.Since(cmpBegin) > time.Second {
-		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
-	}
-
-	mrs = ses.GetMysqlResultSet()
-	ep := ses.GetExportConfig()
-	// cw.Compile might rewrite sql, here we fetch the latest version
-	switch statement := stmt.(type) {
-	//produce result set
-	case *tree.Select:
-		if ep.needExportToFile() {
-
-			columns, err = cw.GetColumns()
-			if err != nil {
-				logError(ses, ses.GetDebugString(),
-					"Failed to get columns from computation handler",
-					zap.Error(err))
-				return
-			}
-			for _, c := range columns {
-				mysqlc := c.(Column)
-				mrs.AddColumn(mysqlc)
-			}
-
-			// open new file
-			ep.DefaultBufSize = pu.SV.ExportDataDefaultFlushSize
-			initExportFileParam(ep, mrs)
-			if err = openNewFile(requestCtx, ep, mrs); err != nil {
-				return
-			}
-
-			runBegin := time.Now()
-			/*
-				Start pipeline
-				Producing the data row and sending the data row
-			*/
-			// todo: add trace
-			if _, err = runner.Run(0); err != nil {
-				return
-			}
-
-			// only log if run time is longer than 1s
-			if time.Since(runBegin) > time.Second {
-				logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-			}
-
-			oq := NewOutputQueue(ses.GetRequestContext(), ses, 0, nil, nil)
-			if err = exportAllData(oq); err != nil {
-				return
-			}
-			if err = ep.Writer.Flush(); err != nil {
-				return
-			}
-			if err = ep.File.Close(); err != nil {
-				return
-			}
-
-			/*
-			   Serialize the execution plan by json
-			*/
-			if cwft, ok := cw.(*TxnComputationWrapper); ok {
-				_ = cwft.RecordExecPlan(requestCtx)
-			}
-
-		} else {
-			columns, err = cw.GetColumns()
-			if err != nil {
-				logError(ses, ses.GetDebugString(),
-					"Failed to get columns from computation handler",
-					zap.Error(err))
-				return
-			}
-			if c, ok := cw.(*TxnComputationWrapper); ok {
-				ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
-			}
-			/*
-				Step 1 : send column count and column definition.
-			*/
-			//send column count
-			colCnt := uint64(len(columns))
-			err = proto.SendColumnCountPacket(colCnt)
-			if err != nil {
-				return
-			}
-			//send columns
-			//column_count * Protocol::ColumnDefinition packets
-			cmd := ses.GetCmd()
-			for _, c := range columns {
-				mysqlc := c.(Column)
-				mrs.AddColumn(mysqlc)
-				/*
-					mysql COM_QUERY response: send the column definition per column
-				*/
-				err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
-				if err != nil {
-					return
-				}
-			}
-
-			/*
-				mysql COM_QUERY response: End after the column has been sent.
-				send EOF packet
-			*/
-			err = proto.SendEOFPacketIf(0, ses.GetServerStatus())
-			if err != nil {
-				return
-			}
-
-			runBegin := time.Now()
-			/*
-				Step 2: Start pipeline
-				Producing the data row and sending the data row
-			*/
-			// todo: add trace
-			if _, err = runner.Run(0); err != nil {
-				return
-			}
-
-			// only log if run time is longer than 1s
-			if time.Since(runBegin) > time.Second {
-				logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-			}
-
-			/*
-				Step 3: Say goodbye
-				mysql COM_QUERY response: End after the data row has been sent.
-				After all row data has been sent, it sends the EOF or OK packet.
-			*/
-			err = proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
-			if err != nil {
-				return
-			}
-
-			/*
-				Step 4: Serialize the execution plan by json`
-			*/
-			if cwft, ok := cw.(*TxnComputationWrapper); ok {
-				_ = cwft.RecordExecPlan(requestCtx)
-			}
-		}
-
-	case *tree.ShowCreateTable, *tree.ShowCreateDatabase, *tree.ShowTables, *tree.ShowSequences, *tree.ShowDatabases, *tree.ShowColumns,
-		*tree.ShowProcessList, *tree.ShowStatus, *tree.ShowTableStatus, *tree.ShowGrants, *tree.ShowRolesStmt,
-		*tree.ShowIndex, *tree.ShowCreateView, *tree.ShowTarget, *tree.ShowCollation, *tree.ValuesStatement,
-		*tree.ExplainFor, *tree.ExplainStmt, *tree.ShowTableNumber, *tree.ShowColumnNumber, *tree.ShowTableValues, *tree.ShowLocks, *tree.ShowNodeList, *tree.ShowFunctionOrProcedureStatus,
-		*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages:
-		columns, err = cw.GetColumns()
-		if err != nil {
-			logError(ses, ses.GetDebugString(),
-				"Failed to get columns from computation handler",
-				zap.Error(err))
-			return
-		}
-		if c, ok := cw.(*TxnComputationWrapper); ok {
-			ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
-		}
-		/*
-			Step 1 : send column count and column definition.
-		*/
-		//send column count
-		colCnt := uint64(len(columns))
-		err = proto.SendColumnCountPacket(colCnt)
-		if err != nil {
-			return
-		}
-		//send columns
-		//column_count * Protocol::ColumnDefinition packets
-		cmd := ses.GetCmd()
-		for _, c := range columns {
-			mysqlc := c.(Column)
-			mrs.AddColumn(mysqlc)
-			/*
-				mysql COM_QUERY response: send the column definition per column
-			*/
-			err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
-			if err != nil {
-				return
-			}
-		}
-
-		/*
-			mysql COM_QUERY response: End after the column has been sent.
-			send EOF packet
-		*/
-		err = proto.SendEOFPacketIf(0, ses.GetServerStatus())
-		if err != nil {
-			return
-		}
-
-		runBegin := time.Now()
-		/*
-			Step 2: Start pipeline
-			Producing the data row and sending the data row
-		*/
-		// todo: add trace
-		if _, err = runner.Run(0); err != nil {
-			return
-		}
-
-		switch ses.GetShowStmtType() {
-		case ShowTableStatus:
-			if err = handleShowTableStatus(ses, statement.(*tree.ShowTableStatus), proc); err != nil {
-				return
-			}
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-		}
-
-		/*
-			Step 3: Say goodbye
-			mysql COM_QUERY response: End after the data row has been sent.
-			After all row data has been sent, it sends the EOF or OK packet.
-		*/
-		err = proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
-		if err != nil {
-			return
-		}
-
-		/*
-			Step 4: Serialize the execution plan by json
-		*/
-		if cwft, ok := cw.(*TxnComputationWrapper); ok {
-			_ = cwft.RecordExecPlan(requestCtx)
-		}
-	//just status, no result set
-	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-		*tree.CreateIndex, *tree.DropIndex,
-		*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.AlterSequence,
-		*tree.CreateSequence, *tree.DropSequence,
-		*tree.Insert, *tree.Update, *tree.Replace,
-		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
-		*tree.SetVar,
-		*tree.Load,
-		*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-		*tree.CreateRole, *tree.DropRole,
-		*tree.Revoke, *tree.Grant,
-		*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.CreateSource,
-		*tree.Delete, *tree.TruncateTable, *tree.LockTableStmt, *tree.UnLockTableStmt:
-		//change privilege
-		switch cw.GetAst().(type) {
-		case *tree.DropTable, *tree.DropDatabase, *tree.DropIndex, *tree.DropView, *tree.DropSequence,
-			*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-			*tree.CreateRole, *tree.DropRole,
-			*tree.Revoke, *tree.Grant,
-			*tree.SetDefaultRole, *tree.SetRole:
-			ses.InvalidatePrivilegeCache()
-		}
-		runBegin := time.Now()
-		/*
-			Step 1: Start
-		*/
-
-		if st, ok := cw.GetAst().(*tree.Load); ok {
-			if st.Local {
-				loadLocalErrGroup = new(errgroup.Group)
-				loadLocalErrGroup.Go(func() error {
-					return mce.processLoadLocal(proc.Ctx, st.Param, loadLocalWriter)
-				})
-			}
-		}
-
-		if runResult, err = runner.Run(0); err != nil {
-			if loadLocalErrGroup != nil { // release resources
-				err2 := proc.LoadLocalReader.Close()
-				if err2 != nil {
-					logError(ses, ses.GetDebugString(),
-						"processLoadLocal goroutine failed",
-						zap.Error(err2))
-				}
-				err2 = loadLocalErrGroup.Wait() // executor failed, but processLoadLocal is still running, wait for it
-				if err2 != nil {
-					logError(ses, ses.GetDebugString(),
-						"processLoadLocal goroutine failed",
-						zap.Error(err2))
-				}
-			}
-			return
-		}
-
-		// Start the dynamic table daemon task
-		if st, ok := cw.GetAst().(*tree.CreateTable); ok {
-			if st.IsDynamicTable {
-				if err = mce.handleCreateDynamicTable(requestCtx, st); err != nil {
-					return
-				}
-			}
-		}
-
-		if loadLocalErrGroup != nil {
-			if err = loadLocalErrGroup.Wait(); err != nil { //executor success, but processLoadLocal goroutine failed
-				return
-			}
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-		}
-
-		echoTime := time.Now()
-
-		logDebug(ses, ses.GetDebugString(), fmt.Sprintf("time of SendResponse %s", time.Since(echoTime).String()))
-
-		/*
-			Step 4: Serialize the execution plan by json
-		*/
-		if cwft, ok := cw.(*TxnComputationWrapper); ok {
-			_ = cwft.RecordExecPlan(requestCtx)
-		}
-	case *tree.ExplainAnalyze:
-		explainColName := "QUERY PLAN"
-		columns, err = GetExplainColumns(requestCtx, explainColName)
-		if err != nil {
-			logError(ses, ses.GetDebugString(),
-				"Failed to get columns from ExplainColumns handler",
-				zap.Error(err))
-			return
-		}
-		/*
-			Step 1 : send column count and column definition.
-		*/
-		//send column count
-		colCnt := uint64(len(columns))
-		err = proto.SendColumnCountPacket(colCnt)
-		if err != nil {
-			return
-		}
-		//send columns
-		//column_count * Protocol::ColumnDefinition packets
-		cmd := ses.GetCmd()
-		for _, c := range columns {
-			mysqlc := c.(Column)
-			mrs.AddColumn(mysqlc)
-			/*
-				mysql COM_QUERY response: send the column definition per column
-			*/
-			err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
-			if err != nil {
-				return
-			}
-		}
-		/*
-			mysql COM_QUERY response: End after the column has been sent.
-			send EOF packet
-		*/
-		err = proto.SendEOFPacketIf(0, ses.GetServerStatus())
-		if err != nil {
-			return
-		}
-
-		runBegin := time.Now()
-		/*
-			Step 1: Start
-		*/
-		if _, err = runner.Run(0); err != nil {
-			return
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-		}
-
-		if cwft, ok := cw.(*TxnComputationWrapper); ok {
-			queryPlan := cwft.plan
-			// generator query explain
-			explainQuery := explain.NewExplainQueryImpl(queryPlan.GetQuery())
-
-			// build explain data buffer
-			buffer := explain.NewExplainDataBuffer()
-			var option *explain.ExplainOptions
-			option, err = getExplainOption(requestCtx, statement.Options)
-			if err != nil {
-				return
-			}
-
-			err = explainQuery.ExplainPlan(requestCtx, buffer, option)
-			if err != nil {
-				return
-			}
-
-			err = buildMoExplainQuery(explainColName, buffer, ses, getDataFromPipeline)
-			if err != nil {
-				return
-			}
-
-			/*
-				Step 3: Say goodbye
-				mysql COM_QUERY response: End after the data row has been sent.
-				After all row data has been sent, it sends the EOF or OK packet.
-			*/
-			err = proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
-			if err != nil {
-				return
-			}
-		}
-	}
+	// var span trace.Span
+	// requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.executeStmt",
+	// 	trace.WithKind(trace.SpanKindStatement))
+	// defer span.End(trace.WithStatementExtra(ses.GetTxnId(), ses.GetStmtId(), ses.GetSqlOfStmt()))
+
+	// ses.SetQueryInProgress(true)
+	// ses.SetQueryStart(time.Now())
+	// ses.SetQueryInExecute(true)
+	// defer ses.SetQueryEnd(time.Now())
+	// defer ses.SetQueryInProgress(false)
+
+	// // per statement profiler
+	// requestCtx, endStmtProfile := fileservice.NewStatementProfiler(requestCtx)
+	// if endStmtProfile != nil {
+	// 	defer endStmtProfile(func() string {
+	// 		// use sql string as file name suffix
+	// 		formatCtx := tree.NewFmtCtx(dialect.MYSQL)
+	// 		stmt.Format(formatCtx)
+	// 		sql := formatCtx.String()
+	// 		if len(sql) > 128 {
+	// 			sql = sql[:128]
+	// 		}
+	// 		sql = strings.TrimSpace(sql)
+	// 		sql = strings.Map(func(r rune) rune {
+	// 			if unicode.IsSpace(r) {
+	// 				return '-'
+	// 			}
+	// 			return r
+	// 		}, sql)
+	// 		return sql
+	// 	})
+	// }
+
+	// // record goroutine info when ddl stmt run timeout
+	// switch stmt.(type) {
+	// case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase:
+	// 	_, span := trace.Start(requestCtx, "executeStmtHung",
+	// 		trace.WithHungThreshold(time.Minute), // be careful with this options
+	// 		trace.WithProfileGoroutine(),
+	// 		trace.WithProfileTraceSecs(10*time.Second),
+	// 	)
+	// 	defer span.End()
+	// default:
+	// }
+
+	// // end of preamble.
+
+	// // deferred functions.
+
+	// var runResult *util2.RunResult
+	// var prepareStmt *PrepareStmt
+
+	// var cmpBegin time.Time
+	// var ret interface{}
+	// var runner ComputationRunner
+	// var selfHandle bool
+	// var columns []interface{}
+	// var mrs *MysqlResultSet
+	// var loadLocalErrGroup *errgroup.Group
+	// var loadLocalWriter *io.PipeWriter
+
+	// //response the client
+	// respClientFunc := func() error {
+	// 	var rspLen uint64
+	// 	if runResult != nil {
+	// 		rspLen = runResult.AffectRows
+	// 	}
+
+	// 	switch stmt.(type) {
+	// 	case *tree.Select:
+	// 		if len(proc.SessionInfo.SeqAddValues) != 0 {
+	// 			ses.AddSeqValues(proc)
+	// 		}
+	// 		ses.SetSeqLastValue(proc)
+	// 	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
+	// 		*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update, *tree.Replace,
+	// 		*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.Load, *tree.MoDump,
+	// 		*tree.CreateSequence, *tree.DropSequence,
+	// 		*tree.CreateAccount, *tree.DropAccount, *tree.AlterAccount, *tree.AlterDataBaseConfig, *tree.CreatePublication, *tree.AlterPublication, *tree.DropPublication,
+	// 		*tree.CreateFunction, *tree.DropFunction,
+	// 		*tree.CreateProcedure, *tree.DropProcedure,
+	// 		*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+	// 		*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
+	// 		*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete, *tree.TruncateTable, *tree.Use,
+	// 		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
+	// 		*tree.LockTableStmt, *tree.UnLockTableStmt,
+	// 		*tree.CreateStage, *tree.DropStage, *tree.AlterStage, *tree.CreateSource, *tree.AlterSequence:
+	// 		resp := mce.setResponse(i, len(cws), rspLen)
+	// 		if _, ok := stmt.(*tree.Insert); ok {
+	// 			resp.lastInsertId = proc.GetLastInsertID()
+	// 			if proc.GetLastInsertID() != 0 {
+	// 				ses.SetLastInsertID(proc.GetLastInsertID())
+	// 			}
+	// 		}
+	// 		if len(proc.SessionInfo.SeqDeleteKeys) != 0 {
+	// 			ses.DeleteSeqValues(proc)
+	// 		}
+
+	// 		if st, ok := cw.GetAst().(*tree.CreateTable); ok {
+	// 			_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
+	// 		}
+
+	// 		if st, ok := cw.GetAst().(*tree.DropTable); ok {
+	// 			// handle dynamic table drop, cancel all the running daemon task
+	// 			_ = mce.handleDropDynamicTable(requestCtx, st)
+
+	// 			_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
+	// 		}
+
+	// 		if st, ok := cw.GetAst().(*tree.CreateDatabase); ok {
+	// 			_ = insertRecordToMoMysqlCompatibilityMode(requestCtx, ses, stmt)
+	// 			_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
+	// 		}
+
+	// 		if st, ok := cw.GetAst().(*tree.DropDatabase); ok {
+	// 			_ = deleteRecordToMoMysqlCompatbilityMode(requestCtx, ses, stmt)
+	// 			_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
+	// 		}
+
+	// 		if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
+	// 			err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
+	// 			logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 			return err
+	// 		}
+
+	// 	case *tree.PrepareStmt, *tree.PrepareString:
+	// 		if ses.GetCmd() == COM_STMT_PREPARE {
+	// 			if err2 := mce.GetSession().GetMysqlProtocol().SendPrepareResponse(requestCtx, prepareStmt); err2 != nil {
+	// 				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
+	// 				logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 				return err
+	// 			}
+	// 		} else {
+	// 			resp := mce.setResponse(i, len(cws), rspLen)
+	// 			if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
+	// 				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
+	// 				logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 				return err
+	// 			}
+	// 		}
+
+	// 	case *tree.SetVar, *tree.SetTransaction, *tree.BackupStart, *tree.CreateConnector, *tree.DropConnector,
+	// 		*tree.PauseDaemonTask, *tree.ResumeDaemonTask, *tree.CancelDaemonTask:
+	// 		resp := mce.setResponse(i, len(cws), rspLen)
+	// 		if err2 := proto.SendResponse(requestCtx, resp); err2 != nil {
+	// 			return moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
+	// 		}
+	// 	case *tree.Deallocate:
+	// 		//we will not send response in COM_STMT_CLOSE command
+	// 		if ses.GetCmd() != COM_STMT_CLOSE {
+	// 			resp := mce.setResponse(i, len(cws), rspLen)
+	// 			if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
+	// 				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
+	// 				logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 				return err
+	// 			}
+	// 		}
+
+	// 	case *tree.Reset:
+	// 		resp := mce.setResponse(i, len(cws), rspLen)
+	// 		if err2 := mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
+	// 			err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
+	// 			logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 			return err
+	// 		}
+	// 	}
+	// 	if ses.GetQueryInExecute() {
+	// 		logStatementStatus(requestCtx, ses, stmt, success, nil)
+	// 	} else {
+	// 		logStatementStatus(requestCtx, ses, stmt, fail, moerr.NewInternalError(requestCtx, "query is killed"))
+	// 	}
+	// 	return err
+	// }
+
+	// //get errors during the transaction. rollback the transaction
+	// rollbackTxnFunc := func() error {
+	// 	incStatementCounter(tenant, stmt)
+	// 	incStatementErrorsCounter(tenant, stmt)
+	// 	/*
+	// 		Cases    | set Autocommit = 1/0 | BEGIN statement |
+	// 		---------------------------------------------------
+	// 		Case1      1                       Yes
+	// 		Case2      1                       No
+	// 		Case3      0                       Yes
+	// 		Case4      0                       No
+	// 		---------------------------------------------------
+	// 		update error message in Case1,Case3,Case4.
+	// 	*/
+	// 	if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
+	// 		ses.cleanCache()
+	// 		ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
+	// 	}
+	// 	logError(ses, ses.GetDebugString(), err.Error())
+	// 	txnErr := ses.TxnRollbackSingleStatement(stmt)
+	// 	if txnErr != nil {
+	// 		logStatementStatus(requestCtx, ses, stmt, fail, txnErr)
+	// 		return txnErr
+	// 	}
+	// 	logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 	return err
+	// }
+
+	// //execution succeeds during the transaction. commit the transaction
+	// commitTxnFunc := func() (retErr error) {
+	// 	// Call a defer function -- if TxnCommitSingleStatement paniced, we
+	// 	// want to catch it and convert it to an error.
+	// 	defer func() {
+	// 		if r := recover(); r != nil {
+	// 			retErr = moerr.ConvertPanicError(requestCtx, r)
+	// 		}
+	// 	}()
+
+	// 	//load data handle txn failure internally
+	// 	incStatementCounter(tenant, stmt)
+	// 	retErr = ses.TxnCommitSingleStatement(stmt)
+	// 	if retErr != nil {
+	// 		logStatementStatus(requestCtx, ses, stmt, fail, retErr)
+	// 	}
+	// 	return
+	// }
+
+	// //finish the transaction
+	// finishTxnFunc := func() error {
+	// 	// First recover all panics.   If paniced, we will abort.
+	// 	if r := recover(); r != nil {
+	// 		err = moerr.ConvertPanicError(requestCtx, r)
+	// 	}
+
+	// 	if err == nil {
+	// 		err = commitTxnFunc()
+	// 		if err == nil {
+	// 			err = respClientFunc()
+	// 			return err
+	// 		}
+	// 		// if commitTxnFunc failed, we will rollback the transaction.
+	// 	}
+
+	// 	err = rollbackTxnFunc()
+	// 	return err
+	// }
+
+	// _, txnOp := ses.GetTxnHandler().GetTxnOperator()
+	// ses.GetTxnHandler().disableStartStmt()
+	// if txnOp != nil && !ses.IsDerivedStmt() {
+	// 	txnOp.GetWorkspace().StartStatement()
+	// 	ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
+	// }
+
+	// // defer Start/End Statement management, called after finishTxnFunc()
+	// defer func() {
+	// 	// move finishTxnFunc() out to another defer so that if finishTxnFunc
+	// 	// paniced, the following is still called.
+	// 	_, txnOp := ses.GetTxnHandler().GetTxnOperator()
+	// 	if txnOp != nil && !ses.IsDerivedStmt() {
+	// 		ok, id := ses.GetTxnHandler().calledStartStmt()
+	// 		if ok && bytes.Equal(txnOp.Txn().ID, id) {
+	// 			txnOp.GetWorkspace().EndStatement()
+	// 		}
+	// 	}
+	// 	ses.GetTxnHandler().disableStartStmt()
+	// }()
+
+	// // defer transaction state mangagement.
+	// defer func() {
+	// 	err = finishTxnFunc()
+	// }()
+
+	// // XXX XXX
+	// // I hope I can break the following code into several functions, but I can't.
+	// // After separating the functions, the system cannot boot, due to mo_account
+	// // not exists.  No clue why, the closure/capture must do some magic.
+
+	// //check transaction states
+	// switch stmt.(type) {
+	// case *tree.BeginTransaction:
+	// 	err = ses.TxnBegin()
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	RecordStatementTxnID(requestCtx, ses)
+	// case *tree.CommitTransaction:
+	// 	err = ses.TxnCommit()
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.RollbackTransaction:
+	// 	err = ses.TxnRollback()
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// }
+
+	// switch st := stmt.(type) {
+	// case *tree.Select:
+	// 	if st.Ep != nil {
+	// 		if ses.pu.SV.DisableSelectInto {
+	// 			err = moerr.NewSyntaxError(requestCtx, "Unsupport select statement")
+	// 			return
+	// 		}
+	// 		ses.InitExportConfig(st.Ep)
+	// 		defer func() {
+	// 			ses.ClearExportParam()
+	// 		}()
+	// 		err = doCheckFilePath(requestCtx, ses, st.Ep)
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// }
+
+	// selfHandle = false
+
+	// switch st := stmt.(type) {
+	// case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
+	// 	selfHandle = true
+	// case *tree.SetRole:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	//switch role
+	// 	err = mce.handleSwitchRole(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.Use:
+	// 	selfHandle = true
+	// 	var v interface{}
+	// 	v, err = ses.GetGlobalVar("lower_case_table_names")
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	st.Name.SetConfig(v.(int64))
+	// 	//use database
+	// 	err = mce.handleChangeDB(requestCtx, st.Name.Compare())
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	err = changeVersion(requestCtx, ses, st.Name.Compare())
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.MoDump:
+	// 	selfHandle = true
+	// 	//dump
+	// 	err = mce.handleDump(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreateDatabase:
+	// 	err = inputNameIsInvalid(proc.Ctx, string(st.Name))
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	if st.SubscriptionOption != nil && ses.GetTenantInfo() != nil && !ses.GetTenantInfo().IsAdminRole() {
+	// 		err = moerr.NewInternalError(proc.Ctx, "only admin can create subscription")
+	// 		return
+	// 	}
+	// 	st.Sql = sql
+	// case *tree.DropDatabase:
+	// 	err = inputNameIsInvalid(proc.Ctx, string(st.Name))
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	ses.InvalidatePrivilegeCache()
+	// 	// if the droped database is the same as the one in use, database must be reseted to empty.
+	// 	if string(st.Name) == ses.GetDatabaseName() {
+	// 		ses.SetDatabaseName("")
+	// 	}
+	// case *tree.PrepareStmt:
+	// 	selfHandle = true
+	// 	prepareStmt, err = mce.handlePrepareStmt(requestCtx, st, sql)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, prepareStmt.PrepareStmt, prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
+	// 	if err != nil {
+	// 		mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
+	// 		return
+	// 	}
+	// case *tree.PrepareString:
+	// 	selfHandle = true
+	// 	prepareStmt, err = mce.handlePrepareString(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, prepareStmt.PrepareStmt, prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
+	// 	if err != nil {
+	// 		mce.GetSession().RemovePrepareStmt(prepareStmt.Name)
+	// 		return
+	// 	}
+	// case *tree.CreateConnector:
+	// 	selfHandle = true
+	// 	err = mce.handleCreateConnector(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.PauseDaemonTask:
+	// 	selfHandle = true
+	// 	err = mce.handlePauseDaemonTask(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.CancelDaemonTask:
+	// 	selfHandle = true
+	// 	err = mce.handleCancelDaemonTask(requestCtx, st.TaskID)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.ResumeDaemonTask:
+	// 	selfHandle = true
+	// 	err = mce.handleResumeDaemonTask(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropConnector:
+	// 	selfHandle = true
+	// 	err = mce.handleDropConnector(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.ShowConnectors:
+	// 	selfHandle = true
+	// 	if err = mce.handleShowConnectors(requestCtx, i, len(cws)); err != nil {
+	// 		return
+	// 	}
+	// case *tree.Deallocate:
+	// 	selfHandle = true
+	// 	err = mce.handleDeallocate(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.Reset:
+	// 	selfHandle = true
+	// 	err = mce.handleReset(requestCtx, st)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.SetVar:
+	// 	selfHandle = true
+	// 	err = mce.handleSetVar(requestCtx, st, sql)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.ShowVariables:
+	// 	selfHandle = true
+	// 	err = mce.handleShowVariables(st, proc, i, len(cws))
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.ShowErrors, *tree.ShowWarnings:
+	// 	selfHandle = true
+	// 	err = mce.handleShowErrors(i, len(cws))
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// case *tree.AnalyzeStmt:
+	// 	selfHandle = true
+	// 	if err = mce.handleAnalyzeStmt(requestCtx, ses, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.ExplainStmt:
+	// 	selfHandle = true
+	// 	if err = mce.handleExplainStmt(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.ExplainAnalyze:
+	// 	ses.SetData(nil)
+	// case *tree.ShowTableStatus:
+	// 	ses.SetShowStmtType(ShowTableStatus)
+	// 	ses.SetData(nil)
+	// case *InternalCmdFieldList:
+	// 	selfHandle = true
+	// 	if err = mce.handleCmdFieldList(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreatePublication:
+	// 	selfHandle = true
+	// 	if err = mce.handleCreatePublication(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.AlterPublication:
+	// 	selfHandle = true
+	// 	if err = mce.handleAlterPublication(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropPublication:
+	// 	selfHandle = true
+	// 	if err = mce.handleDropPublication(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.ShowSubscriptions:
+	// 	selfHandle = true
+	// 	if err = mce.handleShowSubscriptions(requestCtx, st, i, len(cws)); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreateStage:
+	// 	selfHandle = true
+	// 	if err = mce.handleCreateStage(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropStage:
+	// 	selfHandle = true
+	// 	if err = mce.handleDropStage(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.AlterStage:
+	// 	selfHandle = true
+	// 	if err = mce.handleAlterStage(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreateAccount:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleCreateAccount(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropAccount:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleDropAccount(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.AlterAccount:
+	// 	ses.InvalidatePrivilegeCache()
+	// 	selfHandle = true
+	// 	if err = mce.handleAlterAccount(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.AlterDataBaseConfig:
+	// 	ses.InvalidatePrivilegeCache()
+	// 	selfHandle = true
+	// 	if st.IsAccountLevel {
+	// 		if err = mce.handleAlterAccountConfig(requestCtx, ses, st); err != nil {
+	// 			return
+	// 		}
+	// 	} else {
+	// 		if err = mce.handleAlterDataBaseConfig(requestCtx, ses, st); err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// case *tree.CreateUser:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleCreateUser(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropUser:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleDropUser(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.AlterUser: //TODO
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleAlterUser(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreateRole:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleCreateRole(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropRole:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleDropRole(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreateFunction:
+	// 	selfHandle = true
+	// 	if err = st.Valid(); err != nil {
+	// 		return err
+	// 	}
+	// 	if err = mce.handleCreateFunction(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropFunction:
+	// 	selfHandle = true
+	// 	if err = mce.handleDropFunction(requestCtx, st, proc); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CreateProcedure:
+	// 	selfHandle = true
+	// 	if err = mce.handleCreateProcedure(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.DropProcedure:
+	// 	selfHandle = true
+	// 	if err = mce.handleDropProcedure(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.CallStmt:
+	// 	selfHandle = true
+	// 	if err = mce.handleCallProcedure(requestCtx, st, proc, i, len(cws)); err != nil {
+	// 		return
+	// 	}
+	// case *tree.Grant:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	switch st.Typ {
+	// 	case tree.GrantTypeRole:
+	// 		if err = mce.handleGrantRole(requestCtx, &st.GrantRole); err != nil {
+	// 			return
+	// 		}
+	// 	case tree.GrantTypePrivilege:
+	// 		if err = mce.handleGrantPrivilege(requestCtx, &st.GrantPrivilege); err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// case *tree.Revoke:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	switch st.Typ {
+	// 	case tree.RevokeTypeRole:
+	// 		if err = mce.handleRevokeRole(requestCtx, &st.RevokeRole); err != nil {
+	// 			return
+	// 		}
+	// 	case tree.RevokeTypePrivilege:
+	// 		if err = mce.handleRevokePrivilege(requestCtx, &st.RevokePrivilege); err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// case *tree.Kill:
+	// 	selfHandle = true
+	// 	ses.InvalidatePrivilegeCache()
+	// 	if err = mce.handleKill(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.ShowAccounts:
+	// 	selfHandle = true
+	// 	if err = mce.handleShowAccounts(requestCtx, st, i, len(cws)); err != nil {
+	// 		return
+	// 	}
+	// case *tree.Load:
+	// 	if st.Local {
+	// 		proc.LoadLocalReader, loadLocalWriter = io.Pipe()
+	// 	}
+	// case *tree.ShowBackendServers:
+	// 	selfHandle = true
+	// 	if err = mce.handleShowBackendServers(requestCtx, i, len(cws)); err != nil {
+	// 		return
+	// 	}
+	// case *tree.SetTransaction:
+	// 	selfHandle = true
+	// 	//TODO: handle set transaction
+	// case *tree.LockTableStmt:
+	// 	selfHandle = true
+	// case *tree.UnLockTableStmt:
+	// 	selfHandle = true
+	// case *tree.ShowGrants:
+	// 	if len(st.Username) == 0 {
+	// 		st.Username = userName
+	// 	}
+	// 	if len(st.Hostname) == 0 || st.Hostname == "%" {
+	// 		st.Hostname = rootHost
+	// 	}
+	// case *tree.BackupStart:
+	// 	selfHandle = true
+	// 	if err = mce.handleStartBackup(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// case *tree.EmptyStmt:
+	// 	selfHandle = true
+	// 	if err = mce.handleEmptyStmt(requestCtx, st); err != nil {
+	// 		return
+	// 	}
+	// }
+
+	// if selfHandle {
+	// 	return
+	// }
+
+	// cmpBegin = time.Now()
+
+	// if ret, err = cw.Compile(requestCtx, ses, ses.GetOutputCallback()); err != nil {
+	// 	return
+	// }
+	// stmt = cw.GetAst()
+	// // reset some special stmt for execute statement
+	// switch st := stmt.(type) {
+	// case *tree.SetVar:
+	// 	err = mce.handleSetVar(requestCtx, st, sql)
+	// 	if err != nil {
+	// 		return
+	// 	} else {
+	// 		return
+	// 	}
+	// case *tree.ShowVariables:
+	// 	err = mce.handleShowVariables(st, proc, i, len(cws))
+	// 	if err != nil {
+	// 		return
+	// 	} else {
+	// 		return
+	// 	}
+	// case *tree.ShowErrors, *tree.ShowWarnings:
+	// 	err = mce.handleShowErrors(i, len(cws))
+	// 	if err != nil {
+	// 		return
+	// 	} else {
+	// 		return
+	// 	}
+	// }
+
+	// runner = ret.(ComputationRunner)
+
+	// // only log if build time is longer than 1s
+	// if time.Since(cmpBegin) > time.Second {
+	// 	logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
+	// }
+
+	// mrs = ses.GetMysqlResultSet()
+	// ep := ses.GetExportConfig()
+	// // cw.Compile might rewrite sql, here we fetch the latest version
+	// switch statement := stmt.(type) {
+	// //produce result set
+	// case *tree.Select:
+	// 	if ep.needExportToFile() {
+
+	// 		columns, err = cw.GetColumns()
+	// 		if err != nil {
+	// 			logError(ses, ses.GetDebugString(),
+	// 				"Failed to get columns from computation handler",
+	// 				zap.Error(err))
+	// 			return
+	// 		}
+	// 		for _, c := range columns {
+	// 			mysqlc := c.(Column)
+	// 			mrs.AddColumn(mysqlc)
+	// 		}
+
+	// 		// open new file
+	// 		ep.DefaultBufSize = pu.SV.ExportDataDefaultFlushSize
+	// 		initExportFileParam(ep, mrs)
+	// 		if err = openNewFile(requestCtx, ep, mrs); err != nil {
+	// 			return
+	// 		}
+
+	// 		runBegin := time.Now()
+	// 		/*
+	// 			Start pipeline
+	// 			Producing the data row and sending the data row
+	// 		*/
+	// 		// todo: add trace
+	// 		if _, err = runner.Run(0); err != nil {
+	// 			return
+	// 		}
+
+	// 		// only log if run time is longer than 1s
+	// 		if time.Since(runBegin) > time.Second {
+	// 			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+	// 		}
+
+	// 		oq := NewOutputQueue(ses.GetRequestContext(), ses, 0, nil, nil)
+	// 		if err = exportAllData(oq); err != nil {
+	// 			return
+	// 		}
+	// 		if err = ep.Writer.Flush(); err != nil {
+	// 			return
+	// 		}
+	// 		if err = ep.File.Close(); err != nil {
+	// 			return
+	// 		}
+
+	// 		/*
+	// 		   Serialize the execution plan by json
+	// 		*/
+	// 		if cwft, ok := cw.(*TxnComputationWrapper); ok {
+	// 			_ = cwft.RecordExecPlan(requestCtx)
+	// 		}
+
+	// 	} else {
+	// 		columns, err = cw.GetColumns()
+	// 		if err != nil {
+	// 			logError(ses, ses.GetDebugString(),
+	// 				"Failed to get columns from computation handler",
+	// 				zap.Error(err))
+	// 			return
+	// 		}
+	// 		if c, ok := cw.(*TxnComputationWrapper); ok {
+	// 			ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+	// 		}
+	// 		/*
+	// 			Step 1 : send column count and column definition.
+	// 		*/
+	// 		//send column count
+	// 		colCnt := uint64(len(columns))
+	// 		err = proto.SendColumnCountPacket(colCnt)
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 		//send columns
+	// 		//column_count * Protocol::ColumnDefinition packets
+	// 		cmd := ses.GetCmd()
+	// 		for _, c := range columns {
+	// 			mysqlc := c.(Column)
+	// 			mrs.AddColumn(mysqlc)
+	// 			/*
+	// 				mysql COM_QUERY response: send the column definition per column
+	// 			*/
+	// 			err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+	// 			if err != nil {
+	// 				return
+	// 			}
+	// 		}
+
+	// 		/*
+	// 			mysql COM_QUERY response: End after the column has been sent.
+	// 			send EOF packet
+	// 		*/
+	// 		err = proto.SendEOFPacketIf(0, ses.txn.GetServerStatus())
+	// 		if err != nil {
+	// 			return
+	// 		}
+
+	// 		runBegin := time.Now()
+	// 		/*
+	// 			Step 2: Start pipeline
+	// 			Producing the data row and sending the data row
+	// 		*/
+	// 		// todo: add trace
+	// 		if _, err = runner.Run(0); err != nil {
+	// 			return
+	// 		}
+
+	// 		// only log if run time is longer than 1s
+	// 		if time.Since(runBegin) > time.Second {
+	// 			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+	// 		}
+
+	// 		/*
+	// 			Step 3: Say goodbye
+	// 			mysql COM_QUERY response: End after the data row has been sent.
+	// 			After all row data has been sent, it sends the EOF or OK packet.
+	// 		*/
+	// 		err = proto.sendEOFOrOkPacket(0, ses.txn.GetServerStatus())
+	// 		if err != nil {
+	// 			return
+	// 		}
+
+	// 		/*
+	// 			Step 4: Serialize the execution plan by json`
+	// 		*/
+	// 		if cwft, ok := cw.(*TxnComputationWrapper); ok {
+	// 			_ = cwft.RecordExecPlan(requestCtx)
+	// 		}
+	// 	}
+
+	// case *tree.ShowCreateTable, *tree.ShowCreateDatabase, *tree.ShowTables, *tree.ShowSequences, *tree.ShowDatabases, *tree.ShowColumns,
+	// 	*tree.ShowProcessList, *tree.ShowStatus, *tree.ShowTableStatus, *tree.ShowGrants, *tree.ShowRolesStmt,
+	// 	*tree.ShowIndex, *tree.ShowCreateView, *tree.ShowTarget, *tree.ShowCollation, *tree.ValuesStatement,
+	// 	*tree.ExplainFor, *tree.ExplainStmt, *tree.ShowTableNumber, *tree.ShowColumnNumber, *tree.ShowTableValues, *tree.ShowLocks, *tree.ShowNodeList, *tree.ShowFunctionOrProcedureStatus,
+	// 	*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages:
+	// 	columns, err = cw.GetColumns()
+	// 	if err != nil {
+	// 		logError(ses, ses.GetDebugString(),
+	// 			"Failed to get columns from computation handler",
+	// 			zap.Error(err))
+	// 		return
+	// 	}
+	// 	if c, ok := cw.(*TxnComputationWrapper); ok {
+	// 		ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+	// 	}
+	// 	/*
+	// 		Step 1 : send column count and column definition.
+	// 	*/
+	// 	//send column count
+	// 	colCnt := uint64(len(columns))
+	// 	err = proto.SendColumnCountPacket(colCnt)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	//send columns
+	// 	//column_count * Protocol::ColumnDefinition packets
+	// 	cmd := ses.GetCmd()
+	// 	for _, c := range columns {
+	// 		mysqlc := c.(Column)
+	// 		mrs.AddColumn(mysqlc)
+	// 		/*
+	// 			mysql COM_QUERY response: send the column definition per column
+	// 		*/
+	// 		err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 	}
+
+	// 	/*
+	// 		mysql COM_QUERY response: End after the column has been sent.
+	// 		send EOF packet
+	// 	*/
+	// 	err = proto.SendEOFPacketIf(0, ses.txn.GetServerStatus())
+	// 	if err != nil {
+	// 		return
+	// 	}
+
+	// 	runBegin := time.Now()
+	// 	/*
+	// 		Step 2: Start pipeline
+	// 		Producing the data row and sending the data row
+	// 	*/
+	// 	// todo: add trace
+	// 	if _, err = runner.Run(0); err != nil {
+	// 		return
+	// 	}
+
+	// 	switch ses.GetShowStmtType() {
+	// 	case ShowTableStatus:
+	// 		if err = handleShowTableStatus(ses, statement.(*tree.ShowTableStatus), proc); err != nil {
+	// 			return
+	// 		}
+	// 	}
+
+	// 	// only log if run time is longer than 1s
+	// 	if time.Since(runBegin) > time.Second {
+	// 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+	// 	}
+
+	// 	/*
+	// 		Step 3: Say goodbye
+	// 		mysql COM_QUERY response: End after the data row has been sent.
+	// 		After all row data has been sent, it sends the EOF or OK packet.
+	// 	*/
+	// 	err = proto.sendEOFOrOkPacket(0, ses.txn.GetServerStatus())
+	// 	if err != nil {
+	// 		return
+	// 	}
+
+	// 	/*
+	// 		Step 4: Serialize the execution plan by json
+	// 	*/
+	// 	if cwft, ok := cw.(*TxnComputationWrapper); ok {
+	// 		_ = cwft.RecordExecPlan(requestCtx)
+	// 	}
+	// //just status, no result set
+	// case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
+	// 	*tree.CreateIndex, *tree.DropIndex,
+	// 	*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.AlterSequence,
+	// 	*tree.CreateSequence, *tree.DropSequence,
+	// 	*tree.Insert, *tree.Update, *tree.Replace,
+	// 	*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
+	// 	*tree.SetVar,
+	// 	*tree.Load,
+	// 	*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+	// 	*tree.CreateRole, *tree.DropRole,
+	// 	*tree.Revoke, *tree.Grant,
+	// 	*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.CreateSource,
+	// 	*tree.Delete, *tree.TruncateTable, *tree.LockTableStmt, *tree.UnLockTableStmt:
+	// 	//change privilege
+	// 	switch cw.GetAst().(type) {
+	// 	case *tree.DropTable, *tree.DropDatabase, *tree.DropIndex, *tree.DropView, *tree.DropSequence,
+	// 		*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+	// 		*tree.CreateRole, *tree.DropRole,
+	// 		*tree.Revoke, *tree.Grant,
+	// 		*tree.SetDefaultRole, *tree.SetRole:
+	// 		ses.InvalidatePrivilegeCache()
+	// 	}
+	// 	runBegin := time.Now()
+	// 	/*
+	// 		Step 1: Start
+	// 	*/
+
+	// 	if st, ok := cw.GetAst().(*tree.Load); ok {
+	// 		if st.Local {
+	// 			loadLocalErrGroup = new(errgroup.Group)
+	// 			loadLocalErrGroup.Go(func() error {
+	// 				return mce.processLoadLocal(proc.Ctx, st.Param, loadLocalWriter)
+	// 			})
+	// 		}
+	// 	}
+
+	// 	if runResult, err = runner.Run(0); err != nil {
+	// 		if loadLocalErrGroup != nil { // release resources
+	// 			err2 := proc.LoadLocalReader.Close()
+	// 			if err2 != nil {
+	// 				logError(ses, ses.GetDebugString(),
+	// 					"processLoadLocal goroutine failed",
+	// 					zap.Error(err2))
+	// 			}
+	// 			err2 = loadLocalErrGroup.Wait() // executor failed, but processLoadLocal is still running, wait for it
+	// 			if err2 != nil {
+	// 				logError(ses, ses.GetDebugString(),
+	// 					"processLoadLocal goroutine failed",
+	// 					zap.Error(err2))
+	// 			}
+	// 		}
+	// 		return
+	// 	}
+
+	// 	// Start the dynamic table daemon task
+	// 	if st, ok := cw.GetAst().(*tree.CreateTable); ok {
+	// 		if st.IsDynamicTable {
+	// 			if err = mce.handleCreateDynamicTable(requestCtx, st); err != nil {
+	// 				return
+	// 			}
+	// 		}
+	// 	}
+
+	// 	if loadLocalErrGroup != nil {
+	// 		if err = loadLocalErrGroup.Wait(); err != nil { //executor success, but processLoadLocal goroutine failed
+	// 			return
+	// 		}
+	// 	}
+
+	// 	// only log if run time is longer than 1s
+	// 	if time.Since(runBegin) > time.Second {
+	// 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+	// 	}
+
+	// 	echoTime := time.Now()
+
+	// 	logDebug(ses, ses.GetDebugString(), fmt.Sprintf("time of SendResponse %s", time.Since(echoTime).String()))
+
+	// 	/*
+	// 		Step 4: Serialize the execution plan by json
+	// 	*/
+	// 	if cwft, ok := cw.(*TxnComputationWrapper); ok {
+	// 		_ = cwft.RecordExecPlan(requestCtx)
+	// 	}
+	// case *tree.ExplainAnalyze:
+	// 	explainColName := "QUERY PLAN"
+	// 	columns, err = GetExplainColumns(requestCtx, explainColName)
+	// 	if err != nil {
+	// 		logError(ses, ses.GetDebugString(),
+	// 			"Failed to get columns from ExplainColumns handler",
+	// 			zap.Error(err))
+	// 		return
+	// 	}
+	// 	/*
+	// 		Step 1 : send column count and column definition.
+	// 	*/
+	// 	//send column count
+	// 	colCnt := uint64(len(columns))
+	// 	err = proto.SendColumnCountPacket(colCnt)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	//send columns
+	// 	//column_count * Protocol::ColumnDefinition packets
+	// 	cmd := ses.GetCmd()
+	// 	for _, c := range columns {
+	// 		mysqlc := c.(Column)
+	// 		mrs.AddColumn(mysqlc)
+	// 		/*
+	// 			mysql COM_QUERY response: send the column definition per column
+	// 		*/
+	// 		err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// 	/*
+	// 		mysql COM_QUERY response: End after the column has been sent.
+	// 		send EOF packet
+	// 	*/
+	// 	err = proto.SendEOFPacketIf(0, ses.txn.GetServerStatus())
+	// 	if err != nil {
+	// 		return
+	// 	}
+
+	// 	runBegin := time.Now()
+	// 	/*
+	// 		Step 1: Start
+	// 	*/
+	// 	if _, err = runner.Run(0); err != nil {
+	// 		return
+	// 	}
+
+	// 	// only log if run time is longer than 1s
+	// 	if time.Since(runBegin) > time.Second {
+	// 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+	// 	}
+
+	// 	if cwft, ok := cw.(*TxnComputationWrapper); ok {
+	// 		queryPlan := cwft.plan
+	// 		// generator query explain
+	// 		explainQuery := explain.NewExplainQueryImpl(queryPlan.GetQuery())
+
+	// 		// build explain data buffer
+	// 		buffer := explain.NewExplainDataBuffer()
+	// 		var option *explain.ExplainOptions
+	// 		option, err = getExplainOption(requestCtx, statement.Options)
+	// 		if err != nil {
+	// 			return
+	// 		}
+
+	// 		err = explainQuery.ExplainPlan(requestCtx, buffer, option)
+	// 		if err != nil {
+	// 			return
+	// 		}
+
+	// 		err = buildMoExplainQuery(explainColName, buffer, ses, getDataFromPipeline)
+	// 		if err != nil {
+	// 			return
+	// 		}
+
+	// 		/*
+	// 			Step 3: Say goodbye
+	// 			mysql COM_QUERY response: End after the data row has been sent.
+	// 			After all row data has been sent, it sends the EOF or OK packet.
+	// 		*/
+	// 		err = proto.sendEOFOrOkPacket(0, ses.txn.GetServerStatus())
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// }
 	return
 }
 
 // execute query
 func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserInput) (retErr error) {
-	// set the batch buf for stream scan
-	var inMemStreamScan []*kafka.Message
+	// // set the batch buf for stream scan
+	// var inMemStreamScan []*kafka.Message
 
-	if batchValue, ok := requestCtx.Value(defines.SourceScanResKey{}).([]*kafka.Message); ok {
-		inMemStreamScan = batchValue
-	}
+	// if batchValue, ok := requestCtx.Value(defines.SourceScanResKey{}).([]*kafka.Message); ok {
+	// 	inMemStreamScan = batchValue
+	// }
 
-	beginInstant := time.Now()
-	requestCtx = appendStatementAt(requestCtx, beginInstant)
+	// beginInstant := time.Now()
+	// requestCtx = appendStatementAt(requestCtx, beginInstant)
 
-	ses := mce.GetSession()
-	input.genSqlSourceType(ses)
-	ses.SetShowStmtType(NotShowStatement)
-	proto := ses.GetMysqlProtocol()
-	ses.SetSql(input.getSql())
-	pu := ses.GetParameterUnit()
-	//the ses.GetUserName returns the user_name with the account_name.
-	//here,we only need the user_name.
-	userNameOnly := rootName
+	// ses := mce.GetSession()
+	// input.genSqlSourceType(ses)
+	// ses.SetShowStmtType(NotShowStatement)
+	// proto := ses.GetMysqlProtocol()
+	// ses.SetSql(input.getSql())
+	// pu := fePu
+	// //the ses.GetUserName returns the user_name with the account_name.
+	// //here,we only need the user_name.
+	// userNameOnly := rootName
 
-	proc := process.New(
-		requestCtx,
-		ses.GetMemPool(),
-		ses.GetTxnHandler().GetTxnClient(),
-		nil,
-		pu.FileService,
-		pu.LockService,
-		pu.QueryService,
-		pu.HAKeeperClient,
-		pu.UdfService,
-		ses.GetAutoIncrCacheManager())
-	proc.CopyVectorPool(ses.proc)
-	proc.CopyValueScanBatch(ses.proc)
-	proc.Id = mce.getNextProcessId()
-	proc.Lim.Size = pu.SV.ProcessLimitationSize
-	proc.Lim.BatchRows = pu.SV.ProcessLimitationBatchRows
-	proc.Lim.MaxMsgSize = pu.SV.MaxMessageSize
-	proc.Lim.PartitionRows = pu.SV.ProcessLimitationPartitionRows
-	proc.SessionInfo = process.SessionInfo{
-		User:                 ses.GetUserName(),
-		Host:                 pu.SV.Host,
-		ConnectionID:         uint64(proto.ConnectionID()),
-		Database:             ses.GetDatabaseName(),
-		Version:              makeServerVersion(pu, serverVersion.Load().(string)),
-		TimeZone:             ses.GetTimeZone(),
-		StorageEngine:        pu.StorageEngine,
-		LastInsertID:         ses.GetLastInsertID(),
-		SqlHelper:            ses.GetSqlHelper(),
-		Buf:                  ses.GetBuffer(),
-		SourceInMemScanBatch: inMemStreamScan,
-	}
-	proc.SetStmtProfile(&ses.stmtProfile)
-	proc.SetResolveVariableFunc(mce.ses.txnCompileCtx.ResolveVariable)
-	proc.InitSeq()
-	// Copy curvalues stored in session to this proc.
-	// Deep copy the map, takes some memory.
-	ses.CopySeqToProc(proc)
-	if ses.GetTenantInfo() != nil {
-		proc.SessionInfo.Account = ses.GetTenantInfo().GetTenant()
-		proc.SessionInfo.AccountId = ses.GetTenantInfo().GetTenantID()
-		proc.SessionInfo.Role = ses.GetTenantInfo().GetDefaultRole()
-		proc.SessionInfo.RoleId = ses.GetTenantInfo().GetDefaultRoleID()
-		proc.SessionInfo.UserId = ses.GetTenantInfo().GetUserID()
+	// proc := process.New(
+	// 	requestCtx,
+	// 	ses.GetMemPool(),
+	// 	ses.GetTxnHandler().GetTxnClient(),
+	// 	nil,
+	// 	pu.FileService,
+	// 	pu.LockService,
+	// 	pu.QueryService,
+	// 	pu.HAKeeperClient,
+	// 	pu.UdfService,
+	// 	ses.GetAutoIncrCacheManager())
+	// proc.CopyVectorPool(ses.proc)
+	// proc.CopyValueScanBatch(ses.proc)
+	// proc.Id = mce.getNextProcessId()
+	// proc.Lim.Size = pu.SV.ProcessLimitationSize
+	// proc.Lim.BatchRows = pu.SV.ProcessLimitationBatchRows
+	// proc.Lim.MaxMsgSize = pu.SV.MaxMessageSize
+	// proc.Lim.PartitionRows = pu.SV.ProcessLimitationPartitionRows
+	// proc.SessionInfo = process.SessionInfo{
+	// 	User:                 ses.GetUserName(),
+	// 	Host:                 pu.SV.Host,
+	// 	ConnectionID:         uint64(proto.ConnectionID()),
+	// 	Database:             ses.GetDatabaseName(),
+	// 	Version:              makeServerVersion(pu, serverVersion.Load().(string)),
+	// 	TimeZone:             ses.GetTimeZone(),
+	// 	StorageEngine:        pu.StorageEngine,
+	// 	LastInsertID:         ses.GetLastInsertID(),
+	// 	SqlHelper:            ses.GetSqlHelper(),
+	// 	Buf:                  ses.GetBuffer(),
+	// 	SourceInMemScanBatch: inMemStreamScan,
+	// }
+	// proc.SetStmtProfile(&ses.stmtProfile)
+	// proc.SetResolveVariableFunc(mce.ses.txnCompileCtx.ResolveVariable)
+	// proc.InitSeq()
+	// // Copy curvalues stored in session to this proc.
+	// // Deep copy the map, takes some memory.
+	// ses.CopySeqToProc(proc)
+	// if ses.GetTenantInfo() != nil {
+	// 	proc.SessionInfo.Account = ses.GetTenantInfo().GetTenant()
+	// 	proc.SessionInfo.AccountId = ses.GetTenantInfo().GetTenantID()
+	// 	proc.SessionInfo.Role = ses.GetTenantInfo().GetDefaultRole()
+	// 	proc.SessionInfo.RoleId = ses.GetTenantInfo().GetDefaultRoleID()
+	// 	proc.SessionInfo.UserId = ses.GetTenantInfo().GetUserID()
 
-		if len(ses.GetTenantInfo().GetVersion()) != 0 {
-			proc.SessionInfo.Version = ses.GetTenantInfo().GetVersion()
-		}
-		userNameOnly = ses.GetTenantInfo().GetUser()
-	} else {
-		proc.SessionInfo.Account = sysAccountName
-		proc.SessionInfo.AccountId = sysAccountID
-		proc.SessionInfo.RoleId = moAdminRoleID
-		proc.SessionInfo.UserId = rootID
-	}
-	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.doComQuery",
-		trace.WithKind(trace.SpanKindStatement))
-	defer span.End()
+	// 	if len(ses.GetTenantInfo().GetVersion()) != 0 {
+	// 		proc.SessionInfo.Version = ses.GetTenantInfo().GetVersion()
+	// 	}
+	// 	userNameOnly = ses.GetTenantInfo().GetUser()
+	// } else {
+	// 	proc.SessionInfo.Account = sysAccountName
+	// 	proc.SessionInfo.AccountId = sysAccountID
+	// 	proc.SessionInfo.RoleId = moAdminRoleID
+	// 	proc.SessionInfo.UserId = rootID
+	// }
+	// var span trace.Span
+	// requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.doComQuery",
+	// 	trace.WithKind(trace.SpanKindStatement))
+	// defer span.End()
 
-	proc.SessionInfo.User = userNameOnly
-	proc.SessionInfo.QueryId = ses.getQueryId(input.isInternal())
-	ses.txnCompileCtx.SetProcess(ses.proc)
-	ses.proc.SessionInfo = proc.SessionInfo
+	// proc.SessionInfo.User = userNameOnly
+	// proc.SessionInfo.QueryId = ses.getQueryId(input.isInternal())
+	// ses.txnCompileCtx.SetProcess(ses.proc)
+	// ses.proc.SessionInfo = proc.SessionInfo
 
-	statsInfo := statistic.StatsInfo{ParseStartTime: beginInstant}
-	requestCtx = statistic.ContextWithStatsInfo(requestCtx, &statsInfo)
+	// statsInfo := statistic.StatsInfo{ParseStartTime: beginInstant}
+	// requestCtx = statistic.ContextWithStatsInfo(requestCtx, &statsInfo)
 
-	cws, err := GetComputationWrapper(ses.GetDatabaseName(),
-		input,
-		ses.GetUserName(),
-		pu.StorageEngine,
-		proc, ses)
+	// cws, err := GetComputationWrapper(ses.GetDatabaseName(),
+	// 	input,
+	// 	ses.GetUserName(),
+	// 	pu.StorageEngine,
+	// 	proc, ses)
 
-	ParseDuration := time.Since(beginInstant)
+	// ParseDuration := time.Since(beginInstant)
 
-	if err != nil {
-		statsInfo.ParseDuration = ParseDuration
-		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, parsers.HandleSqlForRecord(input.getSql()), input.getSqlSourceTypes(), err)
-		retErr = err
-		if _, ok := err.(*moerr.Error); !ok {
-			retErr = moerr.NewParseError(requestCtx, err.Error())
-		}
-		logStatementStringStatus(requestCtx, ses, input.getSql(), fail, retErr)
-		return retErr
-	}
+	// if err != nil {
+	// 	statsInfo.ParseDuration = ParseDuration
+	// 	requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, parsers.HandleSqlForRecord(input.getSql()), input.getSqlSourceTypes(), err)
+	// 	retErr = err
+	// 	if _, ok := err.(*moerr.Error); !ok {
+	// 		retErr = moerr.NewParseError(requestCtx, err.Error())
+	// 	}
+	// 	logStatementStringStatus(requestCtx, ses, input.getSql(), fail, retErr)
+	// 	return retErr
+	// }
 
-	defer func() {
-		ses.SetMysqlResultSet(nil)
-	}()
+	// defer func() {
+	// 	ses.SetMysqlResultSet(nil)
+	// }()
 
-	canCache := true
+	// canCache := true
 
-	singleStatement := len(cws) == 1
-	sqlRecord := parsers.HandleSqlForRecord(input.getSql())
+	// singleStatement := len(cws) == 1
+	// sqlRecord := parsers.HandleSqlForRecord(input.getSql())
 
-	for i, cw := range cws {
-		if cwft, ok := cw.(*TxnComputationWrapper); ok {
-			if cwft.stmt.GetQueryType() == tree.QueryTypeDDL || cwft.stmt.GetQueryType() == tree.QueryTypeDCL ||
-				cwft.stmt.GetQueryType() == tree.QueryTypeOth ||
-				cwft.stmt.GetQueryType() == tree.QueryTypeTCL {
-				if _, ok := cwft.stmt.(*tree.SetVar); !ok {
-					ses.cleanCache()
-				}
-				canCache = false
-			}
-		}
+	// for i, cw := range cws {
+	// 	if cwft, ok := cw.(*TxnComputationWrapper); ok {
+	// 		if cwft.stmt.GetQueryType() == tree.QueryTypeDDL || cwft.stmt.GetQueryType() == tree.QueryTypeDCL ||
+	// 			cwft.stmt.GetQueryType() == tree.QueryTypeOth ||
+	// 			cwft.stmt.GetQueryType() == tree.QueryTypeTCL {
+	// 			if _, ok := cwft.stmt.(*tree.SetVar); !ok {
+	// 				ses.cleanCache()
+	// 			}
+	// 			canCache = false
+	// 		}
+	// 	}
 
-		ses.SetMysqlResultSet(&MysqlResultSet{})
-		ses.sentRows.Store(int64(0))
-		ses.writeCsvBytes.Store(int64(0))
-		proto.ResetStatistics() // move from getDataFromPipeline, for record column fields' data
-		stmt := cw.GetAst()
-		sqlType := input.getSqlSourceType(i)
-		requestCtx = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sqlRecord[i], sqlType, singleStatement)
+	// 	ses.SetMysqlResultSet(&MysqlResultSet{})
+	// 	ses.sentRows.Store(int64(0))
+	// 	ses.writeCsvBytes.Store(int64(0))
+	// 	proto.ResetStatistics() // move from getDataFromPipeline, for record column fields' data
+	// 	stmt := cw.GetAst()
+	// 	sqlType := input.getSqlSourceType(i)
+	// 	requestCtx = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sqlRecord[i], sqlType, singleStatement)
 
-		statsInfo.Reset()
-		//average parse duration
-		statsInfo.ParseDuration = time.Duration(ParseDuration.Nanoseconds() / int64(len(cws)))
+	// 	statsInfo.Reset()
+	// 	//average parse duration
+	// 	statsInfo.ParseDuration = time.Duration(ParseDuration.Nanoseconds() / int64(len(cws)))
 
-		tenant := ses.GetTenantNameWithStmt(stmt)
-		//skip PREPARE statement here
-		if ses.GetTenantInfo() != nil && !IsPrepareStatement(stmt) {
-			err = authenticateUserCanExecuteStatement(requestCtx, ses, stmt)
-			if err != nil {
-				logStatementStatus(requestCtx, ses, stmt, fail, err)
-				return err
-			}
-		}
+	// 	tenant := ses.GetTenantNameWithStmt(stmt)
+	// 	//skip PREPARE statement here
+	// 	if ses.GetTenantInfo() != nil && !IsPrepareStatement(stmt) {
+	// 		err = authenticateUserCanExecuteStatement(requestCtx, ses, stmt)
+	// 		if err != nil {
+	// 			logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 			return err
+	// 		}
+	// 	}
 
-		/*
-				if it is in an active or multi-statement transaction, we check the type of the statement.
-				Then we decide that if we can execute the statement.
+	// 	/*
+	// 			if it is in an active or multi-statement transaction, we check the type of the statement.
+	// 			Then we decide that if we can execute the statement.
 
-			If we check the active transaction, it will generate the case below.
-			case:
-			set autocommit = 0;  <- no active transaction
-			                     <- no active transaction
-			drop table test1;    <- no active transaction, no error
-			                     <- has active transaction
-			drop table test1;    <- has active transaction, error
-			                     <- has active transaction
-		*/
-		if ses.InActiveTransaction() {
-			err = mce.canExecuteStatementInUncommittedTransaction(requestCtx, stmt)
-			if err != nil {
-				logStatementStatus(requestCtx, ses, stmt, fail, err)
-				return err
-			}
-		}
+	// 		If we check the active transaction, it will generate the case below.
+	// 		case:
+	// 		set autocommit = 0;  <- no active transaction
+	// 		                     <- no active transaction
+	// 		drop table test1;    <- no active transaction, no error
+	// 		                     <- has active transaction
+	// 		drop table test1;    <- has active transaction, error
+	// 		                     <- has active transaction
+	// 	*/
+	// 	if ses.InActiveTransaction() {
+	// 		err = mce.canExecuteStatementInUncommittedTransaction(requestCtx, stmt)
+	// 		if err != nil {
+	// 			logStatementStatus(requestCtx, ses, stmt, fail, err)
+	// 			return err
+	// 		}
+	// 	}
 
-		// update UnixTime for new query, which is used for now() / CURRENT_TIMESTAMP
-		proc.UnixTime = time.Now().UnixNano()
-		if ses.proc != nil {
-			ses.proc.UnixTime = proc.UnixTime
-		}
+	// 	// update UnixTime for new query, which is used for now() / CURRENT_TIMESTAMP
+	// 	proc.UnixTime = time.Now().UnixNano()
+	// 	if ses.proc != nil {
+	// 		ses.proc.UnixTime = proc.UnixTime
+	// 	}
 
-		err = mce.executeStmt(requestCtx, ses, stmt, proc, cw, i, cws, proto, pu, tenant, userNameOnly, sqlRecord[i])
-		if err != nil {
-			return err
-		}
-	} // end of for
+	// 	err = mce.executeStmt(requestCtx, ses, stmt, proc, cw, i, cws, proto, pu, tenant, userNameOnly, sqlRecord[i])
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// } // end of for
 
-	if canCache && !ses.isCached(input.getSql()) {
-		plans := make([]*plan.Plan, len(cws))
-		stmts := make([]tree.Statement, len(cws))
-		for i, cw := range cws {
-			if cwft, ok := cw.(*TxnComputationWrapper); ok && checkNodeCanCache(cwft.plan) {
-				plans[i] = cwft.plan
-				stmts[i] = cwft.stmt
-			} else {
-				return nil
-			}
-		}
-		ses.cachePlan(input.getSql(), stmts, plans)
-	}
+	// if canCache && !ses.isCached(input.getSql()) {
+	// 	plans := make([]*plan.Plan, len(cws))
+	// 	stmts := make([]tree.Statement, len(cws))
+	// 	for i, cw := range cws {
+	// 		if cwft, ok := cw.(*TxnComputationWrapper); ok && checkNodeCanCache(cwft.plan) {
+	// 			plans[i] = cwft.plan
+	// 			stmts[i] = cwft.stmt
+	// 		} else {
+	// 			return nil
+	// 		}
+	// 	}
+	// 	ses.cachePlan(input.getSql(), stmts, plans)
+	// }
 
 	return nil
 }
@@ -3941,90 +3379,6 @@ func checkNodeCanCache(p *plan2.Plan) bool {
 	return true
 }
 
-// execute query. Currently, it is developing. Finally, it will replace the doComQuery.
-func (mce *MysqlCmdExecutor) doComQueryInProgress(requestCtx context.Context, input *UserInput) (retErr error) {
-	var stmtExecs []StmtExecutor
-	var err error
-	beginInstant := time.Now()
-	ses := mce.GetSession()
-	ses.SetShowStmtType(NotShowStatement)
-	proto := ses.GetMysqlProtocol()
-	ses.SetSql(input.getSql())
-	pu := ses.GetParameterUnit()
-	proc := process.New(
-		requestCtx,
-		ses.GetMemPool(),
-		pu.TxnClient,
-		nil,
-		pu.FileService,
-		pu.LockService,
-		pu.QueryService,
-		pu.HAKeeperClient,
-		pu.UdfService,
-		ses.GetAutoIncrCacheManager())
-	proc.CopyVectorPool(ses.proc)
-	proc.CopyValueScanBatch(ses.proc)
-	proc.Id = mce.getNextProcessId()
-	proc.Lim.Size = pu.SV.ProcessLimitationSize
-	proc.Lim.BatchRows = pu.SV.ProcessLimitationBatchRows
-	proc.Lim.PartitionRows = pu.SV.ProcessLimitationPartitionRows
-	proc.SessionInfo = process.SessionInfo{
-		User:          ses.GetUserName(),
-		Host:          pu.SV.Host,
-		ConnectionID:  uint64(proto.ConnectionID()),
-		Database:      ses.GetDatabaseName(),
-		Version:       makeServerVersion(pu, serverVersion.Load().(string)),
-		TimeZone:      ses.GetTimeZone(),
-		StorageEngine: pu.StorageEngine,
-	}
-	proc.SetStmtProfile(&ses.stmtProfile)
-	proc.SetResolveVariableFunc(mce.ses.txnCompileCtx.ResolveVariable)
-	proc.InitSeq()
-	// Copy curvalues stored in session to this proc.
-	// Deep copy the map, takes some memory.
-	ses.CopySeqToProc(proc)
-	if ses.GetTenantInfo() != nil {
-		proc.SessionInfo.Account = ses.GetTenantInfo().GetTenant()
-		proc.SessionInfo.AccountId = ses.GetTenantInfo().GetTenantID()
-		proc.SessionInfo.RoleId = ses.GetTenantInfo().GetDefaultRoleID()
-		proc.SessionInfo.UserId = ses.GetTenantInfo().GetUserID()
-	} else {
-		proc.SessionInfo.Account = sysAccountName
-		proc.SessionInfo.AccountId = sysAccountID
-		proc.SessionInfo.RoleId = moAdminRoleID
-		proc.SessionInfo.UserId = rootID
-	}
-	proc.SessionInfo.QueryId = ses.getQueryId(input.isInternal())
-	ses.txnCompileCtx.SetProcess(ses.proc)
-	ses.proc.SessionInfo = proc.SessionInfo
-	stmtExecs, err = GetStmtExecList(ses.GetDatabaseName(),
-		input.getSql(),
-		ses.GetUserName(),
-		pu.StorageEngine,
-		proc, ses)
-	if err != nil {
-		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, parsers.HandleSqlForRecord(input.getSql()), input.getSqlSourceTypes(), err)
-		retErr = moerr.NewParseError(requestCtx, err.Error())
-		logStatementStringStatus(requestCtx, ses, input.getSql(), fail, retErr)
-		return retErr
-	}
-
-	singleStatement := len(stmtExecs) == 1
-	sqlRecord := parsers.HandleSqlForRecord(input.getSql())
-	for i, exec := range stmtExecs {
-		// update UnixTime for new query, which is used for now() / CURRENT_TIMESTAMP
-		proc.UnixTime = time.Now().UnixNano()
-		if ses.proc != nil {
-			ses.proc.UnixTime = proc.UnixTime
-		}
-		err = Execute(requestCtx, ses, proc, exec, beginInstant, sqlRecord[i], "", singleStatement)
-		if err != nil {
-			return err
-		}
-	}
-	return err
-}
-
 func (mce *MysqlCmdExecutor) setResponse(cwIndex, cwsLen int, rspLen uint64) *Response {
 	return mce.ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", cwIndex, cwsLen)
 }
@@ -4036,9 +3390,9 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 			moe, ok := e.(*moerr.Error)
 			if !ok {
 				err = moerr.ConvertPanicError(requestCtx, e)
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
+				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.txn.GetServerStatus(), err)
 			} else {
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
+				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.txn.GetServerStatus(), moe)
 			}
 		}
 	}()
@@ -4064,10 +3418,10 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 	case COM_QUERY:
 		var query = string(req.GetData())
 		mce.addSqlCount(1)
-		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))))
+		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(fePu.SV.LengthOfQueryPrinted))))
 		err = doComQuery(requestCtx, &UserInput{sql: query})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.txn.GetServerStatus(), err)
 		}
 		return resp, nil
 	case COM_INIT_DB:
@@ -4076,7 +3430,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		query := "use `" + dbname + "`"
 		err = doComQuery(requestCtx, &UserInput{sql: query})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_INIT_DB, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_INIT_DB, mce.ses.txn.GetServerStatus(), err)
 		}
 
 		return resp, nil
@@ -4086,12 +3440,12 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		query := makeCmdFieldListSql(payload)
 		err = doComQuery(requestCtx, &UserInput{sql: query})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_FIELD_LIST, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_FIELD_LIST, mce.ses.txn.GetServerStatus(), err)
 		}
 
 		return resp, nil
 	case COM_PING:
-		resp = NewGeneralOkResponse(COM_PING, mce.ses.GetServerStatus())
+		resp = NewGeneralOkResponse(COM_PING, mce.ses.txn.GetServerStatus())
 
 		return resp, nil
 
@@ -4108,7 +3462,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 
 		err = doComQuery(requestCtx, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_PREPARE, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_PREPARE, mce.ses.txn.GetServerStatus(), err)
 		}
 		return resp, nil
 
@@ -4118,11 +3472,11 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		var prepareStmt *PrepareStmt
 		sql, prepareStmt, err = mce.parseStmtExecute(requestCtx, data)
 		if err != nil {
-			return NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.GetServerStatus(), err), nil
+			return NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.txn.GetServerStatus(), err), nil
 		}
 		err = doComQuery(requestCtx, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.txn.GetServerStatus(), err)
 		}
 		if prepareStmt.params != nil {
 			prepareStmt.params.GetNulls().Reset()
@@ -4137,7 +3491,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		data := req.GetData()
 		err = mce.parseStmtSendLongData(requestCtx, data)
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, mce.ses.txn.GetServerStatus(), err)
 			return resp, nil
 		}
 		return nil, nil
@@ -4153,7 +3507,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 
 		err = doComQuery(requestCtx, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_CLOSE, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_CLOSE, mce.ses.txn.GetServerStatus(), err)
 		}
 		return resp, nil
 
@@ -4167,12 +3521,12 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
 		err = doComQuery(requestCtx, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_RESET, mce.ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_RESET, mce.ses.txn.GetServerStatus(), err)
 		}
 		return resp, nil
 
 	default:
-		resp = NewGeneralErrorResponse(req.GetCmd(), mce.ses.GetServerStatus(), moerr.NewInternalError(requestCtx, "unsupported command. 0x%x", req.GetCmd()))
+		resp = NewGeneralErrorResponse(req.GetCmd(), mce.ses.txn.GetServerStatus(), moerr.NewInternalError(requestCtx, "unsupported command. 0x%x", req.GetCmd()))
 	}
 	return resp, nil
 }

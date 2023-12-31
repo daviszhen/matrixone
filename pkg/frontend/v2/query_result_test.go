@@ -203,7 +203,7 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	err = doDumpQueryResult(ctx, ses, ep)
 	assert.Nil(t, err)
 
-	fs := ses.GetParameterUnit().FileService
+	fs := fePu.FileService
 
 	//csvBuf := &bytes.Buffer{}
 	var r io.ReadCloser

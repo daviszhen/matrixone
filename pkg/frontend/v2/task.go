@@ -25,9 +25,9 @@ import (
 
 func (mce *MysqlCmdExecutor) handlePauseDaemonTask(ctx context.Context, st *tree.PauseDaemonTask) error {
 	ses := mce.ses
-	ts := ses.pu.TaskService
+	ts := fePu.TaskService
 	if ts == nil {
-		return moerr.NewInternalError(ses.requestCtx,
+		return moerr.NewInternalError(ses.GetRequestContext(),
 			"task service not ready yet, please try again later.")
 	}
 	tasks, err := ts.QueryDaemonTask(ctx,
@@ -62,9 +62,9 @@ func (mce *MysqlCmdExecutor) handlePauseDaemonTask(ctx context.Context, st *tree
 
 func (mce *MysqlCmdExecutor) handleCancelDaemonTask(ctx context.Context, taskID uint64) error {
 	ses := mce.ses
-	ts := ses.pu.TaskService
+	ts := fePu.TaskService
 	if ts == nil {
-		return moerr.NewInternalError(ses.requestCtx,
+		return moerr.NewInternalError(ses.GetRequestContext(),
 			"task service not ready yet, please try again later.")
 	}
 	tasks, err := ts.QueryDaemonTask(ctx,
@@ -97,9 +97,9 @@ func (mce *MysqlCmdExecutor) handleCancelDaemonTask(ctx context.Context, taskID 
 
 func (mce *MysqlCmdExecutor) handleResumeDaemonTask(ctx context.Context, st *tree.ResumeDaemonTask) error {
 	ses := mce.ses
-	ts := ses.pu.TaskService
+	ts := fePu.TaskService
 	if ts == nil {
-		return moerr.NewInternalError(ses.requestCtx,
+		return moerr.NewInternalError(ses.GetRequestContext(),
 			"task service not ready yet, please try again later.")
 	}
 	tasks, err := ts.QueryDaemonTask(ctx,

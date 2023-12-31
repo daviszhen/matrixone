@@ -507,9 +507,9 @@ func (mp *MysqlProtocolImpl) SendPrepareResponse(ctx context.Context, stmt *Prep
 		}
 	}
 	if numParams > 0 {
-		if err := mp.SendEOFPacketIf(0, mp.GetSession().GetServerStatus()); err != nil {
-			return err
-		}
+		// if err := mp.SendEOFPacketIf(0, mp.GetSession().GetServerStatus()); err != nil {
+		// 	return err
+		// }
 	}
 
 	for i := 0; i < numColumns; i++ {
@@ -527,9 +527,9 @@ func (mp *MysqlProtocolImpl) SendPrepareResponse(ctx context.Context, stmt *Prep
 		}
 	}
 	if numColumns > 0 {
-		if err := mp.SendEOFPacketIf(0, mp.GetSession().GetServerStatus()); err != nil {
-			return err
-		}
+		// if err := mp.SendEOFPacketIf(0, mp.GetSession().GetServerStatus()); err != nil {
+		// 	return err
+		// }
 	}
 
 	return nil
@@ -1978,7 +1978,7 @@ func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResul
 		}
 		mysqlColumn, ok := column.(*MysqlColumn)
 		if !ok {
-			return nil, moerr.NewInternalError(mp.ses.requestCtx, "sendColumn need MysqlColumn")
+			return nil, moerr.NewInternalError(mp.ses.GetRequestContext(), "sendColumn need MysqlColumn")
 		}
 
 		switch mysqlColumn.ColumnType() {
@@ -2408,7 +2408,7 @@ func (mp *MysqlProtocolImpl) fillPacket(elems ...byte) error {
 		curLen = int(MaxPayloadSize) - hasDataLen
 		curLen = Min(curLen, n-i)
 		if curLen < 0 {
-			return moerr.NewInternalError(mp.ses.requestCtx, "needLen %d < 0. hasDataLen %d n - i %d", curLen, hasDataLen, n-i)
+			return moerr.NewInternalError(mp.ses.GetRequestContext(), "needLen %d < 0. hasDataLen %d n - i %d", curLen, hasDataLen, n-i)
 		}
 		outbuf.Grow(curLen)
 		buf = outbuf.RawBuf()
@@ -2444,7 +2444,7 @@ func (mp *MysqlProtocolImpl) closePacket(appendZeroPacket bool) error {
 	outbuf := mp.tcpConn.OutBuf()
 	payLoadLen := outbuf.GetWriteIndex() - beginWriteIndex(outbuf, mp.beginOffset) - 4
 	if payLoadLen < 0 || payLoadLen > int(MaxPayloadSize) {
-		return moerr.NewInternalError(mp.ses.requestCtx, "invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
+		return moerr.NewInternalError(mp.ses.GetRequestContext(), "invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
 			payLoadLen, outbuf.GetWriteIndex(), beginWriteIndex(outbuf, mp.beginOffset))
 	}
 

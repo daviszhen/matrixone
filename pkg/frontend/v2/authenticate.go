@@ -3256,7 +3256,7 @@ func doSwitchRole(ctx context.Context, ses *Session, sr *tree.SetRole) (err erro
 }
 
 func getSubscriptionMeta(ctx context.Context, dbName string, ses *Session, txn TxnOperator) (*plan.SubscriptionMeta, error) {
-	dbMeta, err := ses.GetParameterUnit().StorageEngine.Database(ctx, dbName, txn)
+	dbMeta, err := fePu.StorageEngine.Database(ctx, dbName, txn)
 	if err != nil {
 		logutil.Errorf("Get Subscription database %s meta error: %s", dbName, err.Error())
 		return nil, moerr.NewNoDB(ctx)
@@ -4314,7 +4314,7 @@ func doDropAccount(ctx context.Context, ses *Session, da *tree.DropAccount) (err
 func postDropSuspendAccount(
 	ctx context.Context, ses *Session, accountName string, accountID int64, version uint64,
 ) (err error) {
-	qs := ses.GetParameterUnit().QueryService
+	qs := fePu.QueryService
 	if qs == nil {
 		return moerr.NewInternalError(ctx, "query service is not initialized")
 	}
@@ -7479,6 +7479,7 @@ func checkSysExistsOrNot(ctx context.Context, bh BackgroundExec, pu *config.Para
 // InitSysTenant initializes the tenant SYS before any tenants and accepting any requests
 // during the system is booting.
 func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err error) {
+	panic("here")
 	var exists bool
 	var mp *mpool.MPool
 	pu := config.GetParameterUnit(ctx)
@@ -7504,12 +7505,10 @@ func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err
 	//Note: it is special here. The connection ctx here is ctx also.
 	//Actually, it is ok here. the ctx is moServerCtx instead of requestCtx
 	upstream := &Session{
-		connectCtx:           ctx,
-		autoIncrCacheManager: aicm,
-		seqCurValues:         make(map[uint64]string),
-		seqLastValue:         new(string),
+		seqCurValues: make(map[uint64]string),
+		seqLastValue: new(string),
 	}
-	bh := NewBackgroundHandler(ctx, upstream, mp, pu)
+	bh := NewBackgroundHandler(ctx, upstream, mp)
 	defer bh.Close()
 
 	//USE the mo_catalog
@@ -7789,7 +7788,7 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 		}
 
 		// create tables for new account
-		rtnErr = createTablesInMoCatalogOfGeneralTenant2(bh, ca, newTenantCtx, newTenant, ses.pu)
+		rtnErr = createTablesInMoCatalogOfGeneralTenant2(bh, ca, newTenantCtx, newTenant, fePu)
 		if rtnErr != nil {
 			return rtnErr
 		}
@@ -9354,7 +9353,7 @@ func postAlterSessionStatus(
 	accountName string,
 	tenantId int64,
 	status string) error {
-	qs := ses.GetParameterUnit().QueryService
+	qs := fePu.QueryService
 	if qs == nil {
 		return moerr.NewInternalError(ctx, "query service is not initialized")
 	}

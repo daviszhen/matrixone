@@ -285,7 +285,7 @@ func (rt *Routine) handleRequest(req *mysqlPayload) error {
 	tenantCtx := context.WithValue(nodeCtx, defines.TenantIDKey{}, tenant.GetTenantID())
 	tenantCtx = context.WithValue(tenantCtx, defines.UserIDKey{}, tenant.GetUserID())
 	tenantCtx = context.WithValue(tenantCtx, defines.RoleIDKey{}, tenant.GetDefaultRoleID())
-	ses.SetRequestContext(tenantCtx)
+	// ses.SetRequestContext(tenantCtx)
 	executor.SetSession(ses)
 
 	rt.increaseCount(func() {
@@ -327,7 +327,7 @@ func (rt *Routine) handleRequest(req *mysqlPayload) error {
 
 		//ensure cleaning the transaction
 		logError(ses, ses.GetDebugString(), "rollback the txn.")
-		err = ses.TxnRollback()
+		err = ses.txn.RollbackTxn()
 		if err != nil {
 			logError(ses, ses.GetDebugString(),
 				"Failed to rollback txn",
@@ -408,7 +408,7 @@ func (rt *Routine) cleanup() {
 		ses := rt.getSession()
 		//step A: rollback the txn
 		if ses != nil {
-			err := ses.TxnRollback()
+			err := ses.txn.RollbackTxn()
 			if err != nil {
 				logError(ses, ses.GetDebugString(),
 					"Failed to rollback txn",

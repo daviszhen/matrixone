@@ -43,7 +43,7 @@ import (
 
 type TxnCompilerContext struct {
 	dbName               string
-	txnHandler           *TxnHandler
+	txnHandler           *Txn
 	ses                  *Session
 	proc                 *process.Process
 	buildAlterView       bool
@@ -60,7 +60,7 @@ func (tcc *TxnCompilerContext) GetStatsCache() *plan2.StatsCache {
 	return tcc.ses.statsCache
 }
 
-func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
+func InitTxnCompilerContext(txn *Txn, db string) *TxnCompilerContext {
 	return &TxnCompilerContext{txnHandler: txn, dbName: db}
 }
 
@@ -90,7 +90,7 @@ func (tcc *TxnCompilerContext) GetSession() *Session {
 	return tcc.ses
 }
 
-func (tcc *TxnCompilerContext) GetTxnHandler() *TxnHandler {
+func (tcc *TxnCompilerContext) GetTxnHandler() *Txn {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	return tcc.txnHandler
@@ -123,20 +123,18 @@ func (tcc *TxnCompilerContext) GetAccountId() uint32 {
 }
 
 func (tcc *TxnCompilerContext) GetContext() context.Context {
-	return tcc.ses.requestCtx
+	reqCtx, _ := tcc.ses.conn.req.ctx.Ctx()
+	return reqCtx
 }
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	var err error
 	var txnCtx context.Context
 	var txn TxnOperator
-	txnCtx, txn, err = tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return false
-	}
+	txnCtx, txn = tcc.txnHandler.GetTxnOperator()
 	//open database
 	ses := tcc.GetSession()
-	_, err = tcc.GetTxnHandler().GetStorage().Database(txnCtx, name, txn)
+	_, err = ses.storage.Database(txnCtx, name, txn)
 	if err != nil {
 		logError(ses, ses.GetDebugString(),
 			"Failed to get database",
@@ -153,11 +151,8 @@ func (tcc *TxnCompilerContext) GetDatabaseId(dbName string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return 0, err
-	}
-	database, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
+	txnCtx, txn := tcc.txnHandler.GetTxnOperator()
+	database, err := tcc.ses.storage.Database(txnCtx, dbName, txn)
 	if err != nil {
 		return 0, err
 	}
@@ -176,10 +171,7 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	}
 
 	ses := tcc.GetSession()
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return nil, nil, err
-	}
+	txnCtx, txn := tcc.txnHandler.GetTxnOperator()
 	account := ses.GetTenantInfo()
 	if isClusterTable(dbName, tableName) {
 		//if it is the cluster table in the general account, switch into the sys account
@@ -196,7 +188,7 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	}
 
 	//open database
-	db, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
+	db, err := tcc.ses.storage.Database(txnCtx, dbName, txn)
 	if err != nil {
 		logError(ses, ses.GetDebugString(),
 			"Failed to get database",
@@ -230,10 +222,7 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 
 func (tcc *TxnCompilerContext) getTmpRelation(_ context.Context, tableName string) (engine.Relation, error) {
 	e := tcc.ses.storage
-	txnCtx, txn, err := tcc.txnHandler.GetTxn()
-	if err != nil {
-		return nil, err
-	}
+	txnCtx, txn := tcc.txnHandler.GetTxnOperator()
 	db, err := e.Database(txnCtx, defines.TEMPORARY_DBNAME, txn)
 	if err != nil {
 		logError(tcc.ses, tcc.ses.GetDebugString(),
@@ -264,11 +253,8 @@ func (tcc *TxnCompilerContext) ensureDatabaseIsNotEmpty(dbName string, checkSub 
 }
 
 func (tcc *TxnCompilerContext) ResolveById(tableId uint64) (*plan2.ObjectRef, *plan2.TableDef) {
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return nil, nil
-	}
-	dbName, tableName, table, err := tcc.GetTxnHandler().GetStorage().GetRelationById(txnCtx, txn, tableId)
+	txnCtx, txn := tcc.txnHandler.GetTxnOperator()
+	dbName, tableName, table, err := tcc.ses.storage.GetRelationById(txnCtx, txn, tableId)
 	if err != nil {
 		return nil, nil
 	}
@@ -707,10 +693,7 @@ func (tcc *TxnCompilerContext) SetProcess(proc *process.Process) {
 }
 
 func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta, error) {
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return nil, err
-	}
+	txnCtx, txn := tcc.txnHandler.GetTxnOperator()
 	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession(), txn)
 	if err != nil {
 		return nil, err

@@ -330,12 +330,12 @@ func (mp *MysqlProtocolImpl) GetRequest(payload []byte) *mysqlPayload {
 }
 
 func (mp *MysqlProtocolImpl) getAbortTransactionErrorInfo() string {
-	ses := mp.GetSession()
+	// ses := mp.GetSession()
 	//update error message in Case1,Case3,Case4.
-	if ses != nil && ses.OptionBitsIsSet(OPTION_ATTACH_ABORT_TRANSACTION_ERROR) {
-		ses.ClearOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
-		return abortTransactionErrorInfo()
-	}
+	// if ses != nil && ses.OptionBitsIsSet(OPTION_ATTACH_ABORT_TRANSACTION_ERROR) {
+	// 	ses.ClearOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
+	// 	return abortTransactionErrorInfo()
+	// }
 	return ""
 }
 

@@ -144,9 +144,7 @@ func requestStorageUsage(ses *Session) (resp any, err error) {
 
 	var ctx context.Context
 	var txnOperator client.TxnOperator
-	if ctx, txnOperator, err = ses.txnHandler.GetTxn(); err != nil {
-		return nil, err
-	}
+	ctx, txnOperator = ses.txn.GetTxnOperator()
 
 	// create a new proc for `handler`
 	proc := process.New(ctx, ses.proc.GetMPool(),
@@ -226,7 +224,7 @@ func getAllAccountsStorageUsage(ctx context.Context, ses *Session) (map[int32]ui
 		return nil, err
 	}
 
-	fs, err := fileservice.Get[fileservice.FileService](ses.GetParameterUnit().FileService, defines.SharedFileServiceName)
+	fs, err := fileservice.Get[fileservice.FileService](fePu.FileService, defines.SharedFileServiceName)
 	if err != nil {
 		return nil, err
 	}

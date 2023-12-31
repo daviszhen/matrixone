@@ -89,6 +89,7 @@ func NewMOServer(
 	feBaseService = baseService
 	feSessionManager = baseService.SessionMgr()
 	feConns.ctx = ctx
+	feTxnClient = pu.TxnClient
 
 	// TODO asyncFlushBatch
 	addresses := []string{addr}

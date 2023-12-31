@@ -69,7 +69,7 @@ func (conns *Connections) Created(rs goetty.IOSession) {
 	// XXX MPOOL pass in a nil mpool.
 	// XXX MPOOL can choose to use a Mid sized mpool, if, we know
 	// this mpool will be deleted.  Maybe in the following Closed method.
-	ses := NewSession(nil, nil, fePu, GSysVariables, true, feAicm, nil)
+	ses := NewSession(conn, nil, GSysVariables, true)
 	ses.SetFromRealUser(true)
 	conn.ses = ses
 	if feBaseService != nil {
@@ -223,6 +223,13 @@ func (conn *Connection) run() error {
 
 	//update conn
 	conn.consumeHandshakeRsp(handrsp)
+
+	//default account
+	reqCtx, reqCancel := context.WithTimeout(conn.connCtx, fePu.SV.SessionTimeout.Duration)
+	reqCtx = context.WithValue(reqCtx, defines.TenantIDKey{}, uint32(sysAccountID))
+	reqCtx = context.WithValue(reqCtx, defines.UserIDKey{}, uint32(rootID))
+	reqCtx = context.WithValue(reqCtx, defines.RoleIDKey{}, uint32(moAdminRoleID))
+	conn.req.ctx.SetCtx(reqCtx, reqCancel)
 
 	//authen user
 	err = conn.authen(endPoint, handrsp.authResponse)
@@ -578,7 +585,17 @@ func (conn *Connection) parseStmtSendLongData(requestCtx context.Context, data [
 }
 
 func (conn *Connection) doComQuery(endPoint *PacketEndPoint) (err error) {
-	return err
+	exec := &GeneralExecutor{}
+	reqCtx, _ := conn.req.ctx.Ctx()
+	err = exec.Open(reqCtx, WithConnection(conn), WithEndPoint(endPoint))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = exec.Close(reqCtx)
+	}()
+
+	return exec.Exec(reqCtx, conn.req.userInput)
 }
 
 func (conn *Connection) doComPing(endPoint *PacketEndPoint) (err error) {
@@ -785,7 +802,7 @@ func (conn *Connection) cleanup() {
 		ses := conn.ses
 		//step A: rollback the txn
 		if ses != nil {
-			err := ses.TxnRollback()
+			err := ses.txn.RollbackTxn()
 			if err != nil {
 				logError(ses, ses.GetDebugString(),
 					"Failed to rollback txn",
