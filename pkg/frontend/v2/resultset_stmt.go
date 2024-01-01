@@ -26,16 +26,19 @@ type SelectExecutor struct {
 	sel *tree.Select
 }
 
-func (se *SelectExecutor) Open(context.Context, ...ExecutorOpt) error {
+func (se *SelectExecutor) Open(ctx context.Context, opts *ExecutorOptions) error {
 	return nil
 }
 func (se *SelectExecutor) Label() Label {
 	return CanExecInUncommittedTxnTxn | KeepTxnNotNilAfterExec | KeepTxnNotNilAfterExec | TxnExistsAferExc
 }
-func (se *SelectExecutor) Next(context.Context) error {
+func (se *SelectExecutor) Next(ctx context.Context, opts *ExecutorOptions) (err error) {
+	return runStmt(ctx, opts)
+}
+func (se *SelectExecutor) Close(context.Context) error {
+	se.sel = nil
 	return nil
 }
-func (se *SelectExecutor) Close(context.Context) error { return nil }
 
 type ValuesStmtExecutor struct {
 	sel *tree.ValuesStatement

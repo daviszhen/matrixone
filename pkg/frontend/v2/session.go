@@ -116,9 +116,11 @@ const (
 )
 
 type Session struct {
-	conn     *Connection
-	database atomic.Value
-	username atomic.Value
+	conn         *Connection
+	database     atomic.Value
+	username     atomic.Value
+	formatWriter *MysqlFormatWriter
+	extraWriters []Writer
 
 	//collation id
 	collationID int
@@ -2307,4 +2309,11 @@ func checkPlanIsInsertValues(proc *process.Process,
 		}
 	}
 	return false, nil
+}
+
+func adjustServerStatus(status uint16, isLastStmt bool) uint16 {
+	if !isLastStmt {
+		status |= SERVER_MORE_RESULTS_EXISTS
+	}
+	return status
 }

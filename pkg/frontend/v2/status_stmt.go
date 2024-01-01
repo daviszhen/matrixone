@@ -32,17 +32,57 @@ func newopts(opts []ExecutorOpt) *ExecutorOptions {
 }
 
 var _ Executor = &UseExecutor{}
+var _ Executor = &BeginTxnExecutor{}
 
 type BeginTxnExecutor struct {
 	bt *tree.BeginTransaction
+}
+
+func (begin *BeginTxnExecutor) Open(context.Context, *ExecutorOptions) error {
+	return nil
+}
+func (begin *BeginTxnExecutor) Label() Label {
+	return CanExecInUncommittedTxnTxn | CommitTxnBeforeExec | TxnExistsAferExc | SkipStmt
+}
+func (begin *BeginTxnExecutor) Next(ctx context.Context, opts *ExecutorOptions) (err error) {
+	_, _, err = opts.ses.txn.NewTxn(WithBegin(true))
+	return err
+}
+func (begin *BeginTxnExecutor) Close(context.Context) error {
+	begin.bt = nil
+	return nil
 }
 
 type CommitTxnExecutor struct {
 	ct *tree.CommitTransaction
 }
 
+func (commit *CommitTxnExecutor) Open(context.Context, *ExecutorOptions) error { return nil }
+func (commit *CommitTxnExecutor) Label() Label {
+	return CanExecInUncommittedTxnTxn | TxnDisappearsAferExec | SkipStmt
+}
+func (commit *CommitTxnExecutor) Next(ctx context.Context, opts *ExecutorOptions) error {
+	return opts.ses.txn.CommitTxn()
+}
+func (commit *CommitTxnExecutor) Close(context.Context) error {
+	commit.ct = nil
+	return nil
+}
+
 type RollbackTxnExecutor struct {
 	rt *tree.RollbackTransaction
+}
+
+func (rollback *RollbackTxnExecutor) Open(context.Context, *ExecutorOptions) error { return nil }
+func (rollback *RollbackTxnExecutor) Label() Label {
+	return CanExecInUncommittedTxnTxn | TxnDisappearsAferExec | SkipStmt
+}
+func (rollback *RollbackTxnExecutor) Next(ctx context.Context, opts *ExecutorOptions) error {
+	return opts.ses.txn.RollbackTxn()
+}
+func (rollback *RollbackTxnExecutor) Close(context.Context) error {
+	rollback.rt = nil
+	return nil
 }
 
 type SetRoleExecutor struct {
@@ -50,16 +90,14 @@ type SetRoleExecutor struct {
 }
 
 type UseExecutor struct {
-	newopts *ExecutorOptions
-	u       *tree.Use
-	db      string
+	u  *tree.Use
+	db string
 }
 
-func (use *UseExecutor) Open(ctx context.Context, opts ...ExecutorOpt) error {
-	use.newopts = newopts(opts)
+func (use *UseExecutor) Open(ctx context.Context, opts *ExecutorOptions) error {
 	var v interface{}
 	var err error
-	v, err = use.newopts.ses.GetGlobalVar("lower_case_table_names")
+	v, err = opts.ses.GetGlobalVar("lower_case_table_names")
 	if err != nil {
 		return err
 	}
@@ -81,54 +119,49 @@ func (use *UseExecutor) Label() Label {
 	return ret
 }
 
-func (use *UseExecutor) doUse(ctx context.Context) (err error) {
+func (use *UseExecutor) doUse(ctx context.Context, opts *ExecutorOptions) (err error) {
 	var txnCtx context.Context
 	var txn TxnOperator
 	var dbMeta engine.Database
-	txnCtx, txn = use.newopts.ses.txn.GetTxnOperator()
+	txnCtx, txn = opts.ses.txn.GetTxnOperator()
 	//TODO: check meta data
 	if dbMeta, err = fePu.StorageEngine.Database(txnCtx, use.db, txn); err != nil {
 		//echo client. no such database
 		return moerr.NewBadDB(ctx, use.db)
 	}
 	if dbMeta.IsSubscription(ctx) {
-		_, err = checkSubscriptionValid(ctx, use.newopts.ses, dbMeta.GetCreateSql(ctx))
+		_, err = checkSubscriptionValid(ctx, opts.ses, dbMeta.GetCreateSql(ctx))
 		if err != nil {
 			return err
 		}
 	}
 	// oldDB := use.newopts.ses.GetDatabaseName()
-	use.newopts.ses.SetDatabaseName(use.db)
+	opts.ses.SetDatabaseName(use.db)
 
 	// logDebugf(use.newopts.ses.GetDebugString(), "User %s change database from [%s] to [%s]", ses.GetUserName(), oldDB, ses.GetDatabaseName())
 
-	err = changeVersion(ctx, use.newopts.ses, use.u.Name.Compare())
+	err = changeVersion(ctx, opts.ses, use.u.Name.Compare())
 	if err != nil {
 		return err
 	}
 	return err
 }
 
-func (use *UseExecutor) Next(ctx context.Context) (err error) {
-	err = use.doUse(ctx)
+func (use *UseExecutor) Next(ctx context.Context, opts *ExecutorOptions) (err error) {
+	err = use.doUse(ctx, opts)
 	if err != nil {
-		err2 := use.newopts.endPoint.SendErrorPacket(ctx, use.newopts.ses.conn, err)
+		err2 := opts.endPoint.SendErrorPacket(ctx, opts.ses.conn, err)
 		if err != nil {
 			return errors.Join(err, err2)
 		}
 	} else {
-		status := use.newopts.ses.txn.GetServerStatus()
-		if !use.newopts.isLastStmt {
-			status |= SERVER_MORE_RESULTS_EXISTS
-		}
-		err = use.newopts.endPoint.SendOkPacket(ctx, use.newopts.ses.conn,
-			0, 0, status, 0, "")
+		err = opts.endPoint.SendOkPacket(ctx, opts.ses.conn,
+			0, 0, adjustServerStatus(opts.ses.txn.GetServerStatus(), opts.isLastStmt), 0, "")
 	}
 	return err
 }
 func (use *UseExecutor) Close(context.Context) error {
 	use.u = nil
-	use.newopts = nil
 	use.db = ""
 	return nil
 }

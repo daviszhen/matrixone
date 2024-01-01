@@ -277,10 +277,14 @@ func (ge *GeneralExecutor) executeSingleStmt(requestCtx context.Context,
 	if err != nil {
 		return err
 	}
-	err = exec.Open(requestCtx,
-		WithSession(ses),
-		WithEndPointToExec(ge.opts.endPoint),
-		WithIsLastStmt(i >= len(stmts)-1))
+	eo := &ExecutorOptions{
+		ses:        ses,
+		proc:       proc,
+		stmt:       stmt,
+		endPoint:   ge.opts.endPoint,
+		isLastStmt: i >= len(stmts)-1,
+	}
+	err = exec.Open(requestCtx, eo)
 	if err != nil {
 		return err
 	}
@@ -337,7 +341,7 @@ func (ge *GeneralExecutor) executeSingleStmt(requestCtx context.Context,
 	}
 
 	//======= execute statement =======
-	err = ge.runExec(requestCtx, ses, exec)
+	err = ge.runExec(requestCtx, exec, eo)
 	if err != nil {
 		return err
 	}
@@ -431,8 +435,8 @@ func rollbackTxn(requestCtx context.Context,
 	return execErr
 }
 
-func (ge *GeneralExecutor) runExec(requestCtx context.Context, ses *Session, exec Executor) (err error) {
-	err = exec.Next(requestCtx)
+func (ge *GeneralExecutor) runExec(requestCtx context.Context, exec Executor, eo *ExecutorOptions) (err error) {
+	err = exec.Next(requestCtx, eo)
 	if err != nil {
 		return err
 	}
@@ -440,43 +444,94 @@ func (ge *GeneralExecutor) runExec(requestCtx context.Context, ses *Session, exe
 }
 
 // for most sql
-func runStmt(requestCtx context.Context, ses *Session, proc *process.Process, stmt *Stmt, endPoint *PacketEndPoint) error {
-	cmp, err := compileStmt(requestCtx, ses, proc, stmt, getDataFromPipeline)
+func runStmt(requestCtx context.Context, opts *ExecutorOptions) error {
+	//====== compile stmt ======
+	cmp, err := compileStmt(requestCtx, opts.ses, opts.proc, opts.stmt, getDataFromPipeline2)
 	if err != nil {
 		return err
 	}
-	cols, err := getColumns(ses, stmt)
+	cols, err := getColumns(opts.ses, opts.stmt)
 	if err != nil {
 		return err
 	}
 
-	//send the column info to the client
-	//TODO:
-	//column count
+	//====== init or update format writer ======
+	colDef := make([]*MysqlColumn, 0)
+	for _, col := range cols {
+		mysqlc := col.(*MysqlColumn)
+		colDef = append(colDef, mysqlc)
+	}
+	if opts.ses.formatWriter == nil {
+		opts.ses.formatWriter = &MysqlFormatWriter{
+			ChunksWriter: &ChunksWriter{
+				ses:      opts.ses,
+				endPoint: opts.endPoint,
+			},
+		}
+		opts.ses.formatWriter.Open(requestCtx)
+	}
+	opts.ses.formatWriter.colDef = colDef
+	opts.ses.formatWriter.row = make([]any, len(colDef))
+	//====== send the column info to the client ======
+	//send column count
 	colCountPacket := LengthEncodedNumber{}
+	defer colCountPacket.Close(requestCtx)
 	colCountPacket.Open(requestCtx, WithNumber(uint64(len(cols))))
-	err = endPoint.SendPacket(requestCtx, &colCountPacket, true)
+	err = opts.endPoint.SendPacket(requestCtx, &colCountPacket, true)
 	if err != nil {
 		return err
 	}
-	colCountPacket.Close(requestCtx)
-	//column defs
+
+	//send column defs
 	for _, col := range cols {
 		mysqlc := col.(*MysqlColumn)
+		// fmt.Fprintf(os.Stderr, "==> %v %v\n", mysqlc.table, mysqlc.name)
 		cd := ColumnDefinition{}
-		cd.Open(requestCtx, WithColumn(mysqlc), WithCmd(int(COM_QUERY))) // not CMD_FILED_LIST
-		err = endPoint.SendPacket(requestCtx, &cd, true)
+		defer cd.Close(requestCtx)
+		err = cd.Open(requestCtx,
+			WithCapability(opts.ses.conn.capability),
+			WithColumn(mysqlc),
+			WithCmd(int(COM_QUERY))) // not CMD_FILED_LIST
 		if err != nil {
 			return err
 		}
-		cd.Close(requestCtx)
+		err = opts.endPoint.SendPacket(requestCtx, &cd, true)
+		if err != nil {
+			return err
+		}
+	}
+
+	//send EOFIf
+	eofif := EOFPacketIf{}
+	defer eofif.Close(requestCtx)
+	err = eofif.Open(requestCtx, WithCapability(opts.ses.conn.capability))
+	if err != nil {
+		return err
+	}
+	err = opts.endPoint.SendPacket(requestCtx, &eofif, true)
+	if err != nil {
+		return err
 	}
 
 	//run the computations
 	runner := cmp.(ComputationRunner)
 	runResult, err := runner.Run(0)
-	stmt.runResult = runResult
-	stmt.compile = nil
+	opts.stmt.runResult = runResult
+	opts.stmt.compile = nil
+	if err != nil {
+		return err
+	}
+	//====== repsonse client ======
+	eofok := EOFOrOkPacket{}
+	defer eofok.Close(requestCtx)
+	err = eofok.Open(requestCtx,
+		WithCapability(opts.ses.conn.capability),
+		WithStatus(adjustServerStatus(opts.ses.txn.GetServerStatus(), opts.isLastStmt)),
+	)
+	if err != nil {
+		return err
+	}
+	err = opts.endPoint.SendPacket(requestCtx, &eofok, true)
 	if err != nil {
 		return err
 	}
@@ -868,141 +923,141 @@ func prepareExecutor(reqCtx context.Context, ses *Session, stmt tree.Statement) 
 		ret = &SelectExecutor{
 			sel: st,
 		}
-	// case *tree.ValuesStatement:
-	// 	ret = &ValuesStmtExecutor{
+		// case *tree.ValuesStatement:
+		// 	ret = &ValuesStmtExecutor{
 
-	// 		sel: st,
-	// 	}
-	// case *tree.ShowCreateTable:
-	// 	ret = &ShowCreateTableExecutor{
+		// 		sel: st,
+		// 	}
+		// case *tree.ShowCreateTable:
+		// 	ret = &ShowCreateTableExecutor{
 
-	// 		sct: st,
-	// 	}
-	// case *tree.ShowCreateDatabase:
-	// 	ret = &ShowCreateDatabaseExecutor{
+		// 		sct: st,
+		// 	}
+		// case *tree.ShowCreateDatabase:
+		// 	ret = &ShowCreateDatabaseExecutor{
 
-	// 		scd: st,
-	// 	}
-	// case *tree.ShowTables:
-	// 	ret = &ShowTablesExecutor{
+		// 		scd: st,
+		// 	}
+		// case *tree.ShowTables:
+		// 	ret = &ShowTablesExecutor{
 
-	// 		st: st,
-	// 	}
-	// case *tree.ShowSequences:
-	// 	ret = &ShowSequencesExecutor{
+		// 		st: st,
+		// 	}
+		// case *tree.ShowSequences:
+		// 	ret = &ShowSequencesExecutor{
 
-	// 		ss: st,
-	// 	}
-	// case *tree.ShowDatabases:
-	// 	ret = &ShowDatabasesExecutor{
+		// 		ss: st,
+		// 	}
+		// case *tree.ShowDatabases:
+		// 	ret = &ShowDatabasesExecutor{
 
-	// 		sd: st,
-	// 	}
-	// case *tree.ShowColumns:
-	// 	ret = &ShowColumnsExecutor{
+		// 		sd: st,
+		// 	}
+		// case *tree.ShowColumns:
+		// 	ret = &ShowColumnsExecutor{
 
-	// 		sc: st,
-	// 	}
-	// case *tree.ShowProcessList:
-	// 	ret = &ShowProcessListExecutor{
+		// 		sc: st,
+		// 	}
+		// case *tree.ShowProcessList:
+		// 	ret = &ShowProcessListExecutor{
 
-	// 		spl: st,
-	// 	}
-	// case *tree.ShowStatus:
-	// 	ret = &ShowStatusExecutor{
+		// 		spl: st,
+		// 	}
+		// case *tree.ShowStatus:
+		// 	ret = &ShowStatusExecutor{
 
-	// 		ss: st,
-	// 	}
-	// case *tree.ShowTableStatus:
-	// 	ret = &ShowTableStatusExecutor{
+		// 		ss: st,
+		// 	}
+		// case *tree.ShowTableStatus:
+		// 	ret = &ShowTableStatusExecutor{
 
-	// 		sts: st,
-	// 	}
-	// case *tree.ShowGrants:
-	// 	ret = &ShowGrantsExecutor{
+		// 		sts: st,
+		// 	}
+		// case *tree.ShowGrants:
+		// 	ret = &ShowGrantsExecutor{
 
-	// 		sg: st,
-	// 	}
-	// case *tree.ShowIndex:
-	// 	ret = &ShowIndexExecutor{
+		// 		sg: st,
+		// 	}
+		// case *tree.ShowIndex:
+		// 	ret = &ShowIndexExecutor{
 
-	// 		si: st,
-	// 	}
-	// case *tree.ShowCreateView:
-	// 	ret = &ShowCreateViewExecutor{
+		// 		si: st,
+		// 	}
+		// case *tree.ShowCreateView:
+		// 	ret = &ShowCreateViewExecutor{
 
-	// 		scv: st,
-	// 	}
-	// case *tree.ShowTarget:
-	// 	ret = &ShowTargetExecutor{
+		// 		scv: st,
+		// 	}
+		// case *tree.ShowTarget:
+		// 	ret = &ShowTargetExecutor{
 
-	// 		st: st,
-	// 	}
-	// case *tree.ExplainFor:
-	// 	ret = &ExplainForExecutor{
+		// 		st: st,
+		// 	}
+		// case *tree.ExplainFor:
+		// 	ret = &ExplainForExecutor{
 
-	// 		ef: st,
-	// 	}
-	// case *tree.ExplainStmt:
+		// 		ef: st,
+		// 	}
+		// case *tree.ExplainStmt:
 
-	// 	ret = &ExplainStmtExecutor{
+		// 	ret = &ExplainStmtExecutor{
 
-	// 		es: st,
-	// 	}
-	// case *tree.ShowVariables:
+		// 		es: st,
+		// 	}
+		// case *tree.ShowVariables:
 
-	// 	ret = &ShowVariablesExecutor{
+		// 	ret = &ShowVariablesExecutor{
 
-	// 		sv: st,
-	// 	}
-	// case *tree.ShowErrors:
+		// 		sv: st,
+		// 	}
+		// case *tree.ShowErrors:
 
-	// 	ret = &ShowErrorsExecutor{
+		// 	ret = &ShowErrorsExecutor{
 
-	// 		se: st,
-	// 	}
-	// case *tree.ShowWarnings:
+		// 		se: st,
+		// 	}
+		// case *tree.ShowWarnings:
 
-	// 	ret = &ShowWarningsExecutor{
+		// 	ret = &ShowWarningsExecutor{
 
-	// 		sw: st,
-	// 	}
-	// case *tree.AnalyzeStmt:
+		// 		sw: st,
+		// 	}
+		// case *tree.AnalyzeStmt:
 
-	// 	ret = &AnalyzeStmtExecutor{
+		// 	ret = &AnalyzeStmtExecutor{
 
-	// 		as: st,
-	// 	}
-	// case *tree.ExplainAnalyze:
-	// 	ret = &ExplainAnalyzeExecutor{
+		// 		as: st,
+		// 	}
+		// case *tree.ExplainAnalyze:
+		// 	ret = &ExplainAnalyzeExecutor{
 
-	// 		ea: st,
-	// 	}
-	// case *InternalCmdFieldList:
+		// 		ea: st,
+		// 	}
+		// case *InternalCmdFieldList:
 
-	// 	ret = &InternalCmdFieldListExecutor{
+		// 	ret = &InternalCmdFieldListExecutor{
 
-	// 		icfl: st,
-	// 	}
-	// //PART 2: the statement with the status only
-	// case *tree.BeginTransaction:
+		// 		icfl: st,
+		// 	}
+		// //PART 2: the statement with the status only
+	case *tree.BeginTransaction:
 
-	// 	ret = &BeginTxnExecutor{
+		ret = &BeginTxnExecutor{
 
-	// 		bt: st,
-	// 	}
-	// case *tree.CommitTransaction:
+			bt: st,
+		}
+	case *tree.CommitTransaction:
 
-	// 	ret = &CommitTxnExecutor{
+		ret = &CommitTxnExecutor{
 
-	// 		ct: st,
-	// 	}
-	// case *tree.RollbackTransaction:
+			ct: st,
+		}
+	case *tree.RollbackTransaction:
 
-	// 	ret = &RollbackTxnExecutor{
+		ret = &RollbackTxnExecutor{
 
-	// 		rt: st,
-	// 	}
+			rt: st,
+		}
 	// case *tree.SetRole:
 
 	// 	ret = &SetRoleExecutor{

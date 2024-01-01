@@ -17,7 +17,9 @@ package v2
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -649,7 +651,7 @@ func (hand *Handshake) Close(context.Context) error {
 	return nil
 }
 
-func (handrsp *HandshakeResponse) Open(context.Context, ...MysqlReadPacketOpt) error {
+func (handrsp *HandshakeResponse) Open(ctx context.Context, opts ...MysqlReadPacketOpt) error {
 	return nil
 }
 
@@ -1066,15 +1068,12 @@ func (eofif *EOFPacketIf) Open(ctx context.Context, opts ...MysqlWritePacketOpt)
 	//If the CLIENT_DEPRECATE_EOF client capabilities flag is not set, EOF_Packet
 	if newopts.capability&CLIENT_DEPRECATE_EOF == 0 {
 		eof := EOFPacket{}
+		defer eof.Close(ctx)
 		err := eof.Open(ctx, opts...)
 		if err != nil {
 			return err
 		}
 		eofif.data = eof.data
-		err = eof.Close(ctx)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1091,26 +1090,20 @@ func (eop *EOFOrOkPacket) Open(ctx context.Context, opts ...MysqlWritePacketOpt)
 	//If the CLIENT_DEPRECATE_EOF client capabilities flag is set, OK_Packet; else EOF_Packet.
 	if newopts.capability&CLIENT_DEPRECATE_EOF != 0 {
 		okeof := OKPacketWithEOF{}
+		defer okeof.Close(ctx)
 		err := okeof.Open(ctx, opts...)
 		if err != nil {
 			return err
 		}
 		eop.data = okeof.data
-		err = okeof.Close(ctx)
-		if err != nil {
-			return err
-		}
 	} else {
 		eof := EOFPacket{}
+		defer eof.Close(ctx)
 		err := eof.Open(ctx, opts...)
 		if err != nil {
 			return err
 		}
 		eop.data = eof.data
-		err = eof.Close(ctx)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1212,6 +1205,8 @@ func (def *ColumnDefinition) Open(ctx context.Context, opts ...MysqlWritePacketO
 	newopts := updateOpts(opts...)
 	if newopts.capability&CLIENT_PROTOCOL_41 != 0 {
 		def.data = def.makeColumnDefinition41Payload(newopts.column, newopts.cmd)
+	} else {
+		panic("not support")
 	}
 	return nil
 }
@@ -1224,16 +1219,17 @@ func (def *ColumnDefinition) Close(context.Context) error {
 }
 
 func (text *ResultSetRowText) Open(ctx context.Context, opts ...MysqlWritePacketOpt) error {
-	newopts := updateOpts(opts...)
-	text.colData = newopts.colData
-	text.colDef = newopts.colDef
-	text.lenEncBuffer = newopts.lenEncBuffer
-	text.strconvBuffer = newopts.strconvBuffer
+	// newopts := updateOpts(opts...)
+	// text.colData = newopts.colData
+	// text.colDef = newopts.colDef
+	// text.lenEncBuffer = newopts.lenEncBuffer
+	// text.strconvBuffer = newopts.strconvBuffer
 	return nil
 }
 
 func (text *ResultSetRowText) Write(ctx context.Context, out WriteBuffer) error {
 	var err error
+	fmt.Fprintf(os.Stderr, "row text columns %d\n", len(text.colDef))
 	for i := uint64(0); i < uint64(len(text.colDef)); i++ {
 		mysqlColumn := text.colDef[i]
 		row := text.colData[i]

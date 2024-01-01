@@ -48,6 +48,7 @@ func (payloadBuf *MysqlPayloadWriteBuffer) Open(ctx context.Context, opts ...Wri
 	payloadBuf.thisAddr = ""
 	payloadBuf.sequenceId = newopts.sequenceId
 	payloadBuf.resetPacket()
+	payloadBuf.untilBytesInOutbufToFlush = payloadBuf.maxBytesToFlush * 1024
 	return nil
 }
 

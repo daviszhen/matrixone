@@ -7479,7 +7479,7 @@ func checkSysExistsOrNot(ctx context.Context, bh BackgroundExec, pu *config.Para
 // InitSysTenant initializes the tenant SYS before any tenants and accepting any requests
 // during the system is booting.
 func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err error) {
-	panic("here")
+	panic("InitSysTenant")
 	var exists bool
 	var mp *mpool.MPool
 	pu := config.GetParameterUnit(ctx)

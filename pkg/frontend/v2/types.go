@@ -29,6 +29,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	util2 "github.com/matrixorigin/matrixone/pkg/util"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
 // ======= Transaction =======
@@ -126,6 +127,8 @@ type BackgroundExecutor struct {
 type ExecutorOptions struct {
 	isLastStmt bool
 	ses        *Session
+	proc       *process.Process
+	stmt       *Stmt
 	endPoint   *PacketEndPoint
 }
 type ExecutorOpt func(*ExecutorOptions)
@@ -133,6 +136,18 @@ type ExecutorOpt func(*ExecutorOptions)
 func WithSession(ses *Session) ExecutorOpt {
 	return func(o *ExecutorOptions) {
 		o.ses = ses
+	}
+}
+
+func WithProcess(proc *process.Process) ExecutorOpt {
+	return func(o *ExecutorOptions) {
+		o.proc = proc
+	}
+}
+
+func WithStmt(stmt *Stmt) ExecutorOpt {
+	return func(o *ExecutorOptions) {
+		o.stmt = stmt
 	}
 }
 
@@ -180,9 +195,9 @@ const (
 
 type Executor interface {
 	// Open prepares the transaction, PacketEndpoint, etc.
-	Open(context.Context, ...ExecutorOpt) error
+	Open(context.Context, *ExecutorOptions) error
 	Label() Label
-	Next(context.Context) error
+	Next(context.Context, *ExecutorOptions) error
 	Close(context.Context) error
 }
 
@@ -352,7 +367,8 @@ type MysqlPayloadWriteBuffer struct {
 	thisAddr   string
 	//The sequence-id is incremented with each packet and may wrap around.
 	//It starts at 0 and is reset to 0 when a new command begins in the Command Phase.
-	sequenceId *atomic.Uint32
+	sequenceId      *atomic.Uint32
+	maxBytesToFlush int
 }
 
 // ======= packets =======
@@ -640,11 +656,14 @@ type PacketEndPoint struct {
 
 // ======= reader & writer =======
 
-type Chunk interface{}
-type Chunks interface{}
+// type Chunk interface{}
+// type Chunks interface{}
 
-var _ Chunk = &vector.Vector{}
-var _ Chunks = &batch.Batch{}
+// var _ Chunk = &vector.Vector{}
+// var _ Chunks = &batch.Batch{}
+
+type Chunk *vector.Vector
+type Chunks *batch.Batch
 
 type ReaderOptions struct{}
 type ReaderOpt func(*ReaderOptions)
@@ -666,8 +685,8 @@ type Writer interface {
 	Open(context.Context, ...WriterOpt) error
 	Write(context.Context, Chunks) error
 	WriteBytes(context.Context, []byte) error
-	Close(context.Context) error
 	Flush(context.Context) error
+	Close(context.Context) error
 }
 
 /*
@@ -675,6 +694,10 @@ ChunksWriter writes the Chunks into the destination.
 The default implementation of the Writer.
 */
 type ChunksWriter struct {
+	ses      *Session
+	endPoint *PacketEndPoint
+	row      []any
+	writeRow func(ctx context.Context, row []any) error
 }
 
 /*
@@ -690,6 +713,13 @@ and writes them into the destination.
 */
 type MysqlFormatWriter struct {
 	*ChunksWriter
+	textRow          *ResultSetRowText
+	binRow           *ResultSetRowBinary
+	isBin            bool
+	colDef           []*MysqlColumn
+	lenEncBuffer     []byte
+	strconvBuffer    []byte
+	binaryNullBuffer []byte
 }
 
 /*

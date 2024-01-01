@@ -165,6 +165,7 @@ func getConnID(ctx context.Context, hkClient logservice.CNHAKeeperClient) (uint3
 
 func (conn *Connection) consumeHandshakeRsp(handrsp *HandshakeResponse) {
 	conn.capability = handrsp.capability
+
 	conn.maxClientPacketSize = handrsp.maxClientPacketSize
 	conn.connectAttrs = handrsp.connectAttrs
 
@@ -206,7 +207,11 @@ func (conn *Connection) run() error {
 	}
 
 	//receive handshake response
-	handrsp := &HandshakeResponse{}
+	handrsp := &HandshakeResponse{
+		capability: conn.capability,
+	}
+	handrsp.Open(conn.connCtx)
+	defer handrsp.Close(conn.connCtx)
 	err = endPoint.ReceivePacket(conn.connCtx, handrsp)
 	if err != nil {
 		return err
@@ -237,6 +242,7 @@ func (conn *Connection) run() error {
 		return err
 	}
 
+	handrsp.Close(conn.connCtx)
 	var payload *mysqlPayload
 
 	for {
