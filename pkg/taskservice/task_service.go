@@ -17,6 +17,7 @@ package taskservice
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -144,6 +145,7 @@ func (s *taskService) CreateDaemonTask(ctx context.Context, metadata task.TaskMe
 func (s *taskService) Allocate(ctx context.Context, value task.AsyncTask, taskRunner string) error {
 	exists, err := s.store.QueryAsyncTask(ctx, WithTaskIDCond(EQ, value.ID))
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "allocate 1 %v\n", err)
 		return err
 	}
 	if len(exists) != 1 {
@@ -171,6 +173,7 @@ func (s *taskService) Allocate(ctx context.Context, value task.AsyncTask, taskRu
 		WithTaskIDCond(EQ, old.ID),
 		WithTaskEpochCond(EQ, old.Epoch-1))
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "allocate 2 %v\n", err)
 		return err
 	}
 	if n == 0 {

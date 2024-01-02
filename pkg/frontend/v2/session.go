@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -692,9 +693,19 @@ func NewBackgroundSession(reqCtx context.Context, upstream *Session, mp *mpool.M
 			panic("invalid shared txn handler")
 		}
 	}
-	ses = NewSession(nil, mp, gSysVars, false)
+	conn := &Connection{}
+	conn.req.ctx.SetCtx(reqCtx, nil)
+	ses = NewSession(conn, mp, gSysVars, false)
 	ses.upstream = upstream
 	ses.SetOutputCallback(fakeDataSetFetcher)
+	ses.SetUserName("")
+	ses.SetDatabaseName("")
+	conn.ses = ses
+	if upstream != nil && upstream.conn != nil && upstream.conn.connCtx != nil {
+		conn.connCtx = upstream.conn.connCtx
+	} else {
+		conn.connCtx = reqCtx
+	}
 	if stmt := motrace.StatementFromContext(reqCtx); stmt != nil {
 		// Reset background session id as frontend stmt id
 		ses.uuid = stmt.StatementID
@@ -1914,6 +1925,7 @@ func executeSQLInBackgroundSession(
 	bh := NewBackgroundHandler(reqCtx, upstream, mp)
 	defer bh.Close()
 	logutil.Debugf("background exec sql:%v", sql)
+	debug.PrintStack()
 	err := bh.Exec(reqCtx, sql)
 	logutil.Debugf("background exec sql done")
 	if err != nil {
@@ -1974,7 +1986,9 @@ var NewBackgroundHandler = func(
 
 	bSes := NewBackgroundSession(reqCtx, upstream, mp, GSysVariables, false)
 	exec := &BackgroundExecutor{}
-	err := exec.Open(reqCtx, WithBackgroundSession(bSes))
+	err := exec.Open(reqCtx,
+		WithConnection(bSes.conn),
+		WithBackgroundSession(bSes))
 	if err != nil {
 		panic("can not create background executor")
 	}

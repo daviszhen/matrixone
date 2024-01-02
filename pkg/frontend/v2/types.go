@@ -120,6 +120,7 @@ type GeneralExecutor struct {
 // it is triggered in the mo with none client.
 // it does not maintain some states also.
 type BackgroundExecutor struct {
+	*GeneralExecutor
 	opts QueryExecutorOptions
 }
 

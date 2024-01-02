@@ -151,6 +151,7 @@ func (ge *GeneralExecutor) Exec(requestCtx context.Context, input *UserInput) (r
 	ParseDuration := time.Since(beginInstant)
 
 	if err != nil {
+		panic(err)
 		statsInfo.ParseDuration = ParseDuration
 		requestCtx = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, parsers.HandleSqlForRecord(input.getSql()), input.getSqlSourceTypes(), err)
 		retErr = err
@@ -1290,15 +1291,24 @@ func prepareExecutor(reqCtx context.Context, ses *Session, stmt tree.Statement) 
 	return ret, err
 }
 
-func (be *BackgroundExecutor) Open(ctx context.Context, opts ...QueryExecutorOpt) error {
+func (be *BackgroundExecutor) Open(ctx context.Context, opts ...QueryExecutorOpt) (err error) {
+	be.GeneralExecutor = &GeneralExecutor{}
+	err = be.GeneralExecutor.Open(ctx, opts...)
+	if err != nil {
+		return err
+	}
 	for _, opt := range opts {
 		opt(&be.opts)
 	}
 	return nil
 }
 func (be *BackgroundExecutor) Exec(ctx context.Context, input *UserInput) error {
-	return nil
+	return be.GeneralExecutor.Exec(ctx, input)
 }
-func (be *BackgroundExecutor) Close(ctx context.Context) error {
+func (be *BackgroundExecutor) Close(ctx context.Context) (err error) {
+	err = be.GeneralExecutor.Close(ctx)
+	if err != nil {
+		return err
+	}
 	return nil
 }

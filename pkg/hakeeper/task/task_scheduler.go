@@ -133,6 +133,7 @@ func (s *scheduler) allocateTask(ts taskservice.TaskService, t task.AsyncTask, o
 			zap.String("task-metadata-id", t.Metadata.ID),
 			zap.String("task-runner", runner),
 			zap.Error(err))
+		panic(err)
 		return
 	}
 	runtime.ProcessLevelRuntime().Logger().Info("task allocated",

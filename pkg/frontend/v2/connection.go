@@ -430,6 +430,7 @@ func (conn *Connection) handleCommand(endPoint *PacketEndPoint) (err error) {
 	case COM_QUERY:
 		var query = string(conn.req.payload.GetData())
 		conn.addSqlCount(1)
+		logDebug(conn.ses, conn.ses.GetDebugString(), "query trace", logutil.ConnectionIdField(conn.ses.GetConnectionID()), logutil.QueryField(query))
 		conn.req.userInput = &UserInput{sql: query}
 		err = conn.doComQuery(endPoint)
 		if err != nil {
@@ -466,7 +467,7 @@ func (conn *Connection) handleCommand(endPoint *PacketEndPoint) (err error) {
 		newLastStmtID := conn.ses.GenNewStmtId()
 		newStmtName := getPrepareStmtName(newLastStmtID)
 		sql = fmt.Sprintf("prepare %s from %s", newStmtName, sql)
-		// logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
+		logDebug(conn.ses, conn.ses.GetDebugString(), "query trace", logutil.ConnectionIdField(conn.ses.GetConnectionID()), logutil.QueryField(sql))
 		conn.req.userInput = &UserInput{sql: sql}
 		err = conn.doComQuery(endPoint)
 		if err != nil {
@@ -510,7 +511,7 @@ func (conn *Connection) handleCommand(endPoint *PacketEndPoint) (err error) {
 		stmtID := binary.LittleEndian.Uint32(data[0:4])
 		stmtName := getPrepareStmtName(stmtID)
 		sql := fmt.Sprintf("deallocate prepare %s", stmtName)
-		// logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
+		logDebug(conn.ses, conn.ses.GetDebugString(), "query trace", logutil.ConnectionIdField(conn.ses.GetConnectionID()), logutil.QueryField(sql))
 		conn.req.userInput = &UserInput{sql: sql}
 		err = conn.doComQuery(endPoint)
 		if err != nil {
@@ -525,7 +526,7 @@ func (conn *Connection) handleCommand(endPoint *PacketEndPoint) (err error) {
 		stmtID := binary.LittleEndian.Uint32(data[0:4])
 		stmtName := getPrepareStmtName(stmtID)
 		sql := fmt.Sprintf("reset prepare %s", stmtName)
-		//logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
+		logDebug(conn.ses, conn.ses.GetDebugString(), "query trace", logutil.ConnectionIdField(conn.ses.GetConnectionID()), logutil.QueryField(sql))
 		conn.req.userInput = &UserInput{sql: sql}
 		err = conn.doComQuery(endPoint)
 		if err != nil {

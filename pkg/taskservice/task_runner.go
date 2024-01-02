@@ -16,6 +16,8 @@ package taskservice
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"runtime"
 	"sort"
 	"sync"
@@ -339,6 +341,7 @@ func (r *taskRunner) doFetch() ([]task.AsyncTask, error) {
 	}
 	r.runningTasks.RUnlock()
 	if len(newTasks) == 0 {
+		fmt.Fprintf(os.Stderr, "+++ doFetch empty newtasks\n")
 		return nil, nil
 	}
 
@@ -381,9 +384,11 @@ func (r *taskRunner) dispatch(ctx context.Context) {
 			r.logger.Debug("dispatch task stopped")
 			return
 		case rt := <-r.waitTasksC:
+			fmt.Fprintf(os.Stderr, "---dispatch task..... %v", rt.task.DebugString())
 			if taskFrameworkDisabled() {
 				continue
 			}
+			fmt.Fprintf(os.Stderr, "---dispatch task 2.....")
 			r.runTask(ctx, rt)
 		}
 	}

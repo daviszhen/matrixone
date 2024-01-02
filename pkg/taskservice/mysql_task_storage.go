@@ -288,6 +288,7 @@ func (m *mysqlTaskStorage) UpdateAsyncTask(ctx context.Context, tasks []task.Asy
 
 	db, release, err := m.getDB()
 	if err != nil {
+		panic(err)
 		return 0, err
 	}
 	defer func() {
@@ -296,6 +297,7 @@ func (m *mysqlTaskStorage) UpdateAsyncTask(ctx context.Context, tasks []task.Asy
 
 	conn, err := db.Conn(ctx)
 	if err != nil {
+		panic(err)
 		return 0, err
 	}
 	defer func() {
@@ -310,6 +312,7 @@ func (m *mysqlTaskStorage) UpdateAsyncTask(ctx context.Context, tasks []task.Asy
 
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to begin transaction: %v\n", err)
 		return 0, err
 	}
 
@@ -335,6 +338,7 @@ func (m *mysqlTaskStorage) UpdateAsyncTask(ctx context.Context, tasks []task.Asy
 
 			prepare, err := tx.PrepareContext(ctx, update)
 			if err != nil {
+				panic(err)
 				return err
 			}
 			defer prepare.Close()
@@ -355,10 +359,12 @@ func (m *mysqlTaskStorage) UpdateAsyncTask(ctx context.Context, tasks []task.Asy
 				t.ID,
 			)
 			if err != nil {
+				panic(err)
 				return err
 			}
 			affected, err := exec.RowsAffected()
 			if err != nil {
+				panic(err)
 				return nil
 			}
 			n += int(affected)
@@ -366,12 +372,14 @@ func (m *mysqlTaskStorage) UpdateAsyncTask(ctx context.Context, tasks []task.Asy
 		}()
 		if err != nil {
 			if e := tx.Rollback(); e != nil {
+				panic(err)
 				return 0, e
 			}
 			return 0, err
 		}
 	}
 	if err = tx.Commit(); err != nil {
+		panic(err)
 		return 0, err
 	}
 	return n, nil
