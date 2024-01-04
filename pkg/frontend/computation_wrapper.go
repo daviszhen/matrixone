@@ -234,18 +234,6 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	cwft.ses.SetTxnId(txnOp.Txn().ID)
 	//save current sql
 	txnOp.SetLastSql(cwft.ses.GetSql())
-	if txnOp != nil && !cwft.ses.IsDerivedStmt() {
-		ok, _ := cwft.ses.GetTxnHandler().calledStartStmt()
-		if !ok {
-			txnOp.GetWorkspace().StartStatement()
-			cwft.ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
-		}
-
-		err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	cacheHit := cwft.plan != nil
 	if !cacheHit {

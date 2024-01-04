@@ -245,6 +245,22 @@ func (th *TxnHandler) NewTxn() (context.Context, TxnOperator, error) {
 	return txnCtx, txnOp, err
 }
 
+func (th *TxnHandler) StartStmt() error {
+	txnCtx, txnOp := th.GetTxnOperator()
+	txnOp.GetWorkspace().StartStatement()
+	return txnOp.GetWorkspace().IncrStatementID(txnCtx, false)
+}
+
+func (th *TxnHandler) RollbackLastStmt() error {
+	txnCtx, txnOp := th.GetTxnOperator()
+	return txnOp.GetWorkspace().RollbackLastStatement(txnCtx)
+}
+
+func (th *TxnHandler) EndStmt() {
+	_, txnOp := th.GetTxnOperator()
+	txnOp.GetWorkspace().EndStatement()
+}
+
 // IsValidTxnOperator checks the txn operator is valid
 func (th *TxnHandler) IsValidTxnOperator() bool {
 	th.mu.Lock()
@@ -641,7 +657,7 @@ If it is Case2, Then
 
 	InMultiStmtTransactionMode returns false
 */
-func (ses *Session) TxnCommitSingleStatement(stmt tree.Statement) error {
+func (ses *Session) TxnCommitSingleStatement(stmt tree.Statement, selfHandle bool) error {
 	var err error
 	/*
 		Commit Rules:
@@ -651,6 +667,9 @@ func (ses *Session) TxnCommitSingleStatement(stmt tree.Statement) error {
 			if the statement is the one can be executed in the active transaction,
 				the transaction need to be committed at the end of the statement.
 	*/
+	if !selfHandle {
+		ses.txnHandler.EndStmt()
+	}
 	if !ses.InMultiStmtTransactionMode() ||
 		ses.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) {
 		err = ses.GetTxnHandler().CommitTxn()
@@ -680,7 +699,7 @@ If it is Case2, Then
 
 	InMultiStmtTransactionMode returns false
 */
-func (ses *Session) TxnRollbackSingleStatement(stmt tree.Statement) error {
+func (ses *Session) TxnRollbackSingleStatement(stmt tree.Statement, selfHandle bool) error {
 	var err error
 	/*
 			Rollback Rules:
@@ -690,11 +709,38 @@ func (ses *Session) TxnRollbackSingleStatement(stmt tree.Statement) error {
 		        the transaction need to be rollback at the end of the statement.
 				(every error will abort the transaction.)
 	*/
-	if !ses.InMultiStmtTransactionMode() || ses.InActiveTransaction() {
-		err = ses.GetTxnHandler().RollbackTxn()
-		ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-		ses.ClearOptionBits(OPTION_BEGIN)
+
+	if !ses.InMultiStmtTransactionMode() {
+		//statement that need the computation engine.
+		//should rollback statement.
+		if !selfHandle {
+			err = ses.txnHandler.RollbackLastStmt()
+			if err == nil {
+				ses.txnHandler.EndStmt()
+			} else {
+				logError(ses, ses.GetDebugString(), "rollback last stmt failed.err:%v", zap.Error(err))
+			}
+		}
+	} else if ses.InActiveTransaction() {
+		if !NeedToBeCommittedInActiveTransaction(stmt) {
+			//statement that need the computation engine.
+			//should rollback statement.
+			if !selfHandle {
+				err = ses.txnHandler.RollbackLastStmt()
+				if err == nil {
+					ses.txnHandler.EndStmt()
+					return err
+				}
+				logError(ses, ses.GetDebugString(), "rollback last stmt failed.err:%v", zap.Error(err))
+			} else {
+				//do nothing. like USE statement
+				return err
+			}
+		}
 	}
+	err = ses.GetTxnHandler().RollbackTxn()
+	ses.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+	ses.ClearOptionBits(OPTION_BEGIN)
 	return err
 }
 

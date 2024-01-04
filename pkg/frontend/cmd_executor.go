@@ -282,7 +282,7 @@ func (bse *baseStmtExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Sessi
 	tenant := bse.tenantName
 	incStatementCounter(tenant, stmt)
 	if bse.GetStatus() == stmtExecSuccess {
-		txnErr = ses.TxnCommitSingleStatement(stmt)
+		txnErr = ses.TxnCommitSingleStatement(stmt, true)
 		if txnErr != nil {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeCommit)
 			logStatementStatus(ctx, ses, stmt, fail, txnErr)
@@ -305,7 +305,7 @@ func (bse *baseStmtExecutor) CommitOrRollbackTxn(ctx context.Context, ses *Sessi
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
 		logError(ses, ses.GetDebugString(), bse.err.Error())
-		txnErr = ses.TxnRollbackSingleStatement(stmt)
+		txnErr = ses.TxnRollbackSingleStatement(stmt, true)
 		if txnErr != nil {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeRollback)
 			logStatementStatus(ctx, ses, stmt, fail, txnErr)

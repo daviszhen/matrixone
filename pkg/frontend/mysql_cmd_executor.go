@@ -2803,7 +2803,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
 		logError(ses, ses.GetDebugString(), err.Error())
-		txnErr := ses.TxnRollbackSingleStatement(stmt)
+		txnErr := ses.TxnRollbackSingleStatement(stmt, selfHandle)
 		if txnErr != nil {
 			logStatementStatus(requestCtx, ses, stmt, fail, txnErr)
 			return txnErr
@@ -2824,7 +2824,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 
 		// load data handle txn failure internally
 		incStatementCounter(tenant, stmt)
-		retErr = ses.TxnCommitSingleStatement(stmt)
+		retErr = ses.TxnCommitSingleStatement(stmt, selfHandle)
 		if retErr != nil {
 			logStatementStatus(requestCtx, ses, stmt, fail, retErr)
 		}
@@ -2854,26 +2854,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		err = rollbackTxnFunc()
 		return err
 	}
-
-	_, txnOp := ses.GetTxnHandler().GetTxnOperator()
-	ses.GetTxnHandler().disableStartStmt()
-	if txnOp != nil && !ses.IsDerivedStmt() {
-		txnOp.GetWorkspace().StartStatement()
-		ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
-	}
-
-	// defer Start/End statement management.  called after finishTxnFunc.
-	// which is deferred after this.
-	defer func() {
-		_, txnOp := ses.GetTxnHandler().GetTxnOperator()
-		if txnOp != nil && !ses.IsDerivedStmt() {
-			ok, id := ses.GetTxnHandler().calledStartStmt()
-			if ok && bytes.Equal(txnOp.Txn().ID, id) {
-				txnOp.GetWorkspace().EndStatement()
-			}
-		}
-		ses.GetTxnHandler().disableStartStmt()
-	}()
 
 	defer func() {
 		err = finishTxnFunc()
@@ -3250,31 +3230,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	if ret, err = cw.Compile(requestCtx, ses, ses.GetOutputCallback()); err != nil {
 		return err
 	}
-	stmt = cw.GetAst()
-	// reset some special stmt for execute statement
-	switch st := stmt.(type) {
-	case *tree.SetVar:
-		err = mce.handleSetVar(requestCtx, st, sql)
-		if err != nil {
-			return err
-		} else {
-			return err
-		}
-	case *tree.ShowVariables:
-		err = mce.handleShowVariables(st, proc, i, len(cws))
-		if err != nil {
-			return err
-		} else {
-			return err
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = mce.handleShowErrors(i, len(cws))
-		if err != nil {
-			return err
-		} else {
-			return err
-		}
-	}
 
 	runner = ret.(ComputationRunner)
 
@@ -3283,6 +3238,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
+	err = ses.txnHandler.StartStmt()
+	if err != nil {
+		return err
+	}
 	mrs = ses.GetMysqlResultSet()
 	// cw.Compile might rewrite sql, here we fetch the latest version
 	switch statement := cw.GetAst().(type) {
