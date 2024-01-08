@@ -217,10 +217,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 
 	txnHandler := cwft.ses.GetTxnHandler()
 	var txnCtx context.Context
-	txnCtx, cwft.proc.TxnOperator, err = txnHandler.GetTxn()
-	if err != nil {
-		return nil, err
-	}
+	txnCtx, cwft.proc.TxnOperator = txnHandler.GetTxnOperator()
 
 	txnCtx = fileservice.EnsureStatementProfiler(txnCtx, requestCtx)
 	txnCtx = statistic.EnsureStatsInfoCanBeFound(txnCtx, requestCtx)

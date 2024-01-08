@@ -3227,6 +3227,15 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 
 	cmpBegin = time.Now()
 
+	_, _, err = ses.txnHandler.GetTxn()
+	if err != nil {
+		return err
+	}
+	err = ses.txnHandler.StartStmt()
+	if err != nil {
+		return err
+	}
+
 	if ret, err = cw.Compile(requestCtx, ses, ses.GetOutputCallback()); err != nil {
 		return err
 	}
@@ -3238,10 +3247,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
-	err = ses.txnHandler.StartStmt()
-	if err != nil {
-		return err
-	}
 	mrs = ses.GetMysqlResultSet()
 	// cw.Compile might rewrite sql, here we fetch the latest version
 	switch statement := cw.GetAst().(type) {
