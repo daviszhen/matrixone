@@ -638,7 +638,7 @@ func (txn *Transaction) getTableWrites(databaseId uint64, tableId uint64, writes
 // transaction by go through the delete tables slice, and advance its cachedIndex.
 func (txn *Transaction) getCachedTable(
 	ctx context.Context, k tableKey, snapshotTS timestamp.Timestamp,
-) *txnTable {
+) (*txnTable, error) {
 	var tbl *txnTable
 	if v, ok := txn.tableCache.tableMap.Load(k); ok {
 		tbl = v.(*txnTable)
@@ -651,13 +651,17 @@ func (txn *Transaction) getCachedTable(
 		val := txn.engine.catalog.GetSchemaVersion(tblKey)
 		if val != nil {
 			if val.Ts.Greater(tbl.lastTS) && val.Version != tbl.version {
-				txn.tableCache.tableMap.Delete(genTableKey(ctx, k.name, k.databaseId))
-				return nil
+				key, err := genTableKey(ctx, k.name, k.databaseId)
+				if err != nil {
+					return nil, err
+				}
+				txn.tableCache.tableMap.Delete(key)
+				return nil, nil
 			}
 		}
 
 	}
-	return tbl
+	return tbl, nil
 }
 
 func (txn *Transaction) Commit(ctx context.Context) ([]txn.TxnRequest, error) {
