@@ -99,7 +99,7 @@ func (s *sqlStore) Create(
 		ctx,
 		func(te executor.TxnExecutor) error {
 			for _, col := range cols {
-				res, err := te.Exec(col.getInsertSQL())
+				res, err := te.Exec(col.getInsertSQL(), executor.StatementOption{})
 				if err != nil {
 					return err
 				}
@@ -143,7 +143,7 @@ func (s *sqlStore) Allocate(
 			ctx,
 			func(te executor.TxnExecutor) error {
 				start := time.Now()
-				res, err := te.Exec(fetchSQL)
+				res, err := te.Exec(fetchSQL, executor.StatementOption{})
 				if err != nil {
 					return err
 				}
@@ -185,7 +185,7 @@ func (s *sqlStore) Allocate(
 					colName,
 					current)
 				start = time.Now()
-				res, err = te.Exec(sql)
+				res, err = te.Exec(sql, executor.StatementOption{})
 				if err != nil {
 					return err
 				}
