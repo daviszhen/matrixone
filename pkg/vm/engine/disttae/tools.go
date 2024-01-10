@@ -1135,12 +1135,8 @@ func getAccessInfo(ctx context.Context) (uint32, uint32, uint32, error) {
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	if v := ctx.Value(defines.UserIDKey{}); v != nil {
-		userId = v.(uint32)
-	}
-	if v := ctx.Value(defines.RoleIDKey{}); v != nil {
-		roleId = v.(uint32)
-	}
+	userId = defines.GetUserId(ctx)
+	roleId = defines.GetRoleId(ctx)
 	return accountId, userId, roleId, nil
 }
 
@@ -1222,7 +1218,7 @@ func genDatabaseKey(ctx context.Context, name string) (databaseKey, error) {
 	return databaseKey{
 		name:      name,
 		accountId: accountId,
-	}, err
+	}, nil
 }
 
 func genTableKey(ctx context.Context, name string, databaseId uint64) (tableKey, error) {
@@ -1234,7 +1230,7 @@ func genTableKey(ctx context.Context, name string, databaseId uint64) (tableKey,
 		name:       name,
 		databaseId: databaseId,
 		accountId: accountId,
-	}, err
+	}, nil
 }
 
 func genMetaTableName(id uint64) string {

@@ -117,7 +117,7 @@ func (db *txnDatabase) getRelationById(ctx context.Context, id uint64) (string, 
 		return "", nil, err
 	}
 	if tblName == "" {
-		return "", nil, err
+		return "", nil, nil
 	}
 	rel, _ := db.Relation(ctx, tblName, nil)
 	return tblName, rel, nil
@@ -142,10 +142,6 @@ func (db *txnDatabase) Relation(ctx context.Context, name string, proc any) (eng
 	if proc != nil {
 		p = proc.(*process.Process)
 	}
-	key, err = genTableKey(ctx, name, db.databaseId)
-	if err != nil {
-		return nil, err
-	}
 	rel, err := db.txn.getCachedTable(ctx, key,
 		db.txn.op.SnapshotTS())
 	if err != nil {
@@ -159,10 +155,6 @@ func (db *txnDatabase) Relation(ctx context.Context, name string, proc any) (eng
 		return rel, nil
 	}
 	// get relation from the txn created tables cache: created by this txn
-	key, err = genTableKey(ctx, name, db.databaseId)
-	if err != nil {
-		return nil, err
-	}
 	if v, ok := db.txn.createMap.Load(key); ok {
 		//v.(*txnTable).proc = p
 		v.(*txnTable).proc.Store(p)
@@ -171,10 +163,6 @@ func (db *txnDatabase) Relation(ctx context.Context, name string, proc any) (eng
 
 	// special tables
 	if db.databaseName == catalog.MO_CATALOG {
-		key, err = genTableKey(ctx, name, db.databaseId)
-		if err != nil {
-			return nil, err
-		}
 		switch name {
 		case catalog.MO_DATABASE:
 			id := uint64(catalog.MO_DATABASE_ID)
@@ -190,18 +178,14 @@ func (db *txnDatabase) Relation(ctx context.Context, name string, proc any) (eng
 			return db.openSysTable(p, key, id, name, defs), nil
 		}
 	}
-	accountId, err := defines.GetAccountId(ctx)
-	if err != nil {
-		return nil, err
-	}
 	item := &cache.TableItem{
 		Name:       name,
 		DatabaseId: db.databaseId,
-		AccountId: accountId,
+		AccountId: key.accountId,
 		Ts:         db.txn.op.SnapshotTS(),
 	}
 	if ok := db.txn.engine.catalog.GetTable(item); !ok {
-		logutil.Debugf("txnDatabase.Relation table %q(acc %d db %d) does not exist", name, accountId, db.databaseId)
+		logutil.Debugf("txnDatabase.Relation table %q(acc %d db %d) does not exist", name, key.accountId, db.databaseId)
 		return nil, moerr.NewParseError(ctx, "table %q does not exist", name)
 	}
 
@@ -228,10 +212,7 @@ func (db *txnDatabase) Relation(ctx context.Context, name string, proc any) (eng
 		lastTS: txn.op.SnapshotTS(),
 	}
 	tbl.proc.Store(p)
-	key, err = genTableKey(ctx, name, db.databaseId)
-	if err != nil {
-		return nil, err
-	}
+
 	db.txn.tableCache.tableMap.Store(key, tbl)
 	return tbl, nil
 }
@@ -270,14 +251,10 @@ func (db *txnDatabase) Delete(ctx context.Context, name string) error {
 		rowid = table.rowid
 		rowids = table.rowids
 	} else {
-		accountId, err := defines.GetAccountId(ctx)
-		if err != nil {
-			return err
-		}
 		item := &cache.TableItem{
 			Name:       name,
 			DatabaseId: db.databaseId,
-			AccountId: accountId,
+			AccountId: k.accountId,
 			Ts:         db.txn.op.SnapshotTS(),
 		}
 		if ok := db.txn.engine.catalog.GetTable(item); !ok {
@@ -342,14 +319,10 @@ func (db *txnDatabase) Truncate(ctx context.Context, name string) (uint64, error
 		txnTable.reset(newId)
 		rowid = txnTable.rowid
 	} else {
-		accountId, err := defines.GetAccountId(ctx)
-		if err != nil {
-			return 0, err
-		}
 		item := &cache.TableItem{
 			Name:       name,
 			DatabaseId: db.databaseId,
-			AccountId: accountId,
+			AccountId: k.accountId,
 			Ts:         db.txn.op.SnapshotTS(),
 		}
 		if ok := db.txn.engine.catalog.GetTable(item); !ok {
