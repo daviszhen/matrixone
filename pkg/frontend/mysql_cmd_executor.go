@@ -1744,6 +1744,9 @@ func checkModify(plan2 *plan.Plan, proc *process.Process, ses *Session) bool {
 		}
 		return false
 	}
+	if plan2 == nil {
+		return true
+	}
 	switch p := plan2.Plan.(type) {
 	case *plan.Plan_Query:
 		for i := range p.Query.Nodes {
@@ -1798,6 +1801,10 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 		for i, stmt := range cached.stmts {
 			tcw := InitTxnComputationWrapper(ses, stmt, proc)
 			tcw.plan = cached.plans[i]
+			if tcw.plan == nil {
+				modify = true
+				break
+			}
 			if checkModify(tcw.plan, proc, ses) {
 				modify = true
 				break
