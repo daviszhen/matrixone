@@ -1744,6 +1744,9 @@ func checkModify(plan2 *plan.Plan, proc *process.Process, ses *Session) bool {
 		}
 		return false
 	}
+	if plan2 == nil {
+		return true
+	}
 	switch p := plan2.Plan.(type) {
 	case *plan.Plan_Query:
 		for i := range p.Query.Nodes {
@@ -2853,9 +2856,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		// Call a defer function -- if TxnCommitSingleStatement paniced, we
 		// want to catch it and convert it to an error.
 		defer func() {
-			if r := recover(); r != nil {
-				retErr = moerr.ConvertPanicError(requestCtx, r)
-			}
+			// if r := recover(); r != nil {
+			// 	retErr = moerr.ConvertPanicError(requestCtx, r)
+			// }
 		}()
 
 		//load data handle txn failure internally
@@ -2870,9 +2873,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	//finish the transaction
 	finishTxnFunc := func() error {
 		// First recover all panics.   If paniced, we will abort.
-		if r := recover(); r != nil {
-			err = moerr.ConvertPanicError(requestCtx, r)
-		}
+		// if r := recover(); r != nil {
+		// 	err = moerr.ConvertPanicError(requestCtx, r)
+		// }
 
 		if err == nil {
 			err = commitTxnFunc()
@@ -2901,8 +2904,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	defer func() {
 		// move finishTxnFunc() out to another defer so that if finishTxnFunc
 		// paniced, the following is still called.
-		_, txnOp, err = ses.GetTxnHandler().GetTxnOperator()
-		if err != nil {
+		var err3 error
+		_, txnOp, err3 = ses.GetTxnHandler().GetTxnOperator()
+		if err3 != nil {
+			logError(ses, ses.GetDebugString(), err3.Error())
 			return
 		}
 		if txnOp != nil && !ses.IsDerivedStmt() {
