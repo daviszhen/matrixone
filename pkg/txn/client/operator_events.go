@@ -26,7 +26,7 @@ const (
 	ClosedEvent = EventType(0)
 )
 
-func (tc *txnOperator) AppendEventCallback(
+func (tc *TtxnOperator) AppendEventCallback(
 	event EventType,
 	callbacks ...func(txn.TxnMeta)) {
 	tc.mu.Lock()
@@ -40,7 +40,7 @@ func (tc *txnOperator) AppendEventCallback(
 	tc.mu.callbacks[event] = append(tc.mu.callbacks[event], callbacks...)
 }
 
-func (tc *txnOperator) triggerEventLocked(event EventType) {
+func (tc *TtxnOperator) triggerEventLocked(event EventType) {
 	if tc.mu.callbacks == nil {
 		return
 	}

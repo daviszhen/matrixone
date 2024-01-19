@@ -35,7 +35,7 @@ import (
 )
 
 func TestRead(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		result, err := tc.Read(ctx, []txn.TxnRequest{newTNRequest(1, 1), newTNRequest(2, 2)})
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(result.Responses))
@@ -45,7 +45,7 @@ func TestRead(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		assert.Empty(t, tc.mu.txn.TNShards)
 		result, err := tc.Write(ctx, []txn.TxnRequest{newTNRequest(1, 1), newTNRequest(2, 2)})
 		assert.NoError(t, err)
@@ -59,7 +59,7 @@ func TestWrite(t *testing.T) {
 }
 
 func TestWriteWithCacheWriteEnabled(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		assert.Empty(t, tc.mu.txn.TNShards)
 		responses, err := tc.Write(ctx, []txn.TxnRequest{newTNRequest(1, 1), newTNRequest(2, 2)})
 		assert.NoError(t, err)
@@ -71,7 +71,7 @@ func TestWriteWithCacheWriteEnabled(t *testing.T) {
 }
 
 func TestRollback(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		tc.mu.txn.TNShards = append(tc.mu.txn.TNShards, metadata.TNShard{TNShardRecord: metadata.TNShardRecord{ShardID: 1}})
 		err := tc.Rollback(ctx)
 		assert.NoError(t, err)
@@ -83,7 +83,7 @@ func TestRollback(t *testing.T) {
 }
 
 func TestRollbackWithClosedTxn(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		ts.setManual(func(sr *rpc.SendResult, err error) (*rpc.SendResult, error) {
 			return nil, moerr.NewTxnClosed(ctx, tc.txnID)
 		})
@@ -95,7 +95,7 @@ func TestRollbackWithClosedTxn(t *testing.T) {
 }
 
 func TestRollbackWithNoWrite(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		err := tc.Rollback(ctx)
 		assert.NoError(t, err)
 		assert.Empty(t, ts.getLastRequests())
@@ -103,7 +103,7 @@ func TestRollbackWithNoWrite(t *testing.T) {
 }
 
 func TestRollbackReadOnly(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		err := tc.Rollback(ctx)
 		assert.NoError(t, err)
 		assert.Empty(t, ts.getLastRequests())
@@ -111,7 +111,7 @@ func TestRollbackReadOnly(t *testing.T) {
 }
 
 func TestCommit(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		tc.mu.txn.TNShards = append(tc.mu.txn.TNShards, metadata.TNShard{TNShardRecord: metadata.TNShardRecord{ShardID: 1}})
 		err := tc.Commit(ctx)
 		assert.NoError(t, err)
@@ -124,7 +124,7 @@ func TestCommit(t *testing.T) {
 }
 
 func TestCommitWithNoWrite(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		err := tc.Commit(ctx)
 		assert.NoError(t, err)
 		assert.Empty(t, ts.getLastRequests())
@@ -132,7 +132,7 @@ func TestCommitWithNoWrite(t *testing.T) {
 }
 
 func TestCommitReadOnly(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		err := tc.Commit(ctx)
 		assert.NoError(t, err)
 		assert.Empty(t, ts.getLastRequests())
@@ -140,7 +140,7 @@ func TestCommitReadOnly(t *testing.T) {
 }
 
 func TestCommitWithLockTables(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		r := runtime.DefaultRuntime()
 		runtime.SetupProcessLevelRuntime(r)
 
@@ -170,7 +170,7 @@ func TestCommitWithLockTables(t *testing.T) {
 func TestCommitWithLockTablesChanged(t *testing.T) {
 	tableID1 := uint64(10)
 	tableID2 := uint64(20)
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		lockservice.RunLockServicesForTest(
 			zap.DebugLevel,
 			[]string{"s1"},
@@ -214,7 +214,7 @@ func TestCommitWithLockTablesChanged(t *testing.T) {
 }
 
 func TestContextWithoutDeadlineWillPanic(t *testing.T) {
-	runOperatorTests(t, func(_ context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(_ context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		defer func() {
 			if err := recover(); err != nil {
 				return
@@ -277,7 +277,7 @@ func TestReadOnlyAndCacheWriteBothSetWillPanic(t *testing.T) {
 }
 
 func TestWriteOnReadyOnlyTxnWillPanic(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		defer func() {
 			if err := recover(); err != nil {
 				return
@@ -291,7 +291,7 @@ func TestWriteOnReadyOnlyTxnWillPanic(t *testing.T) {
 }
 
 func TestWriteOnClosedTxnWillPanic(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		tc.mu.closed = true
 		_, err := tc.Write(ctx, nil)
 		assert.True(t, moerr.IsMoErrCode(err, moerr.ErrTxnClosed))
@@ -299,7 +299,7 @@ func TestWriteOnClosedTxnWillPanic(t *testing.T) {
 }
 
 func TestReadOnClosedTxnWillPanic(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		tc.mu.closed = true
 		_, err := tc.Read(ctx, nil)
 		assert.True(t, moerr.IsMoErrCode(err, moerr.ErrTxnClosed))
@@ -307,7 +307,7 @@ func TestReadOnClosedTxnWillPanic(t *testing.T) {
 }
 
 func TestCacheWrites(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		responses, err := tc.Write(ctx, []txn.TxnRequest{txn.NewTxnRequest(&txn.CNOpRequest{OpCode: 1})})
 		assert.NoError(t, err)
 		assert.Empty(t, responses)
@@ -317,7 +317,7 @@ func TestCacheWrites(t *testing.T) {
 }
 
 func TestCacheWritesWillInsertBeforeRead(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		result, err := tc.Write(ctx, []txn.TxnRequest{newTNRequest(1, 1), newTNRequest(2, 2), newTNRequest(3, 3)})
 		assert.NoError(t, err)
 		assert.Empty(t, result)
@@ -349,7 +349,7 @@ func TestCacheWritesWillInsertBeforeRead(t *testing.T) {
 }
 
 func TestReadOnAbortedTxn(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		ts.setManual(func(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
 			for idx := range result.Responses {
 				result.Responses[idx].Txn = &txn.TxnMeta{Status: txn.TxnStatus_Aborted}
@@ -363,7 +363,7 @@ func TestReadOnAbortedTxn(t *testing.T) {
 }
 
 func TestWriteOnAbortedTxn(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		ts.setManual(func(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
 			for idx := range result.Responses {
 				result.Responses[idx].Txn = &txn.TxnMeta{Status: txn.TxnStatus_Aborted}
@@ -377,7 +377,7 @@ func TestWriteOnAbortedTxn(t *testing.T) {
 }
 
 func TestWriteOnCommittedTxn(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		ts.setManual(func(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
 			for idx := range result.Responses {
 				result.Responses[idx].Txn = &txn.TxnMeta{Status: txn.TxnStatus_Committed}
@@ -391,7 +391,7 @@ func TestWriteOnCommittedTxn(t *testing.T) {
 }
 
 func TestWriteOnCommittingTxn(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		ts.setManual(func(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
 			for idx := range result.Responses {
 				result.Responses[idx].Txn = &txn.TxnMeta{Status: txn.TxnStatus_Committing}
@@ -405,7 +405,7 @@ func TestWriteOnCommittingTxn(t *testing.T) {
 }
 
 func TestSnapshotTxnOperator(t *testing.T) {
-	runOperatorTests(t, func(_ context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(_ context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		assert.NoError(t, tc.AddLockTable(lock.LockTable{Table: 1}))
 
 		v, err := tc.Snapshot()
@@ -425,7 +425,7 @@ func TestSnapshotTxnOperator(t *testing.T) {
 }
 
 func TestApplySnapshotTxnOperator(t *testing.T) {
-	runOperatorTests(t, func(_ context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(_ context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		snapshot := &txn.CNTxnSnapshot{}
 		snapshot.Txn.ID = tc.mu.txn.ID
 		assert.NoError(t, tc.ApplySnapshot(protoc.MustMarshal(snapshot)))
@@ -446,7 +446,7 @@ func TestApplySnapshotTxnOperator(t *testing.T) {
 }
 
 func TestDebugTxnOperator(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		responses, err := tc.Debug(ctx,
 			[]txn.TxnRequest{txn.NewTxnRequest(&txn.CNOpRequest{OpCode: 1, Payload: []byte("OK")})})
 		assert.NoError(t, err)
@@ -456,7 +456,7 @@ func TestDebugTxnOperator(t *testing.T) {
 }
 
 func TestAddLockTable(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 		assert.NoError(t, tc.AddLockTable(lock.LockTable{Table: 1}))
 		assert.Equal(t, 1, len(tc.mu.lockTables))
 
@@ -474,7 +474,7 @@ func TestUpdateSnapshotTSWithWaiter(t *testing.T) {
 		runOperatorTests(t,
 			func(
 				ctx context.Context,
-				tc *txnOperator,
+				tc *TtxnOperator,
 				_ *testTxnSender) {
 				tc.timestampWaiter = waiter
 				tc.mu.txn.SnapshotTS = newTestTimestamp(10)
@@ -494,7 +494,7 @@ func TestUpdateSnapshotTSWithWaiter(t *testing.T) {
 }
 
 func TestRollbackMultiTimes(t *testing.T) {
-	runOperatorTests(t, func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+	runOperatorTests(t, func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 		require.NoError(t, tc.Rollback(ctx))
 		require.NoError(t, tc.Rollback(ctx))
 	})
@@ -512,7 +512,7 @@ func TestWaitCommittedLogAppliedInRCMode(t *testing.T) {
 			tw.NotifyLatestCommitTS(initTS)
 			runOperatorTestsWithOptions(
 				t,
-				func(ctx context.Context, tc *txnOperator, ts *testTxnSender) {
+				func(ctx context.Context, tc *TtxnOperator, ts *testTxnSender) {
 					require.Equal(t, initTS.Next(), tc.mu.txn.SnapshotTS)
 
 					_, err := l.Lock(ctx, 1, [][]byte{[]byte("k1")}, tc.mu.txn.ID, lock.LockOptions{})
@@ -544,14 +544,14 @@ func TestWaitCommittedLogAppliedInRCMode(t *testing.T) {
 
 func runOperatorTests(
 	t *testing.T,
-	tc func(context.Context, *txnOperator, *testTxnSender),
+	tc func(context.Context, *TtxnOperator, *testTxnSender),
 	options ...TxnOption) {
 	runOperatorTestsWithOptions(t, tc, newTestTimestamp(0), options)
 }
 
 func runOperatorTestsWithOptions(
 	t *testing.T,
-	tc func(context.Context, *txnOperator, *testTxnSender),
+	tc func(context.Context, *TtxnOperator, *testTxnSender),
 	minTS timestamp.Timestamp,
 	options []TxnOption,
 	clientOptions ...TxnClientCreateOption) {
@@ -564,7 +564,7 @@ func runOperatorTestsWithOptions(
 			ts rpc.TxnSender) {
 			txn, err := c.New(ctx, minTS, options...)
 			assert.Nil(t, err)
-			tc(ctx, txn.(*txnOperator), ts.(*testTxnSender))
+			tc(ctx, txn.(*TtxnOperator), ts.(*testTxnSender))
 		},
 		clientOptions...)
 }

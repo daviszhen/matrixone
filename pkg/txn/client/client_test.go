@@ -53,7 +53,7 @@ func TestNewTxn(t *testing.T) {
 	defer cancel()
 	tx, err := c.New(ctx, newTestTimestamp(0))
 	assert.Nil(t, err)
-	txnMeta := tx.(*txnOperator).mu.txn
+	txnMeta := tx.(*TtxnOperator).mu.txn
 	assert.Equal(t, timestamp.Timestamp{PhysicalTime: 1}, txnMeta.SnapshotTS)
 	assert.NotEmpty(t, txnMeta.ID)
 	assert.Equal(t, txn.TxnStatus_Active, txnMeta.Status)
@@ -79,7 +79,7 @@ func TestNewTxnWithNormalStateWait(t *testing.T) {
 			defer cancel()
 			tx, err := c.New(ctx, newTestTimestamp(0))
 			assert.Nil(t, err)
-			txnMeta := tx.(*txnOperator).mu.txn
+			txnMeta := tx.(*TtxnOperator).mu.txn
 			assert.Equal(t, int64(1), txnMeta.SnapshotTS.PhysicalTime)
 			assert.NotEmpty(t, txnMeta.ID)
 			assert.Equal(t, txn.TxnStatus_Active, txnMeta.Status)
@@ -129,7 +129,7 @@ func TestNewTxnWithSnapshotTS(t *testing.T) {
 	defer cancel()
 	tx, err := c.New(ctx, newTestTimestamp(0), WithSnapshotTS(timestamp.Timestamp{PhysicalTime: 10}))
 	assert.Nil(t, err)
-	txnMeta := tx.(*txnOperator).mu.txn
+	txnMeta := tx.(*TtxnOperator).mu.txn
 	assert.Equal(t, timestamp.Timestamp{PhysicalTime: 10}, txnMeta.SnapshotTS)
 	assert.NotEmpty(t, txnMeta.ID)
 	assert.Equal(t, txn.TxnStatus_Active, txnMeta.Status)
@@ -159,7 +159,7 @@ func TestTxnClientAbortAllRunningTxn(t *testing.T) {
 	c.AbortAllRunningTxn()
 	require.Equal(t, 0, len(c.(*txnClient).mu.activeTxns))
 	for _, op := range ops {
-		assert.Equal(t, txn.TxnStatus_Aborted, op.(*txnOperator).mu.txn.Status)
+		assert.Equal(t, txn.TxnStatus_Aborted, op.(*TtxnOperator).mu.txn.Status)
 	}
 }
 

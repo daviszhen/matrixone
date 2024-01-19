@@ -65,6 +65,7 @@ import (
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/util"
 	mokafka "github.com/matrixorigin/matrixone/pkg/stream/adapter/kafka"
+	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	util2 "github.com/matrixorigin/matrixone/pkg/util"
 	"github.com/matrixorigin/matrixone/pkg/util/executor"
 	v2 "github.com/matrixorigin/matrixone/pkg/util/metric/v2"
@@ -410,6 +411,12 @@ func (c *Compile) Run(_ uint64) (result *util2.RunResult, err error) {
 	releaseRunC := func() {
 		if runC != c {
 			putCompile(runC)
+		}
+	}
+
+	if strings.Contains(c.sql, "sum_profit") {
+		if op, ok := c.proc.TxnOperator.(*client.TtxnOperator); ok {
+			op.DebugThrowError()
 		}
 	}
 

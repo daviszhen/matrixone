@@ -25,13 +25,13 @@ import (
 
 func TestClosedEvent(t *testing.T) {
 	runClosedEventTests(t,
-		func(tc *txnOperator) func(context.Context) error {
+		func(tc *TtxnOperator) func(context.Context) error {
 			return tc.Commit
 		},
 		txn.TxnStatus_Committed)
 
 	runClosedEventTests(t,
-		func(tc *txnOperator) func(context.Context) error {
+		func(tc *TtxnOperator) func(context.Context) error {
 			return tc.Rollback
 		},
 		txn.TxnStatus_Aborted)
@@ -39,11 +39,11 @@ func TestClosedEvent(t *testing.T) {
 
 func runClosedEventTests(
 	t *testing.T,
-	getAction func(tc *txnOperator) func(context.Context) error,
+	getAction func(tc *TtxnOperator) func(context.Context) error,
 	status txn.TxnStatus) {
 	runOperatorTests(
 		t,
-		func(ctx context.Context, tc *txnOperator, _ *testTxnSender) {
+		func(ctx context.Context, tc *TtxnOperator, _ *testTxnSender) {
 			cnt := 0
 			tc.AppendEventCallback(ClosedEvent,
 				func(tm txn.TxnMeta) {

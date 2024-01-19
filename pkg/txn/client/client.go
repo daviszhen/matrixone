@@ -182,9 +182,9 @@ type txnClient struct {
 		// user active txns
 		users int
 		// all active txns
-		activeTxns map[string]*txnOperator
+		activeTxns map[string]*TtxnOperator
 		// FIFO queue for ready to active txn
-		waitActiveTxns []*txnOperator
+		waitActiveTxns []*TtxnOperator
 	}
 }
 
@@ -218,7 +218,7 @@ func NewTxnClient(
 	}
 	c.mu.state = paused
 	c.mu.cond = sync.NewCond(&c.mu)
-	c.mu.activeTxns = make(map[string]*txnOperator, 100000)
+	c.mu.activeTxns = make(map[string]*TtxnOperator, 100000)
 	for _, opt := range options {
 		opt(c)
 	}
@@ -432,7 +432,7 @@ func (client *txnClient) GetSyncLatestCommitTSTimes() uint64 {
 	return client.atomic.forceSyncCommitTimes.Load()
 }
 
-func (client *txnClient) openTxn(op *txnOperator) error {
+func (client *txnClient) openTxn(op *TtxnOperator) error {
 	client.mu.Lock()
 	defer func() {
 		v2.TxnActiveQueueSizeGauge.Set(float64(len(client.mu.activeTxns)))
@@ -507,7 +507,7 @@ func (client *txnClient) closeTxn(txn txn.TxnMeta) {
 	}
 }
 
-func (client *txnClient) addActiveTxnLocked(op *txnOperator) {
+func (client *txnClient) addActiveTxnLocked(op *TtxnOperator) {
 	if op.isUserTxn() {
 		client.mu.users++
 	}
@@ -515,7 +515,7 @@ func (client *txnClient) addActiveTxnLocked(op *txnOperator) {
 	client.addToLeakCheck(op)
 }
 
-func (client *txnClient) fetchWaitActiveOpLocked() *txnOperator {
+func (client *txnClient) fetchWaitActiveOpLocked() *TtxnOperator {
 	if len(client.mu.waitActiveTxns) == 0 {
 		return nil
 	}
@@ -547,11 +547,11 @@ func (client *txnClient) Resume() {
 
 func (client *txnClient) AbortAllRunningTxn() {
 	client.mu.Lock()
-	ops := make([]*txnOperator, 0, len(client.mu.activeTxns))
+	ops := make([]*TtxnOperator, 0, len(client.mu.activeTxns))
 	for _, op := range client.mu.activeTxns {
 		ops = append(ops, op)
 	}
-	waitOps := append(([]*txnOperator)(nil), client.mu.waitActiveTxns...)
+	waitOps := append(([]*TtxnOperator)(nil), client.mu.waitActiveTxns...)
 	client.mu.waitActiveTxns = client.mu.waitActiveTxns[:0]
 	client.mu.Unlock()
 
@@ -585,7 +585,7 @@ func (client *txnClient) startLeakChecker() {
 	}
 }
 
-func (client *txnClient) addToLeakCheck(op *txnOperator) {
+func (client *txnClient) addToLeakCheck(op *TtxnOperator) {
 	if client.leakChecker != nil {
 		client.leakChecker.txnOpened(op.txnID, op.option.createBy)
 	}
@@ -607,11 +607,11 @@ func (client *txnClient) IterTxns(fn func(TxnOverview) bool) {
 	}
 }
 
-func (client *txnClient) getAllTxnOperators() []*txnOperator {
+func (client *txnClient) getAllTxnOperators() []*TtxnOperator {
 	client.mu.RLock()
 	defer client.mu.RUnlock()
 
-	ops := make([]*txnOperator, 0, len(client.mu.activeTxns)+len(client.mu.waitActiveTxns))
+	ops := make([]*TtxnOperator, 0, len(client.mu.activeTxns)+len(client.mu.waitActiveTxns))
 	for _, op := range client.mu.activeTxns {
 		ops = append(ops, op)
 	}

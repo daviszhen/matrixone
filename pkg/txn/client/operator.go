@@ -71,14 +71,14 @@ var (
 // WithUserTxn setup user transaction flag. Only user transactions need to be controlled for the maximum
 // number of active transactions.
 func WithUserTxn() TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.user = true
 	}
 }
 
 // WithTxnReadyOnly setup readonly flag
 func WithTxnReadyOnly() TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.readyOnly = true
 	}
 }
@@ -88,28 +88,28 @@ func WithTxnReadyOnly() TxnOption {
 // executed successfully, then the transaction is considered committed and returned directly to the
 // client. Partitions' prepared data are committed asynchronously.
 func WithTxnDisable1PCOpt() TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.disable1PCOpt = true
 	}
 }
 
 // WithTxnCNCoordinator set cn txn coordinator
 func WithTxnCNCoordinator() TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.coordinator = true
 	}
 }
 
 // WithTxnLockService set txn lock service
 func WithTxnLockService(lockService lockservice.LockService) TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.lockService = lockService
 	}
 }
 
 // WithTxnCreateBy set txn create by.Used to check leak txn
 func WithTxnCreateBy(createBy string) TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.createBy = createBy
 	}
 }
@@ -124,7 +124,7 @@ func WithTxnCreateBy(createBy string) TxnOption {
 //  2. Before commit, obviously, the cached write requests needs to be sent to the corresponding TN node
 //     before commit.
 func WithTxnCacheWrite() TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.option.enableCacheWrite = true
 		tc.mu.cachedWrites = make(map[uint64][]txn.TxnRequest)
 	}
@@ -132,26 +132,26 @@ func WithTxnCacheWrite() TxnOption {
 
 // WithSnapshotTS use a spec snapshot timestamp to build TxnOperator.
 func WithSnapshotTS(ts timestamp.Timestamp) TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.mu.txn.SnapshotTS = ts
 	}
 }
 
 // WithTxnMode set txn mode
 func WithTxnMode(value txn.TxnMode) TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.mu.txn.Mode = value
 	}
 }
 
 // WithTxnIsolation set txn isolation
 func WithTxnIsolation(value txn.TxnIsolation) TxnOption {
-	return func(tc *txnOperator) {
+	return func(tc *TtxnOperator) {
 		tc.mu.txn.Isolation = value
 	}
 }
 
-type txnOperator struct {
+type TtxnOperator struct {
 	sender rpc.TxnSender
 	waiter *waiter
 	txnID  []byte
@@ -178,6 +178,8 @@ type txnOperator struct {
 
 		lockSeq   uint64
 		waitLocks map[uint64]Lock
+
+		throwError bool
 	}
 	cannotCleanWorkspace bool
 	workspace            Workspace
@@ -191,8 +193,8 @@ func newTxnOperator(
 	clock clock.Clock,
 	sender rpc.TxnSender,
 	txnMeta txn.TxnMeta,
-	options ...TxnOption) *txnOperator {
-	tc := &txnOperator{sender: sender}
+	options ...TxnOption) *TtxnOperator {
+	tc := &TtxnOperator{sender: sender}
 	tc.mu.txn = txnMeta
 	tc.txnID = txnMeta.ID
 	tc.clock = clock
@@ -213,13 +215,13 @@ func newTxnOperator(
 
 func newTxnOperatorWithSnapshot(
 	sender rpc.TxnSender,
-	snapshot []byte) (*txnOperator, error) {
+	snapshot []byte) (*TtxnOperator, error) {
 	v := &txn.CNTxnSnapshot{}
 	if err := v.Unmarshal(snapshot); err != nil {
 		return nil, err
 	}
 
-	tc := &txnOperator{sender: sender}
+	tc := &TtxnOperator{sender: sender}
 	tc.mu.txn = v.Txn
 	tc.mu.txn.Mirror = true
 	tc.txnID = v.Txn.ID
@@ -233,17 +235,17 @@ func newTxnOperatorWithSnapshot(
 	return tc, nil
 }
 
-func (tc *txnOperator) isUserTxn() bool {
+func (tc *TtxnOperator) isUserTxn() bool {
 	return tc.option.user
 }
 
-func (tc *txnOperator) setWaitActive(v bool) {
+func (tc *TtxnOperator) setWaitActive(v bool) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	tc.mu.waitActive = v
 }
 
-func (tc *txnOperator) waitActive(ctx context.Context) error {
+func (tc *TtxnOperator) waitActive(ctx context.Context) error {
 	start := time.Now()
 	defer func() {
 		v2.TxnWaitActiveDurationHistogram.Observe(time.Since(start).Seconds())
@@ -260,7 +262,7 @@ func (tc *txnOperator) waitActive(ctx context.Context) error {
 	return tc.waiter.wait(ctx)
 }
 
-func (tc *txnOperator) notifyActive() {
+func (tc *TtxnOperator) notifyActive() {
 	if tc.waiter == nil {
 		panic("BUG: notify active on non-waiter txn operator")
 	}
@@ -268,15 +270,21 @@ func (tc *txnOperator) notifyActive() {
 	tc.waiter.notify()
 }
 
-func (tc *txnOperator) AddWorkspace(workspace Workspace) {
+func (tc *TtxnOperator) DebugThrowError() {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.mu.throwError = true
+}
+
+func (tc *TtxnOperator) AddWorkspace(workspace Workspace) {
 	tc.workspace = workspace
 }
 
-func (tc *txnOperator) GetWorkspace() Workspace {
+func (tc *TtxnOperator) GetWorkspace() Workspace {
 	return tc.workspace
 }
 
-func (tc *txnOperator) adjust() {
+func (tc *TtxnOperator) adjust() {
 	if tc.sender == nil {
 		util.GetLogger().Fatal("missing txn sender")
 	}
@@ -291,29 +299,29 @@ func (tc *txnOperator) adjust() {
 	}
 }
 
-func (tc *txnOperator) Txn() txn.TxnMeta {
+func (tc *TtxnOperator) Txn() txn.TxnMeta {
 	return tc.getTxnMeta(false)
 }
 
-func (tc *txnOperator) TxnRef() *txn.TxnMeta {
+func (tc *TtxnOperator) TxnRef() *txn.TxnMeta {
 	tc.mu.RLock()
 	defer tc.mu.RUnlock()
 	return &tc.mu.txn
 }
 
-func (tc *txnOperator) SnapshotTS() timestamp.Timestamp {
+func (tc *TtxnOperator) SnapshotTS() timestamp.Timestamp {
 	tc.mu.RLock()
 	defer tc.mu.RUnlock()
 	return tc.mu.txn.SnapshotTS
 }
 
-func (tc *txnOperator) Status() txn.TxnStatus {
+func (tc *TtxnOperator) Status() txn.TxnStatus {
 	tc.mu.RLock()
 	defer tc.mu.RUnlock()
 	return tc.mu.txn.Status
 }
 
-func (tc *txnOperator) Snapshot() ([]byte, error) {
+func (tc *TtxnOperator) Snapshot() ([]byte, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -331,7 +339,7 @@ func (tc *txnOperator) Snapshot() ([]byte, error) {
 	return snapshot.Marshal()
 }
 
-func (tc *txnOperator) UpdateSnapshot(
+func (tc *TtxnOperator) UpdateSnapshot(
 	ctx context.Context,
 	ts timestamp.Timestamp) error {
 	_, task := gotrace.NewTask(context.TODO(), "transaction.UpdateSnapshot")
@@ -359,7 +367,7 @@ func (tc *txnOperator) UpdateSnapshot(
 	return nil
 }
 
-func (tc *txnOperator) ApplySnapshot(data []byte) error {
+func (tc *TtxnOperator) ApplySnapshot(data []byte) error {
 	_, task := gotrace.NewTask(context.TODO(), "transaction.ApplySnapshot")
 	defer task.End()
 	if !tc.option.coordinator {
@@ -409,7 +417,7 @@ func (tc *txnOperator) ApplySnapshot(data []byte) error {
 	return nil
 }
 
-func (tc *txnOperator) Read(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) Read(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Read")
 	defer task.End()
 	util.LogTxnRead(tc.getTxnMeta(false))
@@ -426,7 +434,7 @@ func (tc *txnOperator) Read(ctx context.Context, requests []txn.TxnRequest) (*rp
 	return tc.trimResponses(tc.handleError(tc.doSend(ctx, requests, false)))
 }
 
-func (tc *txnOperator) Write(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) Write(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Write")
 	defer task.End()
 	util.LogTxnWrite(tc.getTxnMeta(false))
@@ -434,7 +442,7 @@ func (tc *txnOperator) Write(ctx context.Context, requests []txn.TxnRequest) (*r
 	return tc.doWrite(ctx, requests, false)
 }
 
-func (tc *txnOperator) WriteAndCommit(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) WriteAndCommit(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
 	_, task := gotrace.NewTask(context.TODO(), "transaction.WriteAndCommit")
 	defer task.End()
 	util.LogTxnWrite(tc.getTxnMeta(false))
@@ -442,7 +450,7 @@ func (tc *txnOperator) WriteAndCommit(ctx context.Context, requests []txn.TxnReq
 	return tc.doWrite(ctx, requests, true)
 }
 
-func (tc *txnOperator) Commit(ctx context.Context) error {
+func (tc *TtxnOperator) Commit(ctx context.Context) error {
 	tc.commitAt = time.Now()
 	defer func() {
 		v2.TxnCNCommitDurationHistogram.Observe(time.Since(tc.commitAt).Seconds())
@@ -469,7 +477,7 @@ func (tc *txnOperator) Commit(ctx context.Context) error {
 	return nil
 }
 
-func (tc *txnOperator) Rollback(ctx context.Context) error {
+func (tc *TtxnOperator) Rollback(ctx context.Context) error {
 	v2.TxnRollbackCounter.Inc()
 
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Rollback")
@@ -519,7 +527,7 @@ func (tc *txnOperator) Rollback(ctx context.Context) error {
 	return nil
 }
 
-func (tc *txnOperator) AddLockTable(value lock.LockTable) error {
+func (tc *TtxnOperator) AddLockTable(value lock.LockTable) error {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	if tc.mu.txn.Mode != txn.TxnMode_Pessimistic {
@@ -536,19 +544,19 @@ func (tc *txnOperator) AddLockTable(value lock.LockTable) error {
 	return tc.doAddLockTableLocked(value)
 }
 
-func (tc *txnOperator) ResetRetry(retry bool) {
+func (tc *TtxnOperator) ResetRetry(retry bool) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	tc.mu.retry = retry
 }
 
-func (tc *txnOperator) IsRetry() bool {
+func (tc *TtxnOperator) IsRetry() bool {
 	tc.mu.RLock()
 	defer tc.mu.RUnlock()
 	return tc.mu.retry
 }
 
-func (tc *txnOperator) doAddLockTableLocked(value lock.LockTable) error {
+func (tc *TtxnOperator) doAddLockTableLocked(value lock.LockTable) error {
 	for _, l := range tc.mu.lockTables {
 		if l.Table == value.Table {
 			if l.Changed(value) {
@@ -561,7 +569,7 @@ func (tc *txnOperator) doAddLockTableLocked(value lock.LockTable) error {
 	return nil
 }
 
-func (tc *txnOperator) Debug(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) Debug(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
 	for idx := range requests {
 		requests[idx].Method = txn.TxnMethod_DEBUG
 	}
@@ -574,7 +582,7 @@ func (tc *txnOperator) Debug(ctx context.Context, requests []txn.TxnRequest) (*r
 	return tc.trimResponses(tc.handleError(tc.doSend(ctx, requests, false)))
 }
 
-func (tc *txnOperator) doWrite(ctx context.Context, requests []txn.TxnRequest, commit bool) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) doWrite(ctx context.Context, requests []txn.TxnRequest, commit bool) (*rpc.SendResult, error) {
 	for idx := range requests {
 		requests[idx].Method = txn.TxnMethod_Write
 	}
@@ -645,7 +653,7 @@ func (tc *txnOperator) doWrite(ctx context.Context, requests []txn.TxnRequest, c
 	return tc.trimResponses(tc.handleError(tc.doSend(ctx, requests, commit)))
 }
 
-func (tc *txnOperator) updateWritePartitions(requests []txn.TxnRequest, locked bool) {
+func (tc *TtxnOperator) updateWritePartitions(requests []txn.TxnRequest, locked bool) {
 	if len(requests) == 0 {
 		return
 	}
@@ -660,7 +668,7 @@ func (tc *txnOperator) updateWritePartitions(requests []txn.TxnRequest, locked b
 	}
 }
 
-func (tc *txnOperator) addPartitionLocked(tn metadata.TNShard) {
+func (tc *TtxnOperator) addPartitionLocked(tn metadata.TNShard) {
 	for idx := range tc.mu.txn.TNShards {
 		if tc.mu.txn.TNShards[idx].ShardID == tn.ShardID {
 			return
@@ -670,7 +678,7 @@ func (tc *txnOperator) addPartitionLocked(tn metadata.TNShard) {
 	util.LogTxnUpdated(tc.mu.txn)
 }
 
-func (tc *txnOperator) validate(ctx context.Context, locked bool) error {
+func (tc *TtxnOperator) validate(ctx context.Context, locked bool) error {
 	if _, ok := ctx.Deadline(); !ok {
 		util.GetLogger().Fatal("context deadline set")
 	}
@@ -678,19 +686,19 @@ func (tc *txnOperator) validate(ctx context.Context, locked bool) error {
 	return tc.checkStatus(locked)
 }
 
-func (tc *txnOperator) checkStatus(locked bool) error {
+func (tc *TtxnOperator) checkStatus(locked bool) error {
 	if !locked {
 		tc.mu.RLock()
 		defer tc.mu.RUnlock()
 	}
 
-	if tc.mu.closed {
+	if tc.mu.closed || tc.mu.throwError {
 		return moerr.NewTxnClosedNoCtx(tc.txnID)
 	}
 	return nil
 }
 
-func (tc *txnOperator) maybeCacheWrites(requests []txn.TxnRequest, locked bool) bool {
+func (tc *TtxnOperator) maybeCacheWrites(requests []txn.TxnRequest, locked bool) bool {
 	if tc.option.enableCacheWrite {
 		tc.mu.Lock()
 		defer tc.mu.Unlock()
@@ -704,7 +712,7 @@ func (tc *txnOperator) maybeCacheWrites(requests []txn.TxnRequest, locked bool) 
 	return false
 }
 
-func (tc *txnOperator) maybeInsertCachedWrites(ctx context.Context, requests []txn.TxnRequest, locked bool) []txn.TxnRequest {
+func (tc *TtxnOperator) maybeInsertCachedWrites(ctx context.Context, requests []txn.TxnRequest, locked bool) []txn.TxnRequest {
 	if len(requests) == 0 || !tc.option.enableCacheWrite {
 		return requests
 	}
@@ -740,7 +748,7 @@ func (tc *txnOperator) maybeInsertCachedWrites(ctx context.Context, requests []t
 	return newRequests
 }
 
-func (tc *txnOperator) getCachedWritesLocked(tn uint64) ([]txn.TxnRequest, bool) {
+func (tc *TtxnOperator) getCachedWritesLocked(tn uint64) ([]txn.TxnRequest, bool) {
 	writes, ok := tc.mu.cachedWrites[tn]
 	if !ok || len(writes) == 0 {
 		return nil, false
@@ -748,11 +756,11 @@ func (tc *txnOperator) getCachedWritesLocked(tn uint64) ([]txn.TxnRequest, bool)
 	return writes, true
 }
 
-func (tc *txnOperator) clearCachedWritesLocked(tn uint64) {
+func (tc *TtxnOperator) clearCachedWritesLocked(tn uint64) {
 	delete(tc.mu.cachedWrites, tn)
 }
 
-func (tc *txnOperator) getTxnMeta(locked bool) txn.TxnMeta {
+func (tc *TtxnOperator) getTxnMeta(locked bool) txn.TxnMeta {
 	if !locked {
 		tc.mu.RLock()
 		defer tc.mu.RUnlock()
@@ -760,7 +768,7 @@ func (tc *txnOperator) getTxnMeta(locked bool) txn.TxnMeta {
 	return tc.mu.txn
 }
 
-func (tc *txnOperator) doSend(ctx context.Context, requests []txn.TxnRequest, locked bool) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) doSend(ctx context.Context, requests []txn.TxnRequest, locked bool) (*rpc.SendResult, error) {
 	txnMeta := tc.getTxnMeta(locked)
 	for idx := range requests {
 		requests[idx].Txn = txnMeta
@@ -792,7 +800,7 @@ func (tc *txnOperator) doSend(ctx context.Context, requests []txn.TxnRequest, lo
 	return result, nil
 }
 
-func (tc *txnOperator) handleError(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) handleError(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -806,7 +814,7 @@ func (tc *txnOperator) handleError(result *rpc.SendResult, err error) (*rpc.Send
 	return result, nil
 }
 
-func (tc *txnOperator) handleErrorResponse(resp txn.TxnResponse) error {
+func (tc *TtxnOperator) handleErrorResponse(resp txn.TxnResponse) error {
 	switch resp.Method {
 	case txn.TxnMethod_Read:
 		if err := tc.checkResponseTxnStatusForReadWrite(resp); err != nil {
@@ -857,7 +865,7 @@ func (tc *txnOperator) handleErrorResponse(resp txn.TxnResponse) error {
 	}
 }
 
-func (tc *txnOperator) checkResponseTxnStatusForReadWrite(resp txn.TxnResponse) error {
+func (tc *TtxnOperator) checkResponseTxnStatusForReadWrite(resp txn.TxnResponse) error {
 	if resp.TxnError != nil {
 		return nil
 	}
@@ -880,7 +888,7 @@ func (tc *txnOperator) checkResponseTxnStatusForReadWrite(resp txn.TxnResponse) 
 	return nil
 }
 
-func (tc *txnOperator) checkTxnError(txnError *txn.TxnError, possibleErrorMap map[uint16]struct{}) error {
+func (tc *TtxnOperator) checkTxnError(txnError *txn.TxnError, possibleErrorMap map[uint16]struct{}) error {
 	if txnError == nil {
 		return nil
 	}
@@ -899,7 +907,7 @@ func (tc *txnOperator) checkTxnError(txnError *txn.TxnError, possibleErrorMap ma
 	panic(moerr.NewInternalErrorNoCtx("invalid txn error, code %d, msg %s", txnCode, txnError.DebugString()))
 }
 
-func (tc *txnOperator) checkResponseTxnStatusForCommit(resp txn.TxnResponse) error {
+func (tc *TtxnOperator) checkResponseTxnStatusForCommit(resp txn.TxnResponse) error {
 	if resp.TxnError != nil {
 		return nil
 	}
@@ -917,7 +925,7 @@ func (tc *txnOperator) checkResponseTxnStatusForCommit(resp txn.TxnResponse) err
 	}
 }
 
-func (tc *txnOperator) checkResponseTxnStatusForRollback(resp txn.TxnResponse) error {
+func (tc *TtxnOperator) checkResponseTxnStatusForRollback(resp txn.TxnResponse) error {
 	if resp.TxnError != nil {
 		return nil
 	}
@@ -935,7 +943,7 @@ func (tc *txnOperator) checkResponseTxnStatusForRollback(resp txn.TxnResponse) e
 	}
 }
 
-func (tc *txnOperator) trimResponses(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
+func (tc *TtxnOperator) trimResponses(result *rpc.SendResult, err error) (*rpc.SendResult, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -950,7 +958,7 @@ func (tc *txnOperator) trimResponses(result *rpc.SendResult, err error) (*rpc.Se
 	return result, nil
 }
 
-func (tc *txnOperator) unlock(ctx context.Context) {
+func (tc *TtxnOperator) unlock(ctx context.Context) {
 	if !tc.commitAt.IsZero() {
 		v2.TxnCNCommitResponseDurationHistogram.Observe(float64(time.Since(tc.commitAt).Seconds()))
 	}
@@ -978,7 +986,7 @@ func (tc *txnOperator) unlock(ctx context.Context) {
 	}
 }
 
-func (tc *txnOperator) needUnlockLocked() bool {
+func (tc *TtxnOperator) needUnlockLocked() bool {
 	if tc.mu.txn.Mode ==
 		txn.TxnMode_Optimistic {
 		return false
@@ -986,14 +994,14 @@ func (tc *txnOperator) needUnlockLocked() bool {
 	return tc.option.lockService != nil
 }
 
-func (tc *txnOperator) closeLocked() {
+func (tc *TtxnOperator) closeLocked() {
 	if !tc.mu.closed {
 		tc.mu.closed = true
 		tc.triggerEventLocked(ClosedEvent)
 	}
 }
 
-func (tc *txnOperator) AddWaitLock(tableID uint64, rows [][]byte, opt lock.LockOptions) uint64 {
+func (tc *TtxnOperator) AddWaitLock(tableID uint64, rows [][]byte, opt lock.LockOptions) uint64 {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	if tc.mu.waitLocks == nil {
@@ -1011,14 +1019,14 @@ func (tc *txnOperator) AddWaitLock(tableID uint64, rows [][]byte, opt lock.LockO
 	return seq
 }
 
-func (tc *txnOperator) RemoveWaitLock(key uint64) {
+func (tc *TtxnOperator) RemoveWaitLock(key uint64) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
 	delete(tc.mu.waitLocks, key)
 }
 
-func (tc *txnOperator) GetOverview() TxnOverview {
+func (tc *TtxnOperator) GetOverview() TxnOverview {
 	tc.mu.RLock()
 	defer tc.mu.RUnlock()
 
@@ -1030,7 +1038,7 @@ func (tc *txnOperator) GetOverview() TxnOverview {
 	}
 }
 
-func (tc *txnOperator) getWaitLocksLocked() []Lock {
+func (tc *TtxnOperator) getWaitLocksLocked() []Lock {
 
 	if tc.mu.waitLocks == nil {
 		return nil
