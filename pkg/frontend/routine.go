@@ -17,6 +17,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -281,9 +282,11 @@ func (rt *Routine) handleRequest(req *Request) error {
 	})
 
 	if resp, err = executor.ExecRequest(tenantCtx, ses, req); err != nil {
-		logError(ses, ses.GetDebugString(),
-			"Failed to execute request",
-			zap.Error(err))
+		if !strings.Contains(err.Error(), quitStr) {
+			logError(ses, ses.GetDebugString(),
+				"Failed to execute request",
+				zap.Error(err))
+		}
 	}
 
 	if resp != nil {

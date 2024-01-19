@@ -116,7 +116,7 @@ func (s *service) handleCommands(cmds []logservicepb.ScheduleCommand) {
 			s.createSQLLogger(cmd.CreateTaskService)
 			s.upgradeOnce.Do(func() {
 				_ = s.stopper.RunNamedTask("upgrade", func(context.Context) {
-					s.upgrade()
+					//s.upgrade()
 				})
 			})
 		} else if s.gossipNode.Created() && cmd.JoinGossipCluster != nil {

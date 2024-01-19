@@ -124,7 +124,7 @@ func (s *scheduler) allocateTask(ts taskservice.TaskService, t task.AsyncTask, o
 		runtime.ProcessLevelRuntime().Logger().Warn("no CN available")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), taskSchedulerDefaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), taskSchedulerDefaultTimeout*600)
 	defer cancel()
 
 	if err := ts.Allocate(ctx, t, runner); err != nil {

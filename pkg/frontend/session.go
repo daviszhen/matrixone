@@ -2267,10 +2267,10 @@ func (ses *Session) getGlobalSystemVariableValue(varName string) (val interface{
 	return nil, moerr.NewInternalError(ctx, "can not resolve global system variable %s", varName)
 }
 
-func (ses *Session) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, cwIndex, cwsLen int) *Response {
+func (ses *Session) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response {
 	// If the stmt has next stmt, should add SERVER_MORE_RESULTS_EXISTS to the server status.
 	var resp *Response
-	if cwIndex < cwsLen-1 {
+	if !isLastStmt {
 		resp = NewResponse(category, affectedRows, 0, 0,
 			ses.GetServerStatus()|SERVER_MORE_RESULTS_EXISTS, cmd, d)
 	} else {
