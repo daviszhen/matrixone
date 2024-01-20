@@ -125,6 +125,14 @@ type InternalCmdFieldList struct {
 	tableName string
 }
 
+func (icfl *InternalCmdFieldList) ResultType() tree.ResultType {
+	return tree.Status
+}
+
+func (si *InternalCmdFieldList) HandleType() tree.HandleType {
+	return tree.InFrontend
+}
+
 func (icfl *InternalCmdFieldList) String() string {
 	return makeCmdFieldListSql(icfl.tableName)
 }

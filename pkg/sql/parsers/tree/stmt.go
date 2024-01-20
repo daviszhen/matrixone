@@ -20,6 +20,8 @@ type Statement interface {
 	fmt.Stringer
 	NodeFormatter
 	StatementType
+	ResultType() ResultType
+	HandleType() HandleType
 }
 
 type StatementType interface {
@@ -29,8 +31,32 @@ type StatementType interface {
 	GetQueryType() string
 }
 
+type ResultType int
+
+const (
+	RowSet ResultType = iota
+	Status
+	Undefined
+)
+
+type HandleType int
+
+const (
+	InFrontend HandleType = iota
+	InBackend
+	Unknown
+)
+
 type statementImpl struct {
 	Statement
+}
+
+func (si *statementImpl) ResultType() ResultType {
+	return Undefined
+}
+
+func (si *statementImpl) HandleType() HandleType {
+	return Unknown
 }
 
 const (

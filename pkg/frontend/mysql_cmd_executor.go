@@ -2999,24 +2999,12 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	// After separating the functions, the system cannot boot, due to mo_account
 	// not exists.  No clue why, the closure/capture must do some magic.
 
-	//check transaction states
-	switch execCtx.stmt.(type) {
-	case *tree.BeginTransaction:
-		err = ses.TxnBegin()
-		if err != nil {
-			return
-		}
-		RecordStatementTxnID(requestCtx, ses)
-	case *tree.CommitTransaction:
-		err = ses.TxnCommit()
-		if err != nil {
-			return
-		}
-	case *tree.RollbackTransaction:
-		err = ses.TxnRollback()
-		if err != nil {
-			return
-		}
+	switch execCtx.stmt.HandleType() {
+	case tree.InFrontend:
+		return mce.selfHandle(requestCtx, ses, proc, proto, pu, execCtx)
+	case tree.InBackend:
+	case tree.Unknown:
+		return moerr.NewInternalError(requestCtx, "usp handle type for %s", execCtx.sqlOfStmt)
 	}
 
 	switch st := execCtx.stmt.(type) {
@@ -3040,40 +3028,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	selfHandle = false
 
 	switch st := execCtx.stmt.(type) {
-	case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-		selfHandle = true
-	case *tree.SetRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		//switch role
-		err = mce.handleSwitchRole(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.Use:
-		selfHandle = true
-		var v interface{}
-		v, err = ses.GetGlobalVar("lower_case_table_names")
-		if err != nil {
-			return
-		}
-		st.Name.SetConfig(v.(int64))
-		//use database
-		err = mce.handleChangeDB(requestCtx, st.Name.Compare())
-		if err != nil {
-			return
-		}
-		err = changeVersion(requestCtx, ses, st.Name.Compare())
-		if err != nil {
-			return
-		}
-	case *tree.MoDump:
-		selfHandle = true
-		//dump
-		err = mce.handleDump(requestCtx, st)
-		if err != nil {
-			return
-		}
 	case *tree.CreateDatabase:
 		err = inputNameIsInvalid(proc.Ctx, string(st.Name))
 		if err != nil {
@@ -3094,103 +3048,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		if string(st.Name) == ses.GetDatabaseName() {
 			ses.SetDatabaseName("")
 		}
-	case *tree.PrepareStmt:
-		selfHandle = true
-		execCtx.prepareStmt, err = mce.handlePrepareStmt(requestCtx, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, execCtx.prepareStmt.PrepareStmt, execCtx.prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
-		if err != nil {
-			mce.GetSession().RemovePrepareStmt(execCtx.prepareStmt.Name)
-			return
-		}
-	case *tree.PrepareString:
-		selfHandle = true
-		execCtx.prepareStmt, err = mce.handlePrepareString(requestCtx, st)
-		if err != nil {
-			return
-		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, execCtx.prepareStmt.PrepareStmt, execCtx.prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
-		if err != nil {
-			mce.GetSession().RemovePrepareStmt(execCtx.prepareStmt.Name)
-			return
-		}
-	case *tree.CreateConnector:
-		selfHandle = true
-		err = mce.handleCreateConnector(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.PauseDaemonTask:
-		selfHandle = true
-		err = mce.handlePauseDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.CancelDaemonTask:
-		selfHandle = true
-		err = mce.handleCancelDaemonTask(requestCtx, st.TaskID)
-		if err != nil {
-			return
-		}
-	case *tree.ResumeDaemonTask:
-		selfHandle = true
-		err = mce.handleResumeDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.DropConnector:
-		selfHandle = true
-		err = mce.handleDropConnector(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.ShowConnectors:
-		selfHandle = true
-		if err = mce.handleShowConnectors(requestCtx, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.Deallocate:
-		selfHandle = true
-		err = mce.handleDeallocate(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.Reset:
-		selfHandle = true
-		err = mce.handleReset(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.SetVar:
-		selfHandle = true
-		err = mce.handleSetVar(requestCtx, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		}
-	case *tree.ShowVariables:
-		selfHandle = true
-		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
-		if err != nil {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		selfHandle = true
-		err = mce.handleShowErrors(execCtx.isLastStmt)
-		if err != nil {
-			return
-		}
-	case *tree.AnalyzeStmt:
-		selfHandle = true
-		if err = mce.handleAnalyzeStmt(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.ExplainStmt:
-		selfHandle = true
-		if err = mce.handleExplainStmt(requestCtx, st); err != nil {
-			return
-		}
+
 	case *tree.ExplainAnalyze:
 		ses.SetData(nil)
 	case *tree.ShowTableStatus:
@@ -3440,6 +3298,12 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 
 	mrs = ses.GetMysqlResultSet()
 	ep := ses.GetExportConfig()
+	switch execCtx.stmt.ResultType() {
+	case tree.RowSet:
+	case tree.Status:
+	case tree.Undefined:
+		return moerr.NewInternalError(requestCtx, "usp result type for %s", execCtx.sqlOfStmt)
+	}
 	// cw.Compile might rewrite sql, here we fetch the latest version
 	switch statement := execCtx.stmt.(type) {
 	//produce result set

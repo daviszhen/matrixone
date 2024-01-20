@@ -35,6 +35,13 @@ type Select struct {
 	SelectLockInfo *SelectLockInfo
 }
 
+func (node *Select) ResultType() ResultType {
+	if node.Ep != nil {
+		return Status
+	}
+	return RowSet
+}
+
 func (node *Select) Format(ctx *FmtCtx) {
 	if node.With != nil {
 		node.With.Format(ctx)
