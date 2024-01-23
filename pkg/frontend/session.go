@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	"github.com/matrixorigin/matrixone/pkg/util"
 	"runtime"
 	"strings"
@@ -292,6 +293,15 @@ type Session struct {
 	timestampMap map[TS]time.Time
 
 	counters [100]*util.DebugCounter
+}
+
+var _ client.GetSessionDebug = &Session{}
+
+func (ses *Session) Get() string {
+	if ses == nil {
+		return ""
+	}
+	return ses.GetDebugString()
 }
 
 func (ses *Session) ResetCounters() {
@@ -598,7 +608,21 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	ses.counters[util.PosDocomquery] = util.NewDebugCounter(util.PosDocomquery)
 	ses.counters[util.PosExecutestmt] = util.NewDebugCounter(util.PosExecutestmt)
 	ses.counters[util.PosCompile] = util.NewDebugCounter(util.PosCompile)
-	ses.counters[util.PosRun] = util.NewDebugCounter(util.PosRun)
+	ses.counters[util.PosLocate1] = util.NewDebugCounter(util.PosLocate1)
+	ses.counters[util.PosLocate2] = util.NewDebugCounter(util.PosLocate2)
+	ses.counters[util.PosLocate3] = util.NewDebugCounter(util.PosLocate3)
+	ses.counters[util.PosLocate4] = util.NewDebugCounter(util.PosLocate4)
+	ses.counters[util.PosLocate5] = util.NewDebugCounter(util.PosLocate5)
+	ses.counters[util.PosLocate6] = util.NewDebugCounter(util.PosLocate6)
+	ses.counters[util.PosLocate7] = util.NewDebugCounter(util.PosLocate7)
+	ses.counters[util.PosLocate8] = util.NewDebugCounter(util.PosLocate8)
+	ses.counters[util.PosLocate9] = util.NewDebugCounter(util.PosLocate9)
+	ses.counters[util.PosLocate10] = util.NewDebugCounter(util.PosLocate10)
+	ses.counters[util.PosLocate11] = util.NewDebugCounter(util.PosLocate11)
+	ses.counters[util.PosLocate12] = util.NewDebugCounter(util.PosLocate12)
+	ses.counters[util.PosLocate13] = util.NewDebugCounter(util.PosLocate13)
+	ses.counters[util.PosLocate14] = util.NewDebugCounter(util.PosLocate14)
+	ses.counters[util.PosLocate15] = util.NewDebugCounter(util.PosLocate15)
 	if isNotBackgroundSession {
 		ses.sysVars = gSysVars.CopySysVarsToSession()
 		ses.userDefinedVars = make(map[string]*UserDefinedVar)

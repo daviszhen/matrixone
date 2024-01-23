@@ -2722,6 +2722,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 
 	//response the client
 	respClientFunc := func() error {
+		counter1 := ses.counters[util2.PosLocate15]
+		counter1.AddEnter()
+		defer counter1.AddExit()
 		var rspLen uint64
 		if runResult != nil {
 			rspLen = runResult.AffectRows
@@ -2886,6 +2889,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			ses.SetOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
 		}
 		logError(ses, ses.GetDebugString(), err.Error())
+		counter1 := ses.counters[util2.PosLocate14]
+		counter1.AddEnter()
+		defer counter1.AddExit()
 		txnErr := ses.TxnRollbackSingleStatement(stmt)
 		if txnErr != nil {
 			logStatementStatus(requestCtx, ses, stmt, fail, txnErr)
@@ -2905,6 +2911,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			}
 		}()
 
+		counter1 := ses.counters[util2.PosLocate13]
+		counter1.AddEnter()
+		defer counter1.AddExit()
+
 		//load data handle txn failure internally
 		incStatementCounter(tenant, stmt)
 		retErr = ses.TxnCommitSingleStatement(stmt)
@@ -2920,6 +2930,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		if r := recover(); r != nil {
 			err = moerr.ConvertPanicError(requestCtx, r)
 		}
+
+		counter1 := ses.counters[util2.PosLocate12]
+		counter1.AddEnter()
+		defer counter1.AddExit()
 
 		if err == nil {
 			err = commitTxnFunc()
@@ -3415,6 +3429,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
+	counter1 := ses.counters[util2.PosLocate1]
+	counter1.AddEnter()
+	defer counter1.AddExit()
+
 	mrs = ses.GetMysqlResultSet()
 	ep := ses.GetExportConfig()
 	// cw.Compile might rewrite sql, here we fetch the latest version
@@ -3448,9 +3466,16 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 				Producing the data row and sending the data row
 			*/
 			// todo: add trace
+			counter2 := ses.counters[util2.PosLocate2]
+			counter2.AddEnter()
+			defer counter2.AddExit()
 			if _, err = runner.Run(0); err != nil {
 				return
 			}
+
+			counter2 = ses.counters[util2.PosLocate3]
+			counter2.AddEnter()
+			defer counter2.AddExit()
 
 			// only log if run time is longer than 1s
 			if time.Since(runBegin) > time.Second {
@@ -3527,10 +3552,15 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 				Producing the data row and sending the data row
 			*/
 			// todo: add trace
+			counter2 := ses.counters[util2.PosLocate4]
+			counter2.AddEnter()
+			defer counter2.AddExit()
 			if _, err = runner.Run(0); err != nil {
 				return
 			}
-
+			counter2 = ses.counters[util2.PosLocate5]
+			counter2.AddEnter()
+			defer counter2.AddExit()
 			// only log if run time is longer than 1s
 			if time.Since(runBegin) > time.Second {
 				logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
@@ -3597,11 +3627,16 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			Step 2: Start pipeline
 			Producing the data row and sending the data row
 		*/
+		counter2 := ses.counters[util2.PosLocate6]
+		counter2.AddEnter()
+		defer counter2.AddExit()
 		// todo: add trace
 		if _, err = runner.Run(0); err != nil {
 			return
 		}
-
+		counter2 = ses.counters[util2.PosLocate7]
+		counter2.AddEnter()
+		defer counter2.AddExit()
 		switch ses.GetShowStmtType() {
 		case ShowTableStatus:
 			if err = handleShowTableStatus(ses, statement.(*tree.ShowTableStatus), proc); err != nil {
@@ -3656,7 +3691,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 				})
 			}
 		}
-
+		counter3 := ses.counters[util2.PosLocate8]
+		counter3.AddEnter()
+		defer counter3.AddExit()
 		if runResult, err = runner.Run(0); err != nil {
 			if loadLocalErrGroup != nil { // release resources
 				err2 := proc.LoadLocalReader.Close()
@@ -3674,6 +3711,10 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			}
 			return
 		}
+
+		counter4 := ses.counters[util2.PosLocate9]
+		counter4.AddEnter()
+		defer counter4.AddExit()
 
 		if loadLocalErrGroup != nil {
 			if err = loadLocalErrGroup.Wait(); err != nil { //executor success, but processLoadLocal goroutine failed
@@ -3741,10 +3782,15 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		/*
 			Step 1: Start
 		*/
+		counter4 := ses.counters[util2.PosLocate10]
+		counter4.AddEnter()
+		defer counter4.AddExit()
 		if _, err = runner.Run(0); err != nil {
 			return
 		}
-
+		counter2 := ses.counters[util2.PosLocate11]
+		counter2.AddEnter()
+		defer counter2.AddExit()
 		// only log if run time is longer than 1s
 		if time.Since(runBegin) > time.Second {
 			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))

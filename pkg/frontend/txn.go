@@ -160,7 +160,8 @@ func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 		client.WithTxnCreateBy(fmt.Sprintf("frontend-session-%p sesInfo(%s) background:%v ",
 			th.ses,
 			th.ses.GetDebugString(),
-			th.ses.IsBackgroundSession())))
+			th.ses.IsBackgroundSession())),
+			client.WithGetSession(th.ses))
 
 	if th.ses != nil && th.ses.GetFromRealUser() {
 		opts = append(opts,

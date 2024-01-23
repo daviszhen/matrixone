@@ -79,6 +79,12 @@ func WithUserTxn() TxnOption {
 	}
 }
 
+func WithGetSession(debug GetSessionDebug) TxnOption {
+	return func(tc *txnOperator) {
+		tc.option.getSesDebug = debug
+	}
+}
+
 // WithTxnReadyOnly setup readonly flag
 func WithTxnReadyOnly() TxnOption {
 	return func(tc *txnOperator) {
@@ -167,6 +173,7 @@ type txnOperator struct {
 		coordinator      bool
 		createBy         string
 		lockService      lockservice.LockService
+		getSesDebug      GetSessionDebug
 	}
 
 	mu struct {
@@ -1101,6 +1108,10 @@ func (tc *txnOperator) counter() string {
 			bb.WriteByte(' ')
 		}
 	}
+	if tc.option.getSesDebug != nil {
+		bb.WriteString(tc.option.getSesDebug.Get())
+	}
+
 	return bb.String()
 }
 

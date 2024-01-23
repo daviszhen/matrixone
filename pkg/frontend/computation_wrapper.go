@@ -443,9 +443,6 @@ func (cwft *TxnComputationWrapper) GetUUID() []byte {
 }
 
 func (cwft *TxnComputationWrapper) Run(ts uint64) (*util2.RunResult, error) {
-	counter := cwft.ses.counters[util2.PosRun]
-	counter.AddEnter()
-	defer counter.AddExit()
 	logDebug(cwft.ses, cwft.ses.GetDebugString(), "compile.Run begin")
 	defer func() {
 		logDebug(cwft.ses, cwft.ses.GetDebugString(), "compile.Run end")

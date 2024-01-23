@@ -167,6 +167,10 @@ type TxnOperator interface {
 	SetLastSql(sql string)
 }
 
+type GetSessionDebug interface {
+	Get() string
+}
+
 // TxnIDGenerator txn id generator
 type TxnIDGenerator interface {
 	// Generate returns a unique transaction id
