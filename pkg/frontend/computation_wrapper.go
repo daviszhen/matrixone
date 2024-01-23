@@ -190,6 +190,9 @@ func (cwft *TxnComputationWrapper) GetServerStatus() uint16 {
 }
 
 func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
+	counter := cwft.ses.counters[util2.PosCompile]
+	counter.AddEnter()
+	defer counter.AddExit()
 	var span trace.Span
 	requestCtx, span = trace.Start(requestCtx, "TxnComputationWrapper.Compile",
 		trace.WithKind(trace.SpanKindStatement))
@@ -440,6 +443,9 @@ func (cwft *TxnComputationWrapper) GetUUID() []byte {
 }
 
 func (cwft *TxnComputationWrapper) Run(ts uint64) (*util2.RunResult, error) {
+	counter := cwft.ses.counters[util2.PosRun]
+	counter.AddEnter()
+	defer counter.AddExit()
 	logDebug(cwft.ses, cwft.ses.GetDebugString(), "compile.Run begin")
 	defer func() {
 		logDebug(cwft.ses, cwft.ses.GetDebugString(), "compile.Run end")

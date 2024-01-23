@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/util"
 	"runtime"
 	"strings"
 	"sync"
@@ -289,6 +290,14 @@ type Session struct {
 
 	// timestampMap record timestamp for statistical purposes
 	timestampMap map[TS]time.Time
+
+	counters [100]*util.DebugCounter
+}
+
+func (ses *Session) ResetCounters() {
+	for _, counter := range ses.counters {
+		counter.Reset()
+	}
 }
 
 func (ses *Session) ClearStmtProfile() {
@@ -585,6 +594,11 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 
 		timestampMap: map[TS]time.Time{},
 	}
+	ses.counters[util.PosExecreq] = util.NewDebugCounter(util.PosExecreq)
+	ses.counters[util.PosDocomquery] = util.NewDebugCounter(util.PosDocomquery)
+	ses.counters[util.PosExecutestmt] = util.NewDebugCounter(util.PosExecutestmt)
+	ses.counters[util.PosCompile] = util.NewDebugCounter(util.PosCompile)
+	ses.counters[util.PosRun] = util.NewDebugCounter(util.PosRun)
 	if isNotBackgroundSession {
 		ses.sysVars = gSysVars.CopySysVarsToSession()
 		ses.userDefinedVars = make(map[string]*UserDefinedVar)
@@ -690,6 +704,9 @@ func (ses *Session) Close() {
 	}
 
 	ses.timestampMap = nil
+	for i, _ := range ses.counters {
+		ses.counters[i] = nil
+	}
 }
 
 // BackgroundSession executing the sql in background
@@ -835,7 +852,15 @@ func (ses *Session) UpdateDebugString() {
 func (ses *Session) GetDebugString() string {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	return ses.debugStr
+	sb := strings.Builder{}
+	for _, counter := range ses.counters {
+		s := counter.String()
+		if len(s) != 0 {
+			sb.WriteString(counter.String())
+			sb.WriteByte(' ')
+		}
+	}
+	return ses.debugStr + sb.String()
 }
 
 func (ses *Session) EnableInitTempEngine() {

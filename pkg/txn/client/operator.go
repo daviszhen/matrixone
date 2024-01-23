@@ -19,8 +19,9 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"fmt"
+	util2 "github.com/matrixorigin/matrixone/pkg/util"
 	gotrace "runtime/trace"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -188,12 +189,8 @@ type txnOperator struct {
 	clock                clock.Clock
 	createAt             time.Time
 	commitAt             time.Time
-	commitEnter          atomic.Int64
-	commitExit           atomic.Int64
-	rollbackEnter        atomic.Int64
-	rollbackExit         atomic.Int64
 	lastSql              atomic.Value
-
+	counters             [100]*util2.DebugCounter
 }
 
 func newTxnOperator(
@@ -217,6 +214,17 @@ func newTxnOperator(
 	} else {
 		v2.TxnInternalCounter.Inc()
 	}
+	tc.counters[util2.PosGetOverview] = util2.NewDebugCounter(util2.PosGetOverview)
+	tc.counters[util2.PosTxn] = util2.NewDebugCounter(util2.PosTxn)
+	tc.counters[util2.PosSnapshot] = util2.NewDebugCounter(util2.PosSnapshot)
+	tc.counters[util2.PosUpdateSnapshot] = util2.NewDebugCounter(util2.PosUpdateSnapshot)
+	tc.counters[util2.PosApplySnapshot] = util2.NewDebugCounter(util2.PosApplySnapshot)
+	tc.counters[util2.PosRead] = util2.NewDebugCounter(util2.PosRead)
+	tc.counters[util2.PosWrite] = util2.NewDebugCounter(util2.PosWrite)
+	tc.counters[util2.PosWriteAndCommit] = util2.NewDebugCounter(util2.PosWriteAndCommit)
+	tc.counters[util2.PosCommit] = util2.NewDebugCounter(util2.PosCommit)
+	tc.counters[util2.PosRollback] = util2.NewDebugCounter(util2.PosRollback)
+	tc.counters[util2.PosAddLockTable] = util2.NewDebugCounter(util2.PosAddLockTable)
 	return tc
 }
 
@@ -301,6 +309,9 @@ func (tc *txnOperator) adjust() {
 }
 
 func (tc *txnOperator) Txn() txn.TxnMeta {
+	counter := tc.counters[util2.PosTxn]
+	counter.AddEnter()
+	defer counter.AddExit()
 	return tc.getTxnMeta(false)
 }
 
@@ -323,6 +334,9 @@ func (tc *txnOperator) Status() txn.TxnStatus {
 }
 
 func (tc *txnOperator) Snapshot() ([]byte, error) {
+	counter := tc.counters[util2.PosSnapshot]
+	counter.AddEnter()
+	defer counter.AddExit()
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -343,6 +357,9 @@ func (tc *txnOperator) Snapshot() ([]byte, error) {
 func (tc *txnOperator) UpdateSnapshot(
 	ctx context.Context,
 	ts timestamp.Timestamp) error {
+	counter := tc.counters[util2.PosUpdateSnapshot]
+	counter.AddEnter()
+	defer counter.AddExit()
 	_, task := gotrace.NewTask(context.TODO(), "transaction.UpdateSnapshot")
 	defer task.End()
 	tc.mu.Lock()
@@ -369,6 +386,9 @@ func (tc *txnOperator) UpdateSnapshot(
 }
 
 func (tc *txnOperator) ApplySnapshot(data []byte) error {
+	counter := tc.counters[util2.PosApplySnapshot]
+	counter.AddEnter()
+	defer counter.AddExit()
 	_, task := gotrace.NewTask(context.TODO(), "transaction.ApplySnapshot")
 	defer task.End()
 	if !tc.option.coordinator {
@@ -419,6 +439,9 @@ func (tc *txnOperator) ApplySnapshot(data []byte) error {
 }
 
 func (tc *txnOperator) Read(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+	counter := tc.counters[util2.PosRead]
+	counter.AddEnter()
+	defer counter.AddExit()
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Read")
 	defer task.End()
 	util.LogTxnRead(tc.getTxnMeta(false))
@@ -436,6 +459,9 @@ func (tc *txnOperator) Read(ctx context.Context, requests []txn.TxnRequest) (*rp
 }
 
 func (tc *txnOperator) Write(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+	counter := tc.counters[util2.PosWrite]
+	counter.AddEnter()
+	defer counter.AddExit()
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Write")
 	defer task.End()
 	util.LogTxnWrite(tc.getTxnMeta(false))
@@ -444,6 +470,9 @@ func (tc *txnOperator) Write(ctx context.Context, requests []txn.TxnRequest) (*r
 }
 
 func (tc *txnOperator) WriteAndCommit(ctx context.Context, requests []txn.TxnRequest) (*rpc.SendResult, error) {
+	counter := tc.counters[util2.PosWriteAndCommit]
+	counter.AddEnter()
+	defer counter.AddExit()
 	_, task := gotrace.NewTask(context.TODO(), "transaction.WriteAndCommit")
 	defer task.End()
 	util.LogTxnWrite(tc.getTxnMeta(false))
@@ -452,6 +481,9 @@ func (tc *txnOperator) WriteAndCommit(ctx context.Context, requests []txn.TxnReq
 }
 
 func (tc *txnOperator) Commit(ctx context.Context) error {
+	counter := tc.counters[util2.PosCommit]
+	counter.AddEnter()
+	defer counter.AddExit()
 	tc.commitAt = time.Now()
 	defer func() {
 		v2.TxnCNCommitDurationHistogram.Observe(time.Since(tc.commitAt).Seconds())
@@ -459,8 +491,6 @@ func (tc *txnOperator) Commit(ctx context.Context) error {
 
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Commit")
 	defer task.End()
-	tc.enterCommit()
-	defer tc.exitCommit()
 	util.LogTxnCommit(tc.getTxnMeta(false))
 
 	if tc.option.readyOnly {
@@ -481,12 +511,13 @@ func (tc *txnOperator) Commit(ctx context.Context) error {
 }
 
 func (tc *txnOperator) Rollback(ctx context.Context) error {
+	counter := tc.counters[util2.PosRollback]
+	counter.AddEnter()
+	defer counter.AddExit()
 	v2.TxnRollbackCounter.Inc()
 
 	_, task := gotrace.NewTask(context.TODO(), "transaction.Rollback")
 	defer task.End()
-	tc.enterRollback()
-	defer tc.exitRollback()
 	txnMeta := tc.getTxnMeta(false)
 	util.LogTxnRollback(txnMeta)
 	if tc.workspace != nil && !tc.cannotCleanWorkspace {
@@ -533,6 +564,9 @@ func (tc *txnOperator) Rollback(ctx context.Context) error {
 }
 
 func (tc *txnOperator) AddLockTable(value lock.LockTable) error {
+	counter := tc.counters[util2.PosAddLockTable]
+	counter.AddEnter()
+	defer counter.AddExit()
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	if tc.mu.txn.Mode != txn.TxnMode_Pessimistic {
@@ -1032,9 +1066,11 @@ func (tc *txnOperator) RemoveWaitLock(key uint64) {
 }
 
 func (tc *txnOperator) GetOverview() TxnOverview {
+	counter := tc.counters[util2.PosGetOverview]
+	counter.AddEnter()
+	defer counter.AddExit()
 	tc.mu.RLock()
 	defer tc.mu.RUnlock()
-
 	return TxnOverview{
 		CreateAt:  tc.createAt,
 		Meta:      tc.mu.txn,
@@ -1056,28 +1092,16 @@ func (tc *txnOperator) getWaitLocksLocked() []Lock {
 	return values
 }
 
-func (tc *txnOperator) enterCommit() {
-	tc.commitEnter.Add(1)
-}
-
-func (tc *txnOperator) exitCommit() {
-	tc.commitEnter.Add(1)
-}
-
-func (tc *txnOperator) enterRollback() {
-	tc.rollbackEnter.Add(1)
-}
-
-func (tc *txnOperator) exitRollback() {
-	tc.rollbackExit.Add(1)
-}
-
 func (tc *txnOperator) counter() string {
-	return fmt.Sprintf("commitEnter:%d commitExit:%d rollbackEnter:%d rollbackExit:%d",
-		tc.commitEnter.Load(),
-		tc.commitExit.Load(),
-		tc.rollbackEnter.Load(),
-		tc.rollbackExit.Load())
+	bb := strings.Builder{}
+	for _, counter := range tc.counters {
+		s := counter.String()
+		if len(s) != 0 {
+			bb.WriteString(s)
+			bb.WriteByte(' ')
+		}
+	}
+	return bb.String()
 }
 
 func (tc *txnOperator) SetLastSql(sql string) {

@@ -219,7 +219,7 @@ func (rt *Routine) handleRequest(req *Request) error {
 	rt.setCancelRequestFunc(cancelRequestFunc)
 	ses = rt.getSession()
 	ses.UpdateDebugString()
-
+	ses.ResetCounters()
 	if rt.needPrintSessionInfo() {
 		logInfof(ses.GetDebugString(), "mo received first request")
 	}

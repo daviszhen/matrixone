@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"math"
 	"testing"
@@ -798,4 +799,13 @@ func TestSession_updateTimeZone(t *testing.T) {
 	err = updateTimeZone(ses, ses.GetSysVars(), "time_zone", "")
 	assert.NoError(t, err)
 	assert.Equal(t, ses.GetTimeZone().String(), "UTC")
+}
+
+func TestSessionCounter(t *testing.T) {
+	sc := &DebugCounter{
+		info: "test",
+	}
+	sc.AddEnter()
+	sc.AddExit()
+	fmt.Println(sc)
 }

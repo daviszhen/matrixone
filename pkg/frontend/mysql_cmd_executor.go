@@ -2661,7 +2661,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.executeStmt",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(ses.GetTxnId(), ses.GetStmtId(), ses.GetSqlOfStmt()))
-
+	counter := ses.counters[util2.PosExecutestmt]
+	counter.AddEnter()
+	defer counter.AddExit()
 	ses.SetQueryInProgress(true)
 	ses.SetQueryStart(time.Now())
 	ses.SetQueryInExecute(true)
@@ -3782,6 +3784,9 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 	requestCtx = appendStatementAt(requestCtx, beginInstant)
 
 	ses := mce.GetSession()
+	counter := ses.counters[util2.PosDocomquery]
+	counter.AddEnter()
+	defer counter.AddExit()
 	input.genSqlSourceType(ses)
 	ses.SetShowStmtType(NotShowStatement)
 	proto := ses.GetMysqlProtocol()
@@ -4102,6 +4107,9 @@ func (mce *MysqlCmdExecutor) setResponse(cwIndex, cwsLen int, rspLen uint64) *Re
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
 func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
+	counter := ses.counters[util2.PosExecreq]
+	counter.AddEnter()
+	defer counter.AddExit()
 	defer func() {
 		if e := recover(); e != nil {
 			moe, ok := e.(*moerr.Error)
