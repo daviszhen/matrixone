@@ -2988,7 +2988,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	var cmpBegin time.Time
 	var ret interface{}
 	var runner ComputationRunner
-	var selfHandle bool
 	var columns []interface{}
 	var mrs *MysqlResultSet
 	var loadLocalErrGroup *errgroup.Group
@@ -3025,8 +3024,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	}
 
-	selfHandle = false
-
 	switch st := execCtx.stmt.(type) {
 	case *tree.CreateDatabase:
 		err = inputNameIsInvalid(proc.Ctx, string(st.Name))
@@ -3054,187 +3051,11 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	case *tree.ShowTableStatus:
 		ses.SetShowStmtType(ShowTableStatus)
 		ses.SetData(nil)
-	case *InternalCmdFieldList:
-		selfHandle = true
-		if err = mce.handleCmdFieldList(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreatePublication:
-		selfHandle = true
-		if err = mce.handleCreatePublication(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterPublication:
-		selfHandle = true
-		if err = mce.handleAlterPublication(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropPublication:
-		selfHandle = true
-		if err = mce.handleDropPublication(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.ShowSubscriptions:
-		selfHandle = true
-		if err = mce.handleShowSubscriptions(requestCtx, st, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.CreateStage:
-		selfHandle = true
-		if err = mce.handleCreateStage(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropStage:
-		selfHandle = true
-		if err = mce.handleDropStage(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterStage:
-		selfHandle = true
-		if err = mce.handleAlterStage(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateAccount:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleCreateAccount(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropAccount:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleDropAccount(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterAccount:
-		ses.InvalidatePrivilegeCache()
-		selfHandle = true
-		if err = mce.handleAlterAccount(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterDataBaseConfig:
-		ses.InvalidatePrivilegeCache()
-		selfHandle = true
-		if st.IsAccountLevel {
-			if err = mce.handleAlterAccountConfig(requestCtx, ses, st); err != nil {
-				return
-			}
-		} else {
-			if err = mce.handleAlterDataBaseConfig(requestCtx, ses, st); err != nil {
-				return
-			}
-		}
-	case *tree.CreateUser:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleCreateUser(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropUser:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleDropUser(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterUser: //TODO
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleAlterUser(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleCreateRole(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleDropRole(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateFunction:
-		selfHandle = true
-		if err = st.Valid(); err != nil {
-			return err
-		}
-		if err = mce.handleCreateFunction(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropFunction:
-		selfHandle = true
-		if err = mce.handleDropFunction(requestCtx, st, proc); err != nil {
-			return
-		}
-	case *tree.CreateProcedure:
-		selfHandle = true
-		if err = mce.handleCreateProcedure(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.DropProcedure:
-		selfHandle = true
-		if err = mce.handleDropProcedure(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.CallStmt:
-		selfHandle = true
-		if err = mce.handleCallProcedure(requestCtx, st, proc); err != nil {
-			return
-		}
-	case *tree.Grant:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		switch st.Typ {
-		case tree.GrantTypeRole:
-			if err = mce.handleGrantRole(requestCtx, &st.GrantRole); err != nil {
-				return
-			}
-		case tree.GrantTypePrivilege:
-			if err = mce.handleGrantPrivilege(requestCtx, &st.GrantPrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Revoke:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		switch st.Typ {
-		case tree.RevokeTypeRole:
-			if err = mce.handleRevokeRole(requestCtx, &st.RevokeRole); err != nil {
-				return
-			}
-		case tree.RevokeTypePrivilege:
-			if err = mce.handleRevokePrivilege(requestCtx, &st.RevokePrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Kill:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = mce.handleKill(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.ShowAccounts:
-		selfHandle = true
-		if err = mce.handleShowAccounts(requestCtx, st, execCtx.isLastStmt); err != nil {
-			return
-		}
 	case *tree.Load:
 		if st.Local {
 			proc.LoadLocalReader, loadLocalWriter = io.Pipe()
 		}
-	case *tree.ShowBackendServers:
-		selfHandle = true
-		if err = mce.handleShowBackendServers(requestCtx, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.SetTransaction:
-		selfHandle = true
-		//TODO: handle set transaction
-	case *tree.LockTableStmt:
-		selfHandle = true
-	case *tree.UnLockTableStmt:
-		selfHandle = true
+
 	case *tree.ShowGrants:
 		if len(st.Username) == 0 {
 			st.Username = execCtx.userName
@@ -3242,20 +3063,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		if len(st.Hostname) == 0 || st.Hostname == "%" {
 			st.Hostname = rootHost
 		}
-	case *tree.BackupStart:
-		selfHandle = true
-		if err = mce.handleStartBackup(requestCtx, st); err != nil {
-			return
-		}
-	case *tree.EmptyStmt:
-		selfHandle = true
-		if err = mce.handleEmptyStmt(requestCtx, st); err != nil {
-			return
-		}
-	}
-
-	if selfHandle {
-		return
 	}
 
 	cmpBegin = time.Now()
