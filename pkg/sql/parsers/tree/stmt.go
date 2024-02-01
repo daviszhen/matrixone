@@ -36,6 +36,7 @@ type ResultType int
 const (
 	RowSet ResultType = iota
 	Status
+	NoResp //like COM_QUIT, Deallocate
 	Undefined
 )
 
@@ -368,5 +369,93 @@ func (node *EmptyStmt) HandleType() HandleType {
 }
 
 func (node *EmptyStmt) ResultType() ResultType {
+	return Status
+}
+
+func (node *prepareImpl) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *prepareImpl) ResultType() ResultType {
+	return Undefined
+}
+
+func (node *Execute) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *Execute) ResultType() ResultType {
+	return Undefined
+}
+
+func (node *Deallocate) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *Deallocate) ResultType() ResultType {
+	return NoResp
+}
+
+func (node *Update) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *Update) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateDatabase) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *CreateDatabase) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateTable) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *CreateTable) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateView) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *CreateView) ResultType() ResultType {
+	return Status
+}
+
+func (node *ShowDatabases) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowDatabases) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowTables) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowTables) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowCreateTable) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowCreateTable) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *Insert) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *Insert) ResultType() ResultType {
 	return Status
 }

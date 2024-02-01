@@ -2744,6 +2744,8 @@ func TestValid(t *testing.T) {
 			t.Errorf("Parse(%q) err: %v", tcase.input, err)
 			continue
 		}
+		ast.HandleType()
+		ast.ResultType()
 		out := tree.String(ast, dialect.MYSQL)
 		if tcase.output != out {
 			t.Errorf("Parsing failed. \nExpected/Got:\n%s\n%s", tcase.output, out)

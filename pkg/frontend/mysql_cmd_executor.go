@@ -2680,9 +2680,9 @@ func (mce *MysqlCmdExecutor) finishTxnFunc(requestCtx context.Context,
 	execCtx *ExecCtx) (err error) {
 	//TODO: fixme
 	// First recover all panics.   If paniced, we will abort.
-	if r := recover(); r != nil {
-		err = moerr.ConvertPanicError(requestCtx, r)
-	}
+	//if r := recover(); r != nil {
+	//	err = moerr.ConvertPanicError(requestCtx, r)
+	//}
 
 	if execErr == nil {
 		//1. commit txn
@@ -2706,9 +2706,9 @@ func (mce *MysqlCmdExecutor) commitTxnFunc(requestCtx context.Context,
 	// Call a defer function -- if TxnCommitSingleStatement paniced, we
 	// want to catch it and convert it to an error.
 	defer func() {
-		if r := recover(); r != nil {
-			retErr = moerr.ConvertPanicError(requestCtx, r)
-		}
+		//if r := recover(); r != nil {
+		//	retErr = moerr.ConvertPanicError(requestCtx, r)
+		//}
 	}()
 
 	//load data handle txn failure internally
@@ -3035,6 +3035,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		return mce.selfHandle(requestCtx, ses, proc, proto, pu, execCtx)
 	case tree.InBackend:
 	case tree.Unknown:
+		panic("!!!+++usp handle type")
 		return moerr.NewInternalError(requestCtx, "usp handle type for %s", execCtx.sqlOfStmt)
 	}
 
@@ -3141,7 +3142,16 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	case tree.RowSet:
 	case tree.Status:
 	case tree.Undefined:
-		return moerr.NewInternalError(requestCtx, "usp result type for %s", execCtx.sqlOfStmt)
+		isExecute := false
+		switch execCtx.stmt.(type) {
+		case *tree.Execute:
+			isExecute = true
+		}
+		if !isExecute {
+			panic("!!!+++usp undefined")
+			return moerr.NewInternalError(requestCtx, "usp result type for %s", execCtx.sqlOfStmt)
+		}
+
 	}
 	// cw.Compile might rewrite sql, here we fetch the latest version
 	switch statement := execCtx.stmt.(type) {
@@ -3851,15 +3861,15 @@ func (mce *MysqlCmdExecutor) setResponse(isLastStmt bool, rspLen uint64) *Respon
 // ExecRequest the server execute the commands from the client following the mysql's routine
 func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
 	defer func() {
-		if e := recover(); e != nil {
-			moe, ok := e.(*moerr.Error)
-			if !ok {
-				err = moerr.ConvertPanicError(requestCtx, e)
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
-			} else {
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
-			}
-		}
+		//if e := recover(); e != nil {
+		//	moe, ok := e.(*moerr.Error)
+		//	if !ok {
+		//		err = moerr.ConvertPanicError(requestCtx, e)
+		//		resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
+		//	} else {
+		//		resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
+		//	}
+		//}
 	}()
 
 	var span trace.Span
