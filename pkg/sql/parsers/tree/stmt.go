@@ -52,6 +52,7 @@ type statementImpl struct {
 	Statement
 }
 
+/*
 func (si *statementImpl) ResultType() ResultType {
 	return Undefined
 }
@@ -59,6 +60,7 @@ func (si *statementImpl) ResultType() ResultType {
 func (si *statementImpl) HandleType() HandleType {
 	return Unknown
 }
+*/
 
 const (
 	// QueryTypeDQL (Data Query Language) Select, MoDump, ValuesStatement, With
@@ -457,5 +459,381 @@ func (node *Insert) HandleType() HandleType {
 }
 
 func (node *Insert) ResultType() ResultType {
+	return Status
+}
+
+func (node *ShowVariables) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowVariables) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowIndex) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowIndex) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowTarget) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowTarget) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowCollation) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowCollation) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowFunctionOrProcedureStatus) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowFunctionOrProcedureStatus) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowGrants) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowGrants) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowTableStatus) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowTableStatus) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ExplainStmt) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ExplainStmt) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ExplainAnalyze) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ExplainAnalyze) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ExplainFor) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ExplainFor) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowColumns) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowColumns) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowStatus) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowStatus) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowWarnings) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowWarnings) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowErrors) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowErrors) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowProcessList) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowProcessList) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowCreateDatabase) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowCreateDatabase) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowStages) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowStages) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowCreatePublications) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowCreatePublications) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowPublications) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowPublications) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowTableSize) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowTableSize) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowRolesStmt) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowRolesStmt) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowConnectors) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowConnectors) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *AlterTable) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *AlterTable) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateConnector) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *CreateConnector) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateSource) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *CreateSource) ResultType() ResultType {
+	return Status
+}
+
+func (node *DropTable) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *DropTable) ResultType() ResultType {
+	return Status
+}
+
+func (node *Load) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *Load) ResultType() ResultType {
+	return Status
+}
+
+func (node *AlterView) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *AlterView) ResultType() ResultType {
+	return Status
+}
+
+func (node *TruncateTable) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *TruncateTable) ResultType() ResultType {
+	return Status
+}
+
+func (node *Delete) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *Delete) ResultType() ResultType {
+	return Status
+}
+
+func (node *SetVar) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *SetVar) ResultType() ResultType {
+	return Status
+}
+
+func (node *Replace) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *Replace) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateIndex) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *CreateIndex) ResultType() ResultType {
+	return Status
+}
+
+func (node *DropDatabase) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *DropDatabase) ResultType() ResultType {
+	return Status
+}
+
+func (node *SetDefaultRole) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *SetDefaultRole) ResultType() ResultType {
+	return Status
+}
+
+func (node *SetPassword) HandleType() HandleType {
+	return Unknown
+}
+
+func (node *SetPassword) ResultType() ResultType {
+	return Status
+}
+
+func (node *DropIndex) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *DropIndex) ResultType() ResultType {
+	return Status
+}
+
+func (node *AnalyzeStmt) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *AnalyzeStmt) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *SetRole) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *SetRole) ResultType() ResultType {
+	return Status
+}
+
+func (node *Do) HandleType() HandleType {
+	return Unknown
+}
+
+func (node *Do) ResultType() ResultType {
+	return Undefined
+}
+
+func (node *Declare) HandleType() HandleType {
+	return Unknown
+}
+
+func (node *Declare) ResultType() ResultType {
+	return Undefined
+}
+
+func (node *CreateExtension) HandleType() HandleType {
+	return Unknown
+}
+
+func (node *CreateExtension) ResultType() ResultType {
+	return Undefined
+}
+
+func (node *LoadExtension) HandleType() HandleType {
+	return Unknown
+}
+
+func (node *LoadExtension) ResultType() ResultType {
+	return Undefined
+}
+
+func (node *ValuesStatement) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ValuesStatement) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *MoDump) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *MoDump) ResultType() ResultType {
+	return Status
+}
+
+func (node *CreateSequence) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *CreateSequence) ResultType() ResultType {
+	return Status
+}
+
+func (node *AlterSequence) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *AlterSequence) ResultType() ResultType {
 	return Status
 }

@@ -2671,7 +2671,7 @@ func (mce *MysqlCmdExecutor) processLoadLocal(ctx context.Context, param *tree.E
 	return
 }
 
-//finish the transaction
+// finish the transaction
 func (mce *MysqlCmdExecutor) finishTxnFunc(requestCtx context.Context,
 	ses *Session,
 	proc *process.Process,
@@ -2699,7 +2699,7 @@ func (mce *MysqlCmdExecutor) finishTxnFunc(requestCtx context.Context,
 	return mce.rollbackTxnFunc(requestCtx, ses, execErr, execCtx)
 }
 
-//execution succeeds during the transaction. commit the transaction
+// execution succeeds during the transaction. commit the transaction
 func (mce *MysqlCmdExecutor) commitTxnFunc(requestCtx context.Context,
 	ses *Session,
 	execCtx *ExecCtx) (retErr error) {
@@ -2720,7 +2720,7 @@ func (mce *MysqlCmdExecutor) commitTxnFunc(requestCtx context.Context,
 	return
 }
 
-//get errors during the transaction. rollback the transaction
+// get errors during the transaction. rollback the transaction
 func (mce *MysqlCmdExecutor) rollbackTxnFunc(requestCtx context.Context,
 	ses *Session,
 	execErr error,
@@ -2766,7 +2766,7 @@ type ExecCtx struct {
 	cw        ComputationWrapper
 }
 
-//response the client
+// response the client
 func (mce *MysqlCmdExecutor) respClientFunc(requestCtx context.Context,
 	ses *Session,
 	proc *process.Process,

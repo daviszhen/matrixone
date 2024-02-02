@@ -16,6 +16,7 @@ package mysql
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
@@ -2744,12 +2745,13 @@ func TestValid(t *testing.T) {
 			t.Errorf("Parse(%q) err: %v", tcase.input, err)
 			continue
 		}
-		ast.HandleType()
-		ast.ResultType()
 		out := tree.String(ast, dialect.MYSQL)
 		if tcase.output != out {
 			t.Errorf("Parsing failed. \nExpected/Got:\n%s\n%s", tcase.output, out)
 		}
+		fmt.Println(out)
+		ast.HandleType()
+		ast.ResultType()
 	}
 }
 
