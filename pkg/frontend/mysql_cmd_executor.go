@@ -2779,6 +2779,9 @@ func (mce *MysqlCmdExecutor) respClientFunc(requestCtx context.Context,
 	}
 
 	resultType := execCtx.stmt.ResultType()
+	//if prepare1, ok := execCtx.stmt.(*tree.PrepareStmt); ok {
+	//	resultType = prepare1.Stmt.ResultType()
+	//}
 	switch resultType {
 	case tree.RowSet:
 		switch execCtx.stmt.(type) {
@@ -2831,6 +2834,8 @@ func (mce *MysqlCmdExecutor) respClientFunc(requestCtx context.Context,
 		}
 	case tree.NoResp:
 	case tree.Undefined:
+
+		panic("!!!usp")
 	}
 
 	switch execCtx.stmt.(type) {
@@ -3910,7 +3915,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 	case COM_QUERY:
 		var query = string(req.GetData().([]byte))
 		mce.addSqlCount(1)
-		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))))
+		logError(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))))
 		err = doComQuery(requestCtx, &UserInput{sql: query})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
@@ -3950,7 +3955,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		newLastStmtID := ses.GenNewStmtId()
 		newStmtName := getPrepareStmtName(newLastStmtID)
 		sql = fmt.Sprintf("prepare %s from %s", newStmtName, sql)
-		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
+		logError(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
 
 		err = doComQuery(requestCtx, &UserInput{sql: sql})
 		if err != nil {
@@ -3966,6 +3971,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 		if err != nil {
 			return NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.GetServerStatus(), err), nil
 		}
+		logError(ses, ses.GetDebugString(), "query trace", logutil.QueryField(sql))
 		err = doComQuery(requestCtx, &UserInput{sql: sql})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, mce.ses.GetServerStatus(), err)

@@ -291,7 +291,7 @@ func (node *CallStmt) HandleType() HandleType {
 }
 
 func (node *CallStmt) ResultType() ResultType {
-	return RowSet
+	return Undefined
 }
 
 func (node *Grant) HandleType() HandleType {
@@ -379,7 +379,7 @@ func (node *prepareImpl) HandleType() HandleType {
 }
 
 func (node *prepareImpl) ResultType() ResultType {
-	return Undefined
+	return Status
 }
 
 func (node *Execute) HandleType() HandleType {
@@ -463,7 +463,7 @@ func (node *Insert) ResultType() ResultType {
 }
 
 func (node *ShowVariables) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *ShowVariables) ResultType() ResultType {
@@ -519,7 +519,7 @@ func (node *ShowTableStatus) ResultType() ResultType {
 }
 
 func (node *ExplainStmt) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *ExplainStmt) ResultType() ResultType {
@@ -559,7 +559,7 @@ func (node *ShowStatus) ResultType() ResultType {
 }
 
 func (node *ShowWarnings) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *ShowWarnings) ResultType() ResultType {
@@ -567,7 +567,7 @@ func (node *ShowWarnings) ResultType() ResultType {
 }
 
 func (node *ShowErrors) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *ShowErrors) ResultType() ResultType {
@@ -631,7 +631,7 @@ func (node *ShowRolesStmt) ResultType() ResultType {
 }
 
 func (node *ShowConnectors) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *ShowConnectors) ResultType() ResultType {
@@ -703,7 +703,7 @@ func (node *Delete) ResultType() ResultType {
 }
 
 func (node *SetVar) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *SetVar) ResultType() ResultType {
@@ -759,7 +759,7 @@ func (node *DropIndex) ResultType() ResultType {
 }
 
 func (node *AnalyzeStmt) HandleType() HandleType {
-	return InBackend
+	return InFrontend
 }
 
 func (node *AnalyzeStmt) ResultType() ResultType {
@@ -835,5 +835,69 @@ func (node *AlterSequence) HandleType() HandleType {
 }
 
 func (node *AlterSequence) ResultType() ResultType {
+	return Status
+}
+
+func (node *Reset) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *Reset) ResultType() ResultType {
+	return Status
+}
+
+func (node *DropConnector) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *DropConnector) ResultType() ResultType {
+	return Status
+}
+
+func (node *ResumeDaemonTask) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *ResumeDaemonTask) ResultType() ResultType {
+	return Status
+}
+
+func (node *CancelDaemonTask) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *CancelDaemonTask) ResultType() ResultType {
+	return Status
+}
+
+func (node *PauseDaemonTask) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *PauseDaemonTask) ResultType() ResultType {
+	return Status
+}
+
+func (node *PrepareString) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *PrepareString) ResultType() ResultType {
+	return Status
+}
+
+func (node *PrepareStmt) HandleType() HandleType {
+	return InFrontend
+}
+
+func (node *PrepareStmt) ResultType() ResultType {
+	return Status
+}
+
+func (node *DropView) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *DropView) ResultType() ResultType {
 	return Status
 }
