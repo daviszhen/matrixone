@@ -2833,6 +2833,7 @@ func (mce *MysqlCmdExecutor) respClientFunc(requestCtx context.Context,
 
 		}
 	case tree.NoResp:
+	case tree.RespItself:
 	case tree.Undefined:
 
 		panic("!!!usp")

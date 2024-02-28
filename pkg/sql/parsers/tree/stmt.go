@@ -37,6 +37,7 @@ const (
 	RowSet ResultType = iota
 	Status
 	NoResp //like COM_QUIT, Deallocate
+	RespItself
 	Undefined
 )
 
@@ -291,7 +292,7 @@ func (node *CallStmt) HandleType() HandleType {
 }
 
 func (node *CallStmt) ResultType() ResultType {
-	return Undefined
+	return RespItself
 }
 
 func (node *Grant) HandleType() HandleType {
@@ -775,19 +776,19 @@ func (node *SetRole) ResultType() ResultType {
 }
 
 func (node *Do) HandleType() HandleType {
-	return Unknown
+	return InBackend
 }
 
 func (node *Do) ResultType() ResultType {
-	return Undefined
+	return Status
 }
 
 func (node *Declare) HandleType() HandleType {
-	return Unknown
+	return InBackend
 }
 
 func (node *Declare) ResultType() ResultType {
-	return Undefined
+	return Status
 }
 
 func (node *CreateExtension) HandleType() HandleType {
@@ -916,4 +917,52 @@ func (node *DropSequence) HandleType() HandleType {
 
 func (node *DropSequence) ResultType() ResultType {
 	return Status
+}
+
+func (node *ShowTableNumber) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowTableNumber) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowColumnNumber) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowColumnNumber) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowTableValues) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowTableValues) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowNodeList) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowNodeList) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowLocks) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowLocks) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *ShowSequences) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowSequences) ResultType() ResultType {
+	return RowSet
 }
