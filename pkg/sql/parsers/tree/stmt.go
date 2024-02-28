@@ -901,3 +901,19 @@ func (node *DropView) HandleType() HandleType {
 func (node *DropView) ResultType() ResultType {
 	return Status
 }
+
+func (node *ShowCreateView) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *ShowCreateView) ResultType() ResultType {
+	return RowSet
+}
+
+func (node *DropSequence) HandleType() HandleType {
+	return InBackend
+}
+
+func (node *DropSequence) ResultType() ResultType {
+	return Status
+}
