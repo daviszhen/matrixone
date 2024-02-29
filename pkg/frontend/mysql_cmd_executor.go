@@ -2830,108 +2830,74 @@ func (mce *MysqlCmdExecutor) respClientFunc(requestCtx context.Context,
 				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
 				return err
 			}
+		case *tree.PrepareStmt, *tree.PrepareString:
+			if ses.GetCmd() == COM_STMT_PREPARE {
+				if err = mce.GetSession().GetMysqlProtocol().SendPrepareResponse(requestCtx, execCtx.prepareStmt); err != nil {
+					err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
+					logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
+					return
+				}
+			} else {
+				resp := mce.setResponse(execCtx.isLastStmt, rspLen)
+				if err = mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
+					err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
+					logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
+					return
+				}
+			}
 
+		default:
+			resp := mce.setResponse(execCtx.isLastStmt, rspLen)
+			if _, ok := execCtx.stmt.(*tree.Insert); ok {
+				resp.lastInsertId = proc.GetLastInsertID()
+				if proc.GetLastInsertID() != 0 {
+					ses.SetLastInsertID(proc.GetLastInsertID())
+				}
+			}
+			if len(proc.SessionInfo.SeqDeleteKeys) != 0 {
+				ses.DeleteSeqValues(proc)
+			}
+
+			if st, ok := execCtx.stmt.(*tree.CreateTable); ok {
+				_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
+			}
+
+			if st, ok := execCtx.stmt.(*tree.DropTable); ok {
+				// handle dynamic table drop, cancel all the running daemon task
+				_ = mce.handleDropDynamicTable(requestCtx, st)
+
+				_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
+			}
+
+			if st, ok := execCtx.stmt.(*tree.CreateDatabase); ok {
+				_ = insertRecordToMoMysqlCompatibilityMode(requestCtx, ses, execCtx.stmt)
+				_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
+			}
+
+			if st, ok := execCtx.stmt.(*tree.DropDatabase); ok {
+				_ = deleteRecordToMoMysqlCompatbilityMode(requestCtx, ses, execCtx.stmt)
+				_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
+			}
+
+			if _, ok := execCtx.stmt.(*tree.Deallocate); ok {
+				//we will not send response in COM_STMT_CLOSE command
+				if ses.GetCmd() == COM_STMT_CLOSE {
+					break
+				}
+			}
+
+			if err = mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
+				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
+				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
+				return
+			}
 		}
 	case tree.NoResp:
 	case tree.RespItself:
 	case tree.Undefined:
-
 		panic("!!!usp")
 	}
 
-	switch execCtx.stmt.(type) {
-	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-		*tree.CreateIndex, *tree.DropIndex, *tree.Insert, *tree.Update, *tree.Replace,
-		*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.Load, *tree.MoDump,
-		*tree.CreateSequence, *tree.DropSequence,
-		*tree.CreateAccount, *tree.DropAccount, *tree.AlterAccount, *tree.AlterDataBaseConfig, *tree.CreatePublication, *tree.AlterPublication, *tree.DropPublication,
-		*tree.CreateFunction, *tree.DropFunction,
-		*tree.CreateProcedure, *tree.DropProcedure,
-		*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-		*tree.CreateRole, *tree.DropRole, *tree.Revoke, *tree.Grant,
-		*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.Delete, *tree.TruncateTable, *tree.Use,
-		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
-		*tree.LockTableStmt, *tree.UnLockTableStmt,
-		*tree.CreateStage, *tree.DropStage, *tree.AlterStage, *tree.CreateSource, *tree.AlterSequence:
-		resp := mce.setResponse(execCtx.isLastStmt, rspLen)
-		if _, ok := execCtx.stmt.(*tree.Insert); ok {
-			resp.lastInsertId = proc.GetLastInsertID()
-			if proc.GetLastInsertID() != 0 {
-				ses.SetLastInsertID(proc.GetLastInsertID())
-			}
-		}
-		if len(proc.SessionInfo.SeqDeleteKeys) != 0 {
-			ses.DeleteSeqValues(proc)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.CreateTable); ok {
-			_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.DropTable); ok {
-			// handle dynamic table drop, cancel all the running daemon task
-			_ = mce.handleDropDynamicTable(requestCtx, st)
-
-			_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.CreateDatabase); ok {
-			_ = insertRecordToMoMysqlCompatibilityMode(requestCtx, ses, execCtx.stmt)
-			_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.DropDatabase); ok {
-			_ = deleteRecordToMoMysqlCompatbilityMode(requestCtx, ses, execCtx.stmt)
-			_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if err = mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
-			err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-			logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
-			return
-		}
-
-	case *tree.PrepareStmt, *tree.PrepareString:
-		if ses.GetCmd() == COM_STMT_PREPARE {
-			if err = mce.GetSession().GetMysqlProtocol().SendPrepareResponse(requestCtx, execCtx.prepareStmt); err != nil {
-				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
-				return
-			}
-		} else {
-			resp := mce.setResponse(execCtx.isLastStmt, rspLen)
-			if err = mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
-				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
-				return
-			}
-		}
-
-	case *tree.SetVar, *tree.SetTransaction, *tree.BackupStart, *tree.CreateConnector, *tree.DropConnector,
-		*tree.PauseDaemonTask, *tree.ResumeDaemonTask, *tree.CancelDaemonTask:
-		resp := mce.setResponse(execCtx.isLastStmt, rspLen)
-		if err = proto.SendResponse(requestCtx, resp); err != nil {
-			return moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-		}
-	case *tree.Deallocate:
-		//we will not send response in COM_STMT_CLOSE command
-		if ses.GetCmd() != COM_STMT_CLOSE {
-			resp := mce.setResponse(execCtx.isLastStmt, rspLen)
-			if err = mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
-				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
-				return
-			}
-		}
-
-	case *tree.Reset:
-		resp := mce.setResponse(execCtx.isLastStmt, rspLen)
-		if err = mce.GetSession().GetMysqlProtocol().SendResponse(requestCtx, resp); err != nil {
-			err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err)
-			logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
-			return err
-		}
-	}
 	if ses.GetQueryInExecute() {
 		logStatementStatus(requestCtx, ses, execCtx.stmt, success, nil)
 	} else {
@@ -2947,6 +2913,11 @@ func (mce *MysqlCmdExecutor) executeStmtWithTxn(requestCtx context.Context,
 	pu *config.ParameterUnit,
 	execCtx *ExecCtx,
 ) (err error) {
+	// defer transaction state management.
+	defer func() {
+		err = mce.finishTxnFunc(requestCtx, ses, proc, proto, err, execCtx)
+	}()
+
 	_, txnOp, err := ses.GetTxnHandler().GetTxnOperator()
 	if err != nil {
 		return err
@@ -2973,11 +2944,6 @@ func (mce *MysqlCmdExecutor) executeStmtWithTxn(requestCtx context.Context,
 			}
 		}
 		ses.GetTxnHandler().disableStartStmt()
-	}()
-
-	// defer transaction state management.
-	defer func() {
-		err = mce.finishTxnFunc(requestCtx, ses, proc, proto, err, execCtx)
 	}()
 
 	err = mce.executeStmt(requestCtx, ses, proc, proto, pu, execCtx)
@@ -3118,7 +3084,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 	}
 
 	cmpBegin = time.Now()
-
 	if ret, err = execCtx.cw.Compile(requestCtx, ses, ses.GetOutputCallback()); err != nil {
 		return
 	}
@@ -3439,7 +3404,78 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 				}
 
 			}
+		default:
+			//change privilege
+			switch execCtx.cw.GetAst().(type) {
+			case *tree.DropTable, *tree.DropDatabase, *tree.DropIndex, *tree.DropView, *tree.DropSequence,
+				*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
+				*tree.CreateRole, *tree.DropRole,
+				*tree.Revoke, *tree.Grant,
+				*tree.SetDefaultRole, *tree.SetRole:
+				ses.InvalidatePrivilegeCache()
+			}
+			runBegin := time.Now()
+			/*
+				Step 1: Start
+			*/
 
+			if st, ok := execCtx.cw.GetAst().(*tree.Load); ok {
+				if st.Local {
+					loadLocalErrGroup = new(errgroup.Group)
+					loadLocalErrGroup.Go(func() error {
+						return mce.processLoadLocal(proc.Ctx, st.Param, loadLocalWriter)
+					})
+				}
+			}
+
+			if execCtx.runResult, err = runner.Run(0); err != nil {
+				if loadLocalErrGroup != nil { // release resources
+					err2 := proc.LoadLocalReader.Close()
+					if err2 != nil {
+						logError(ses, ses.GetDebugString(),
+							"processLoadLocal goroutine failed",
+							zap.Error(err2))
+					}
+					err2 = loadLocalErrGroup.Wait() // executor failed, but processLoadLocal is still running, wait for it
+					if err2 != nil {
+						logError(ses, ses.GetDebugString(),
+							"processLoadLocal goroutine failed",
+							zap.Error(err2))
+					}
+				}
+				return
+			}
+
+			// Start the dynamic table daemon task
+			if st, ok := execCtx.cw.GetAst().(*tree.CreateTable); ok {
+				if st.IsDynamicTable {
+					if err = mce.handleCreateDynamicTable(requestCtx, st); err != nil {
+						return
+					}
+				}
+			}
+
+			if loadLocalErrGroup != nil {
+				if err = loadLocalErrGroup.Wait(); err != nil { //executor success, but processLoadLocal goroutine failed
+					return
+				}
+			}
+
+			// only log if run time is longer than 1s
+			if time.Since(runBegin) > time.Second {
+				logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+			}
+
+			echoTime := time.Now()
+
+			logDebug(ses, ses.GetDebugString(), fmt.Sprintf("time of SendResponse %s", time.Since(echoTime).String()))
+
+			/*
+				Step 4: Serialize the execution plan by json
+			*/
+			if cwft, ok := execCtx.cw.(*TxnComputationWrapper); ok {
+				_ = cwft.RecordExecPlan(requestCtx)
+			}
 		}
 	case tree.NoResp:
 	case tree.Undefined:
@@ -3452,95 +3488,8 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			panic("!!!+++usp undefined")
 			return moerr.NewInternalError(requestCtx, "usp result type for %s", execCtx.sqlOfStmt)
 		}
-
-	}
-	// cw.Compile might rewrite sql, here we fetch the latest version
-	switch execCtx.stmt.(type) {
-	//just status, no result set
-	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-		*tree.CreateIndex, *tree.DropIndex,
-		*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.AlterSequence,
-		*tree.CreateSequence, *tree.DropSequence,
-		*tree.Insert, *tree.Update, *tree.Replace,
-		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
-		*tree.SetVar,
-		*tree.Load,
-		*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-		*tree.CreateRole, *tree.DropRole,
-		*tree.Revoke, *tree.Grant,
-		*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.CreateSource,
-		*tree.Delete, *tree.TruncateTable, *tree.LockTableStmt, *tree.UnLockTableStmt:
-		//change privilege
-		switch execCtx.cw.GetAst().(type) {
-		case *tree.DropTable, *tree.DropDatabase, *tree.DropIndex, *tree.DropView, *tree.DropSequence,
-			*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-			*tree.CreateRole, *tree.DropRole,
-			*tree.Revoke, *tree.Grant,
-			*tree.SetDefaultRole, *tree.SetRole:
-			ses.InvalidatePrivilegeCache()
-		}
-		runBegin := time.Now()
-		/*
-			Step 1: Start
-		*/
-
-		if st, ok := execCtx.cw.GetAst().(*tree.Load); ok {
-			if st.Local {
-				loadLocalErrGroup = new(errgroup.Group)
-				loadLocalErrGroup.Go(func() error {
-					return mce.processLoadLocal(proc.Ctx, st.Param, loadLocalWriter)
-				})
-			}
-		}
-
-		if execCtx.runResult, err = runner.Run(0); err != nil {
-			if loadLocalErrGroup != nil { // release resources
-				err2 := proc.LoadLocalReader.Close()
-				if err2 != nil {
-					logError(ses, ses.GetDebugString(),
-						"processLoadLocal goroutine failed",
-						zap.Error(err2))
-				}
-				err2 = loadLocalErrGroup.Wait() // executor failed, but processLoadLocal is still running, wait for it
-				if err2 != nil {
-					logError(ses, ses.GetDebugString(),
-						"processLoadLocal goroutine failed",
-						zap.Error(err2))
-				}
-			}
-			return
-		}
-
-		// Start the dynamic table daemon task
-		if st, ok := execCtx.cw.GetAst().(*tree.CreateTable); ok {
-			if st.IsDynamicTable {
-				if err = mce.handleCreateDynamicTable(requestCtx, st); err != nil {
-					return
-				}
-			}
-		}
-
-		if loadLocalErrGroup != nil {
-			if err = loadLocalErrGroup.Wait(); err != nil { //executor success, but processLoadLocal goroutine failed
-				return
-			}
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-		}
-
-		echoTime := time.Now()
-
-		logDebug(ses, ses.GetDebugString(), fmt.Sprintf("time of SendResponse %s", time.Since(echoTime).String()))
-
-		/*
-			Step 4: Serialize the execution plan by json
-		*/
-		if cwft, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-			_ = cwft.RecordExecPlan(requestCtx)
-		}
+	default:
+		panic("!!!+++usp default")
 	}
 	return
 }
