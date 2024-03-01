@@ -396,7 +396,8 @@ func (node *Deallocate) HandleType() HandleType {
 }
 
 func (node *Deallocate) ResultType() ResultType {
-	return NoResp
+	//if it triggered by COM_STMT_CLOSE, it should return NoResp
+	return Status
 }
 
 func (node *Update) HandleType() HandleType {
