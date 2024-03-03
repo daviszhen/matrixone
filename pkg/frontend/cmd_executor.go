@@ -16,17 +16,13 @@ package frontend
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"time"
-
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/util"
+	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/frontend/constant"
 	"github.com/matrixorigin/matrixone/pkg/util/metric"
-	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
 // CmdExecutor handle the command from the client
@@ -175,79 +171,6 @@ type StmtExecutor interface {
 var _ StmtExecutor = &baseStmtExecutor{}
 var _ StmtExecutor = &statusStmtExecutor{}
 var _ StmtExecutor = &resultSetStmtExecutor{}
-
-// Execute runs the statement executor
-func Execute(ctx context.Context, ses *Session, proc *process.Process, stmtExec StmtExecutor, beginInstant time.Time, envStmt, sqlType string, useEnv bool) error {
-	var err, err2 error
-	var cmpBegin, runBegin time.Time
-	ctx, err = RecordStatement(ctx, ses, proc, stmtExec, beginInstant, envStmt, sqlType, useEnv)
-	if err != nil {
-		return err
-	}
-	err = stmtExec.Setup(ctx, ses)
-	if err != nil {
-		goto handleRet
-	}
-
-	err = stmtExec.VerifyPrivilege(ctx, ses)
-	if err != nil {
-		goto handleRet
-	}
-
-	err = stmtExec.VerifyTxn(ctx, ses)
-	if err != nil {
-		goto handleRet
-	}
-
-	cmpBegin = time.Now()
-
-	//TODO: selfhandle statements do not need to compile
-	if _, err = stmtExec.Compile(ctx, ses, ses.GetOutputCallback()); err != nil {
-		goto handleRet
-	}
-
-	// only log if time of compile is longer than 1s
-	if time.Since(cmpBegin) > time.Second {
-		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
-	}
-
-	err = stmtExec.ResponseBeforeExec(ctx, ses)
-	if err != nil {
-		goto handleRet
-	}
-
-	runBegin = time.Now()
-
-	err = stmtExec.ExecuteImpl(ctx, ses)
-	if err != nil {
-		goto handleRet
-	}
-
-	// only log if time of run is longer than 1s
-	if time.Since(runBegin) > time.Second {
-		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-	}
-
-	_ = stmtExec.RecordExecPlan(ctx)
-
-handleRet:
-	stmtExec.SetStatus(err)
-	err2 = stmtExec.CommitOrRollbackTxn(ctx, ses)
-	if err2 != nil {
-		return err2
-	}
-
-	err2 = stmtExec.ResponseAfterExec(ctx, ses)
-	if err2 != nil {
-		return err2
-	}
-
-	err2 = stmtExec.Close(ctx, ses)
-	if err2 != nil {
-		return err2
-	}
-	return err
-}
 
 // baseStmtExecutor the base class for the statement execution
 type baseStmtExecutor struct {
