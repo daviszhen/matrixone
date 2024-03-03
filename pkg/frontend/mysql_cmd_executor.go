@@ -31,7 +31,7 @@ import (
 	"unicode"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/fagongzi/goetty/v2"
+	goetty "github.com/fagongzi/goetty/v2"
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/clusterservice"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -3088,31 +3088,6 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		return
 	}
 	execCtx.stmt = execCtx.cw.GetAst()
-	// reset some special stmt for execute statement
-	switch st := execCtx.stmt.(type) {
-	case *tree.SetVar:
-		err = mce.handleSetVar(requestCtx, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowVariables:
-		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = mce.handleShowErrors(execCtx.isLastStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	}
-
 	runner = ret.(ComputationRunner)
 
 	// only log if build time is longer than 1s
