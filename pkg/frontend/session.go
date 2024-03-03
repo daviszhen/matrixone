@@ -289,6 +289,11 @@ type Session struct {
 
 	// timestampMap record timestamp for statistical purposes
 	timestampMap map[TS]time.Time
+
+	//mysql protocol io
+	packetIO    *PacketIO
+	mysqlWriter *MysqlFormatWriter
+	tableWriter *TableStatusWriter
 }
 
 func (ses *Session) ClearStmtProfile() {

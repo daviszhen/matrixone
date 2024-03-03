@@ -258,6 +258,15 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	ses.SetFromRealUser(true)
 	ses.setRoutineManager(rm)
 	ses.setRoutine(routine)
+	outBuf := &MysqlPayloadWriteBuffer{proto: pro}
+
+	ses.packetIO = &PacketIO{
+		out: outBuf,
+	}
+	ses.mysqlWriter = &MysqlFormatWriter{}
+	_ = ses.mysqlWriter.Open(rm.getCtx(), &WriterOptions{ses: ses, packetIO: ses.packetIO})
+	ses.tableWriter = &TableStatusWriter{}
+	_ = ses.tableWriter.Open(rm.getCtx(), &WriterOptions{ses: ses, packetIO: ses.packetIO})
 
 	ses.timestampMap[TSCreatedStart] = createdStart
 	defer func() {

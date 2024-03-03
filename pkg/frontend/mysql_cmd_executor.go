@@ -486,45 +486,34 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	proto := ses.GetMysqlProtocol()
 
 	ec := ses.GetExportConfig()
-	oq := NewOutputQueue(ses.GetRequestContext(), ses, len(bat.Vecs), nil, nil)
+
 	row2colTime := time.Duration(0)
 	procBatchBegin := time.Now()
 	n := bat.Vecs[0].Length()
 	requestCtx := ses.GetRequestContext()
 
 	if ec.needExportToFile() {
+		oq := NewOutputQueue(ses.GetRequestContext(), ses, len(bat.Vecs), nil, nil)
 		initExportFirst(oq)
-	}
-
-	for j := 0; j < n; j++ { //row index
-		if ec.needExportToFile() {
-			select {
-			case <-requestCtx.Done():
-				return nil
-			default:
-			}
-			continue
-		}
-
-		row, err := extractRowFromEveryVector(ses, bat, j, oq, false)
-		if err != nil {
-			return err
-		}
-		if oq.showStmtType == ShowTableStatus {
-			row2 := make([]interface{}, len(row))
-			copy(row2, row)
-			ses.AppendData(row2)
-		}
-	}
-
-	if ec.needExportToFile() {
 		oq.rowIdx = uint64(n)
 		bat2 := preCopyBat(obj, bat)
 		go constructByte(obj, bat2, oq.ep.Index, oq.ep.ByteChan, oq)
-	}
-	err := oq.flush()
-	if err != nil {
-		return err
+
+		err := oq.flush()
+		if err != nil {
+			return err
+		}
+	} else {
+		colDef := make([]*MysqlColumn, 0)
+		for _, col := range ses.GetMysqlResultSet().Columns {
+			mysqlc := col.(*MysqlColumn)
+			colDef = append(colDef, mysqlc)
+		}
+		opts := &WriterOptions{ses: ses, colDef: colDef, isBinary: ses.GetCmd() == COM_STMT_EXECUTE}
+		if ses.GetShowStmtType() == ShowTableStatus {
+			return ses.tableWriter.Write(requestCtx, bat, opts)
+		}
+		return ses.mysqlWriter.Write(requestCtx, bat, opts)
 	}
 
 	procBatchTime := time.Since(procBatchBegin)
@@ -3114,6 +3103,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			return err
 		}
 	case tree.NoResp:
+	case tree.RespItself:
 	case tree.Undefined:
 		isExecute := false
 		switch execCtx.stmt.(type) {
@@ -3339,6 +3329,7 @@ func (mce *MysqlCmdExecutor) runResultSetStmt(requestCtx context.Context,
 
 		switch ses.GetShowStmtType() {
 		case ShowTableStatus:
+			//the data saved from ses.data
 			if err = handleShowTableStatus(ses, execCtx.stmt.(*tree.ShowTableStatus), proc); err != nil {
 				return
 			}

@@ -246,6 +246,37 @@ func extractRowFromVector(ses *Session, vec *vector.Vector, i int, row []interfa
 	return nil
 }
 
+// extractRowFromEveryVector2 gets the j row from the every vector and outputs the row
+// needCopyBytes : true -- make a copy of the bytes. else not.
+// Case 1: needCopyBytes = false.
+// For responding the client, we do not make a copy of the bytes. Because the data
+// has been written into the tcp conn before the batch.Batch returned to the pipeline.
+// Case 2: needCopyBytes = true.
+// For the background execution, we need to make a copy of the bytes. Because the data
+// has been saved in the session. Later the data will be used but then the batch.Batch has
+// been returned to the pipeline and may be reused and changed by the pipeline.
+func extractRowFromEveryVector2(ses *Session, dataSet *batch.Batch, j int, row []any, needCopyBytes bool) error {
+	var err error
+	var rowIndex = j
+	for i, vec := range dataSet.Vecs { //col index
+		rowIndexBackup := rowIndex
+		if vec.IsConstNull() {
+			row[i] = nil
+			continue
+		}
+		if vec.IsConst() {
+			rowIndex = 0
+		}
+
+		err = extractRowFromVector(ses, vec, i, row, rowIndex, needCopyBytes)
+		if err != nil {
+			return err
+		}
+		rowIndex = rowIndexBackup
+	}
+	return nil
+}
+
 // fakeOutputQueue saves the data into the session.
 type fakeOutputQueue struct {
 	mrs *MysqlResultSet
