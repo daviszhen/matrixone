@@ -3081,6 +3081,9 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		return
 	}
 	execCtx.stmt = execCtx.cw.GetAst()
+	if ret == nil {
+		panic("!!!+++usp ret nil")
+	}
 	execCtx.runner = ret.(ComputationRunner)
 
 	// only log if build time is longer than 1s
