@@ -15,24 +15,24 @@
 package frontend
 
 import (
-    "context"
-    "github.com/matrixorigin/matrixone/pkg/container/batch"
-    "github.com/matrixorigin/matrixone/pkg/container/vector"
+	"context"
+	"github.com/matrixorigin/matrixone/pkg/container/batch"
+	"github.com/matrixorigin/matrixone/pkg/container/vector"
 )
 
 type PacketIO struct {
-    out WriteBuffer
+	out WriteBuffer
 }
 
 type WriteBufferOptions struct {
-    proto *MysqlProtocolImpl
+	proto *MysqlProtocolImpl
 }
 
 type WriteBuffer interface {
-    Open(context.Context, *WriteBufferOptions) error
-    Write(context.Context, []byte, *WriteBufferOptions) error
-    Flush(context.Context) error
-    Close(context.Context) error
+	Open(context.Context, *WriteBufferOptions) error
+	Write(context.Context, []byte, *WriteBufferOptions) error
+	Flush(context.Context) error
+	Close(context.Context) error
 }
 
 var _ WriteBuffer = &MysqlPayloadWriteBuffer{}
@@ -42,49 +42,63 @@ MysqlPayloadWriteBuffer holds the bytes that will be encoded and written into th
 the data will split into mysql payloads.
 */
 type MysqlPayloadWriteBuffer struct {
-    proto *MysqlProtocolImpl
+	proto *MysqlProtocolImpl
 }
 
 type MysqlWritePacketOptions struct {
-    flush bool
+	flush bool
+	len   uint64
+
+	column     Column
+	capability uint32
+	cmd        int
 }
 
 /*
 MysqlWritePacket denotes the mysql packets.
 */
 type MysqlWritePacket interface {
-    Open(context.Context, *MysqlWritePacketOptions) error
-    Write(context.Context, WriteBuffer, *MysqlWritePacketOptions) error
-    Close(context.Context) error
+	Open(context.Context, *MysqlWritePacketOptions) error
+	Write(context.Context, WriteBuffer, *MysqlWritePacketOptions) error
+	Close(context.Context) error
 }
 
 var _ MysqlWritePacket = &ResultSetRowText{}
 var _ MysqlWritePacket = &ResultSetRowBinary{}
+var _ MysqlWritePacket = &LenEnc{}
+var _ MysqlWritePacket = &ColumnDef{}
 
 type ResultSetRowText struct {
-    colDef        []*MysqlColumn
-    colData       []any
-    lenEncBuffer  []byte
-    strconvBuffer []byte
+	colDef        []*MysqlColumn
+	colData       []any
+	lenEncBuffer  []byte
+	strconvBuffer []byte
 }
 
 type ResultSetRowBinary struct {
-    colDef           []*MysqlColumn
-    colData          []any
-    lenEncBuffer     []byte
-    strconvBuffer    []byte
-    binaryNullBuffer []byte
+	colDef           []*MysqlColumn
+	colData          []any
+	lenEncBuffer     []byte
+	strconvBuffer    []byte
+	binaryNullBuffer []byte
+}
+
+type LenEnc struct {
+	buf [10]byte
+}
+
+type ColumnDef struct {
 }
 
 type Chunk *vector.Vector
 type Chunks *batch.Batch
 
 type WriterOptions struct {
-    ses      *Session
-    writeRow func(ctx context.Context, row []any, opts *WriterOptions) error
-    packetIO *PacketIO
-    colDef   []*MysqlColumn
-    isBinary bool
+	ses      *Session
+	writeRow func(ctx context.Context, row []any, opts *WriterOptions) error
+	packetIO *PacketIO
+	colDef   []*MysqlColumn
+	isBinary bool
 }
 
 /*
@@ -92,11 +106,11 @@ Writer writes the Chunks generated from the computation engine
 to the destination.
 */
 type Writer interface {
-    Open(context.Context, *WriterOptions) error
-    Write(context.Context, Chunks, *WriterOptions) error
-    WriteBytes(context.Context, []byte, *WriterOptions) error
-    Flush(context.Context) error
-    Close(context.Context) error
+	Open(context.Context, *WriterOptions) error
+	Write(context.Context, Chunks, *WriterOptions) error
+	WriteBytes(context.Context, []byte, *WriterOptions) error
+	Flush(context.Context) error
+	Close(context.Context) error
 }
 
 /*
@@ -104,23 +118,23 @@ ChunksWriter writes the Chunks into the destination.
 The default implementation of the Writer.
 */
 type ChunksWriter struct {
-    row           []any
-    needCopyBytes bool
+	row           []any
+	needCopyBytes bool
 }
 
 /*
-MysqlFormatWriter convertes the Chunks to the mysql format
+MysqlRowWriter converts the Chunks to the mysql format
 and writes them into the destination.
 */
-type MysqlFormatWriter struct {
-    *ChunksWriter
-    packetIO         *PacketIO
-    textRow          *ResultSetRowText
-    binRow           *ResultSetRowBinary
-    lenEncBuffer     []byte
-    strconvBuffer    []byte
-    binaryNullBuffer []byte
-    opts             *MysqlWritePacketOptions
+type MysqlRowWriter struct {
+	*ChunksWriter
+	packetIO         *PacketIO
+	textRow          *ResultSetRowText
+	binRow           *ResultSetRowBinary
+	lenEncBuffer     []byte
+	strconvBuffer    []byte
+	binaryNullBuffer []byte
+	opts             *MysqlWritePacketOptions
 }
 
 /*
@@ -128,6 +142,6 @@ TableStatusWriter holds the data generated from the ShowTableStatus statement.
 It will be regrouped again later.
 */
 type TableStatusWriter struct {
-    *ChunksWriter
-    ses *Session
+	*ChunksWriter
+	ses *Session
 }

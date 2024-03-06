@@ -292,7 +292,7 @@ type Session struct {
 
 	//mysql protocol io
 	packetIO    *PacketIO
-	mysqlWriter *MysqlFormatWriter
+	mysqlWriter *MysqlRowWriter
 	tableWriter *TableStatusWriter
 }
 

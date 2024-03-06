@@ -3145,8 +3145,11 @@ func (mce *MysqlCmdExecutor) runResultSetStmt(requestCtx context.Context,
 			Step 1 : send column count and column definition.
 		*/
 		//send column count
-		colCnt := uint64(len(columns))
-		err = proto.SendColumnCountPacket(colCnt)
+		colCnt := &LenEnc{}
+		opts := &MysqlWritePacketOptions{
+			len: uint64(len(columns)),
+		}
+		err = ses.packetIO.SendPacket(requestCtx, colCnt, opts)
 		if err != nil {
 			return
 		}
@@ -3156,10 +3159,11 @@ func (mce *MysqlCmdExecutor) runResultSetStmt(requestCtx context.Context,
 		for _, c := range columns {
 			mysqlc := c.(Column)
 			mrs.AddColumn(mysqlc)
-			/*
-				mysql COM_QUERY response: send the column definition per column
-			*/
-			err = proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+			colDef := &ColumnDef{}
+			opts.column = mysqlc
+			opts.cmd = int(cmd)
+			opts.capability = proto.GetCapability()
+			err = ses.packetIO.SendPacket(requestCtx, colDef, opts)
 			if err != nil {
 				return
 			}

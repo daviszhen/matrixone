@@ -263,7 +263,7 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	ses.packetIO = &PacketIO{
 		out: outBuf,
 	}
-	ses.mysqlWriter = &MysqlFormatWriter{}
+	ses.mysqlWriter = &MysqlRowWriter{}
 	_ = ses.mysqlWriter.Open(rm.getCtx(), &WriterOptions{ses: ses, packetIO: ses.packetIO})
 	ses.tableWriter = &TableStatusWriter{}
 	_ = ses.tableWriter.Open(rm.getCtx(), &WriterOptions{ses: ses, packetIO: ses.packetIO})

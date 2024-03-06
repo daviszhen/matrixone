@@ -21,6 +21,7 @@ import (
     "github.com/matrixorigin/matrixone/pkg/common/moerr"
     "github.com/matrixorigin/matrixone/pkg/container/bytejson"
     "github.com/matrixorigin/matrixone/pkg/container/types"
+    "github.com/matrixorigin/matrixone/pkg/defines"
     "math"
     "strconv"
 )
@@ -610,4 +611,74 @@ func getUint64(ctx context.Context, value any) (uint64, error) {
     default:
         return 0, moerr.NewInternalError(ctx, "unsupported type %d ", v)
     }
+}
+
+// make the column information with the format of column definition41
+func makeColumnDefinition41Payload(column *MysqlColumn, cmd int) []byte {
+    space := 8*9 + //lenenc bytes of 8 fields
+        21 + //fixed-length fields
+        3 + // catalog "def"
+        len(column.Schema()) +
+        len(column.Table()) +
+        len(column.OrgTable()) +
+        len(column.Name()) +
+        len(column.OrgName()) +
+        len(column.DefaultValue()) +
+        100 // for safe
+
+    data := make([]byte, space)
+    pos := 0
+
+    //lenenc_str     catalog(always "def")
+    pos = writeStringLenEnc(data, pos, "def")
+
+    //lenenc_str     schema
+    pos = writeStringLenEnc(data, pos, column.Schema())
+
+    //lenenc_str     table
+    pos = writeStringLenEnc(data, pos, column.Table())
+
+    //lenenc_str     org_table
+    pos = writeStringLenEnc(data, pos, column.OrgTable())
+
+    //lenenc_str     name
+    pos = writeStringLenEnc(data, pos, column.Name())
+
+    //lenenc_str     org_name
+    pos = writeStringLenEnc(data, pos, column.OrgName())
+
+    //lenenc_int     length of fixed-length fields [0c]
+    pos = gio.WriteUint8(data, pos, 0x0c)
+
+    if column.ColumnType() == defines.MYSQL_TYPE_BOOL {
+        //int<2>              character set
+        pos = gio.WriteUint16(data, pos, charsetVarchar)
+        //int<4>              column length
+        pos = gio.WriteUint32(data, pos, boolColumnLength)
+        //int<1>              type
+        pos = gio.WriteUint8(data, pos, uint8(defines.MYSQL_TYPE_VARCHAR))
+    } else {
+        //int<2>              character set
+        pos = gio.WriteUint16(data, pos, column.Charset())
+        //int<4>              column length
+        pos = gio.WriteUint32(data, pos, column.Length())
+        //int<1>              type
+        pos = gio.WriteUint8(data, pos, uint8(column.ColumnType()))
+    }
+
+    //int<2>              flags
+    pos = gio.WriteUint16(data, pos, column.Flag())
+
+    //int<1>              decimals
+    pos = gio.WriteUint8(data, pos, column.Decimal())
+
+    //int<2>              filler [00] [00]
+    pos = gio.WriteUint16(data, pos, 0)
+
+    if CommandType(cmd) == COM_FIELD_LIST {
+        pos = writeIntLenEnc(data, pos, uint64(len(column.DefaultValue())))
+        pos = writeCountOfBytes(data, pos, column.DefaultValue())
+    }
+
+    return data[:pos]
 }
