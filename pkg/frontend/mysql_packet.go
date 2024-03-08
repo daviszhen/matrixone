@@ -682,3 +682,13 @@ func makeColumnDefinition41Payload(column *MysqlColumn, cmd int) []byte {
 
     return data[:pos]
 }
+
+func makeEOFPayload(data []byte, warnings, status uint16, capability uint32) []byte {
+    pos := 0
+    pos = gio.WriteUint8(data, pos, defines.EOFHeader)
+    if capability&CLIENT_PROTOCOL_41 != 0 {
+        pos = gio.WriteUint16(data, pos, warnings)
+        pos = gio.WriteUint16(data, pos, status)
+    }
+    return data[:pos]
+}

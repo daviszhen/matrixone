@@ -52,6 +52,8 @@ type MysqlWritePacketOptions struct {
 	column     Column
 	capability uint32
 	cmd        int
+	warnings uint16
+	status   uint16
 }
 
 /*
@@ -67,6 +69,7 @@ var _ MysqlWritePacket = &ResultSetRowText{}
 var _ MysqlWritePacket = &ResultSetRowBinary{}
 var _ MysqlWritePacket = &LenEnc{}
 var _ MysqlWritePacket = &ColumnDef{}
+var _ MysqlWritePacket = &EOFIf{}
 
 type ResultSetRowText struct {
 	colDef        []*MysqlColumn
@@ -88,6 +91,10 @@ type LenEnc struct {
 }
 
 type ColumnDef struct {
+}
+
+type EOFIf struct {
+	buf [10]byte
 }
 
 type Chunk *vector.Vector

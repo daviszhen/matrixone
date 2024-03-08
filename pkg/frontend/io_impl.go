@@ -543,25 +543,62 @@ func (col *ColumnDef) Write(ctx context.Context, out WriteBuffer, options *Mysql
 		data = makeColumnDefinition41Payload(mysqlColumn, options.cmd)
 	}
 
-	err = out.Open(ctx, nil)
-	if err != nil {
-		return err
-	}
-	
-	err = out.Write(ctx, data, nil)
-	if err != nil {
-		return err
-	}
+	if len(data) > 0 {
+		err = out.Open(ctx, nil)
+		if err != nil {
+			return err
+		}
 
-	//output into outbuf
-	err = out.Close(ctx)
-	if err != nil {
-		return err
+		err = out.Write(ctx, data, nil)
+		if err != nil {
+			return err
+		}
+
+		//output into outbuf
+		err = out.Close(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	return err
 }
 
 func (col *ColumnDef) Close(ctx context.Context) error {
+	return nil
+}
+
+func (eof *EOFIf) Open(ctx context.Context, options *MysqlWritePacketOptions) error {
+	return nil
+}
+
+func (eof *EOFIf) Write(ctx context.Context, out WriteBuffer, options *MysqlWritePacketOptions) (err error) {
+	var data []byte
+	//If the CLIENT_DEPRECATE_EOF client capabilities flag is not set, EOF_Packet
+	if options.capability&CLIENT_DEPRECATE_EOF == 0 {
+		data = makeEOFPayload(eof.buf[:], options.warnings, options.status, options.capability)
+	}
+	if len(data) > 0 {
+		err = out.Open(ctx, nil)
+		if err != nil {
+			return err
+		}
+
+		err = out.Write(ctx, data, nil)
+		if err != nil {
+			return err
+		}
+
+		//output into outbuf
+		err = out.Close(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+func (eof *EOFIf) Close(ctx context.Context) error {
 	return nil
 }
 
