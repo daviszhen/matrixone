@@ -540,9 +540,11 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 	//handle request
 	err = routine.handleRequest(req)
 	if err != nil {
-		logError(routine.ses, routine.ses.GetDebugString(),
-			"Error occurred",
-			zap.Error(err))
+		if !skipClientQuit(err.Error()) {
+			logError(routine.ses, routine.ses.GetDebugString(),
+				"Error occurred",
+				zap.Error(err))
+		}
 		return err
 	}
 
