@@ -796,12 +796,7 @@ func (bgs *BackgroundSession) Close() {
 	}
 
 	if bgs.Session != nil {
-		//bgs.Session.Close()
-		bgs.Session.mrs = nil
-		bgs.Session.allResultSet = nil
-		for _, bat := range bgs.Session.resultBatches {
-			bat.Clean(bgs.Session.mp)
-		}
+		bgs.Session.Close()
 	}
 	bgs = nil
 }
@@ -2116,7 +2111,13 @@ var NewBackgroundHandler = func(
 
 func (bh *BackgroundHandler) Close() {
 	bh.mce.Close()
-	bh.ses.Close()
+	bh.Clear()
+}
+
+func (bh *BackgroundHandler) Clear() {
+	bh.ses.mrs = nil
+	bh.ses.ClearAllMysqlResultSet()
+	bh.ses.ClearResultBatches()
 }
 
 func (bh *BackgroundHandler) Exec(ctx context.Context, sql string) error {

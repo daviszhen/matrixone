@@ -7466,6 +7466,7 @@ type backgroundExecTest struct {
 	sql2result map[string]ExecResult
 }
 
+
 func (bt *backgroundExecTest) ExecStmt(ctx context.Context, statement tree.Statement) error {
 	//TODO implement me
 	panic("implement me")
@@ -7487,6 +7488,8 @@ func (bt *backgroundExecTest) init() {
 
 func (bt *backgroundExecTest) Close() {
 }
+
+func (bt *backgroundExecTest) Clear() {}
 
 func (bt *backgroundExecTest) Exec(ctx context.Context, s string) error {
 	bt.currentSql = s

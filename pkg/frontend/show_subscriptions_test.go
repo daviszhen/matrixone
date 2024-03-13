@@ -40,6 +40,8 @@ type mockedBackgroundHandler struct {
 	accountId             int32
 }
 
+func (m *mockedBackgroundHandler) Clear() {}
+
 func (m *mockedBackgroundHandler) Close() {}
 
 func (m *mockedBackgroundHandler) Exec(ctx context.Context, s string) error {
