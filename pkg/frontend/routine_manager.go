@@ -277,6 +277,8 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	ses.SetFromRealUser(true)
 	ses.setRoutineManager(rm)
 	ses.setRoutine(routine)
+	ses.backSes = NewBackgroundSession(cancelCtx, ses, ses.mp, pu, GSysVariables, false)
+	ses.shareTxnBackSess = NewBackgroundSession(cancelCtx, ses, ses.mp, pu, GSysVariables, true)
 
 	ses.timestampMap[TSCreatedStart] = createdStart
 	defer func() {

@@ -302,6 +302,9 @@ type Session struct {
 	fromProxy bool
 
 	disableTrace bool
+
+	backSes          *BackgroundSession
+	shareTxnBackSess *BackgroundSession
 }
 
 func (ses *Session) ClearStmtProfile() {
@@ -586,13 +589,13 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	var txnOp TxnOperator
 	var err error
 	if sharedTxnHandler != nil {
-		if !sharedTxnHandler.IsValidTxnOperator() {
-			panic("shared txn is invalid")
-		}
-		txnCtx, txnOp, err = sharedTxnHandler.GetTxnOperator()
-		if err != nil {
-			panic(err)
-		}
+		//if !sharedTxnHandler.IsValidTxnOperator() {
+		//	panic("shared txn is invalid")
+		//}
+		//txnCtx, txnOp, err = sharedTxnHandler.GetTxnOperator()
+		//if err != nil {
+		//	panic(err)
+		//}
 	}
 	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, txnCtx, txnOp)
 
@@ -717,6 +720,17 @@ func (ses *Session) Close() {
 			bat.Clean(ses.proc.Mp())
 		}
 	}
+	for _, bat := range ses.resultBatches {
+		bat.Clean(ses.mp)
+	}
+	if ses.isNotBackgroundSession {
+		if ses.backSes != nil {
+			ses.backSes.Close()
+		}
+		if ses.shareTxnBackSess != nil {
+			ses.shareTxnBackSess.Close()
+		}
+	}
 	if ses.isNotBackgroundSession {
 		mp := ses.GetMemPool()
 		mpool.DeleteMPool(mp)
@@ -745,7 +759,7 @@ func NewBackgroundSession(reqCtx context.Context, upstream *Session, mp *mpool.M
 	var sharedTxnHandler *TxnHandler
 	if shareTxn {
 		sharedTxnHandler = upstream.GetTxnHandler()
-		if sharedTxnHandler == nil || !sharedTxnHandler.IsValidTxnOperator() {
+		if sharedTxnHandler == nil /* || !sharedTxnHandler.IsValidTxnOperator() */ {
 			panic("invalid shared txn handler")
 		}
 	}
@@ -782,7 +796,12 @@ func (bgs *BackgroundSession) Close() {
 	}
 
 	if bgs.Session != nil {
-		bgs.Session.Close()
+		//bgs.Session.Close()
+		bgs.Session.mrs = nil
+		bgs.Session.allResultSet = nil
+		for _, bat := range bgs.Session.resultBatches {
+			bat.Clean(bgs.Session.mp)
+		}
 	}
 	bgs = nil
 }
@@ -957,7 +976,7 @@ func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
 func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch bool) BackgroundExec {
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, true),
+		ses: ses.shareTxnBackSess,
 	}
 	//the derived statement execute in a shared transaction in background session
 	bh.ses.ReplaceDerivedStmt(true)
@@ -974,7 +993,7 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) *BackgroundHandler {
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, false),
+		ses: ses.backSes,
 	}
 	bh.ses.SetOutputCallback(batchFetcher)
 	return bh
@@ -2084,9 +2103,13 @@ var NewBackgroundHandler = func(
 	upstream *Session,
 	mp *mpool.MPool,
 	pu *config.ParameterUnit) BackgroundExec {
+	backSes := upstream.backSes
+	if backSes == nil {
+		backSes = NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false)
+	}
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false),
+		ses: backSes,
 	}
 	return bh
 }

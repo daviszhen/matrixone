@@ -196,6 +196,8 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 	sess.SetRequestContext(ctx)
 	sess.SetConnectContext(ctx)
 	sess.disableTrace = true
+	sess.backSes = NewBackgroundSession(ctx, sess, sess.mp, ie.pu, GSysVariables, false)
+	sess.shareTxnBackSess = NewBackgroundSession(ctx, sess, sess.mp, ie.pu, GSysVariables, true)
 
 	var t *TenantInfo
 	if accountId, err := defines.GetAccountId(ctx); err == nil {
