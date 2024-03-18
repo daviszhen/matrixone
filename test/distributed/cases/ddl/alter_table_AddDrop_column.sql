@@ -1,3 +1,4 @@
+set global enable_privilege_cache = off;
 -- @suit
 -- @case
 -- @desc:alter table add/drop column,add comment

@@ -990,6 +990,10 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) *BackgroundHa
 		mce: NewMysqlCmdExecutor(),
 		ses: ses.backSes,
 	}
+	prev := bh.ses.GetOutputCallback()
+	defer func() {
+		bh.ses.SetOutputCallback(prev)
+	}()
 	bh.ses.SetOutputCallback(batchFetcher)
 	return bh
 }
