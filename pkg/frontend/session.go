@@ -18,12 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"runtime"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -49,6 +43,11 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/memoryengine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var MaxPrepareNumberInOneSession int = 100000
