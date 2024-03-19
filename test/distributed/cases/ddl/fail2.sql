@@ -20,4 +20,6 @@ grant show tables on database * to role_r1;
 use fail2_test0;
 alter table rename01 rename to newRename;
 -- @session
+drop role if exists role_r1;
+drop user if exists role_u1;
 drop database if exists fail2_test0;

@@ -1,4 +1,3 @@
-set global enable_privilege_cache = off;
 drop database if exists test;
 create database test;
 use test;
