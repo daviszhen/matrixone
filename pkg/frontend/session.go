@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -955,6 +956,7 @@ func (ses *Session) InvalidatePrivilegeCache() {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	ses.cache.invalidate()
+	fmt.Fprintln(os.Stderr, "==>", "invalidate privilege cache")
 }
 
 // GetBackgroundExec generates a background executor
