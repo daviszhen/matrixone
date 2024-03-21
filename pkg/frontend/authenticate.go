@@ -6541,6 +6541,7 @@ func determineUserHasPrivilegeSet(ctx context.Context, ses *Session, priv *privi
 	if err != nil {
 		return false, err
 	}
+	fmt.Fprintln(os.Stderr, "=>", "priv cache", enableCache)
 	if enableCache {
 		yes, err = checkPrivilegeInCache(ctx, ses, priv, enableCache)
 		if err != nil {
@@ -6549,6 +6550,7 @@ func determineUserHasPrivilegeSet(ctx context.Context, ses *Session, priv *privi
 		if yes {
 			return true, nil
 		}
+		fmt.Fprintln(os.Stderr, "=>", "priv cache", "no hit")
 	}
 
 	tenant := ses.GetTenantInfo()
