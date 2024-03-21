@@ -974,8 +974,15 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		ses: ses.shareTxnBackSess,
 	}
 	//the derived statement execute in a shared transaction in background session
-	bh.ses.ReplaceDerivedStmt(true)
+	prevDerived := bh.ses.ReplaceDerivedStmt(true)
+	defer func() {
+		bh.ses.ReplaceDerivedStmt(prevDerived)
+	}()
 	if newRawBatch {
+		prev := bh.ses.GetOutputCallback()
+		defer func() {
+			bh.ses.SetOutputCallback(prev)
+		}()
 		bh.ses.SetOutputCallback(batchFetcher)
 	}
 	return bh
