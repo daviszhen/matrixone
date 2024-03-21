@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"go/constant"
+	"os"
 	"sort"
 	"strings"
 
@@ -275,6 +276,7 @@ func doShowSubscriptions(ctx context.Context, ses *Session, ss *tree.ShowSubscri
 		return err
 	}
 
+	fmt.Fprintln(os.Stderr, "accounts", "==>", accountIds, accountNames)
 	// step 2. traversal all accounts, get all published pubs
 	var allPublished []*published
 	for i := 0; i < len(accountIds); i++ {
@@ -282,7 +284,7 @@ func doShowSubscriptions(ctx context.Context, ses *Session, ss *tree.ShowSubscri
 		if pubs, err = getPubs(ctx, ses, bh, accountIds[i], accountNames[i], like, ses.GetTenantName()); err != nil {
 			return err
 		}
-
+		fmt.Fprintln(os.Stderr, "pubs", "==>", pubs)
 		allPublished = append(allPublished, pubs...)
 	}
 
@@ -292,6 +294,7 @@ func doShowSubscriptions(ctx context.Context, ses *Session, ss *tree.ShowSubscri
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(os.Stderr, "subs", "==>", subs)
 	for _, sub := range subs {
 		if _, ok := allSubscribedMap[sub.pubAccount]; !ok {
 			allSubscribedMap[sub.pubAccount] = make(map[string]*subscribed)

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	gotrace "runtime/trace"
 	"sort"
 	"strconv"
@@ -4170,6 +4171,8 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 	if batchValue, ok := requestCtx.Value(defines.SourceScanResKey{}).([]*kafka.Message); ok {
 		inMemStreamScan = batchValue
 	}
+
+	fmt.Fprintln(os.Stderr, "input", "==>", input.getSql())
 
 	beginInstant := time.Now()
 	requestCtx = appendStatementAt(requestCtx, beginInstant)

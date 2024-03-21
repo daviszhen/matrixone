@@ -64,7 +64,7 @@ func main() {
 		}
 		//fmt.Println("new session")
 		ses := newTestSession(proto, testPool, pu)
-		ses.ClearAllMysqlResultSet()
+		ses.Clear()
 		//ses.Close()
 		//time.Sleep(time.Second * 3)
 		if val%10000 == 0 {

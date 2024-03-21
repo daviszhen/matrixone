@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -744,6 +745,14 @@ func (ses *Session) Close() {
 	ses.timestampMap = nil
 }
 
+func (ses *Session) Clear() {
+	if ses == nil {
+		return
+	}
+	ses.ClearAllMysqlResultSet()
+	ses.ClearResultBatches()
+}
+
 // BackgroundSession executing the sql in background
 type BackgroundSession struct {
 	*Session
@@ -966,23 +975,47 @@ func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
 		ses.GetParameterUnit())
 }
 
+func refreshBackgroundSession(reqCtx context.Context,
+	backSess *BackgroundSession,
+	upstream *Session,
+	callback func(interface{}, *batch.Batch) error) {
+	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(reqCtx)
+	backSess.upstream = upstream
+	backSess.SetOutputCallback(callback)
+	backSess.SetRequestContext(cancelBackgroundCtx)
+	backSess.UpdateDebugString()
+	backSess.SetDatabaseName(upstream.GetDatabaseName())
+	//TODO: For seq init values.
+	backSess.InheritSequenceData(upstream)
+	backSess.cancel = cancelBackgroundFunc
+}
+
 // GetShareTxnBackgroundExec returns a background executor running the sql in a shared transaction.
 // newRawBatch denotes we need the raw batch instead of mysql result set.
 func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch bool) BackgroundExec {
+	//bh := &BackgroundHandler{
+	//	mce: NewMysqlCmdExecutor(),
+	//	ses: ses.shareTxnBackSess,
+	//}
+	////the derived statement execute in a shared transaction in background session
+	//bh.ses.ReplaceDerivedStmt(true)
+	//var callback func(interface{}, *batch.Batch) error
+	//if newRawBatch {
+	//	callback = batchFetcher
+	//} else {
+	//	callback = fakeDataSetFetcher
+	//}
+	//bh.ses.Clear()
+	//
+	////refresh background session
+	//refreshBackgroundSession(ctx, bh.ses, ses, callback)
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: ses.shareTxnBackSess,
+		ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, true),
 	}
 	//the derived statement execute in a shared transaction in background session
-	prevDerived := bh.ses.ReplaceDerivedStmt(true)
-	defer func() {
-		bh.ses.ReplaceDerivedStmt(prevDerived)
-	}()
+	bh.ses.ReplaceDerivedStmt(true)
 	if newRawBatch {
-		prev := bh.ses.GetOutputCallback()
-		defer func() {
-			bh.ses.SetOutputCallback(prev)
-		}()
 		bh.ses.SetOutputCallback(batchFetcher)
 	}
 	return bh
@@ -993,14 +1026,18 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) *BackgroundHandler {
+	//bh := &BackgroundHandler{
+	//	mce: NewMysqlCmdExecutor(),
+	//	ses: ses.backSes,
+	//}
+	//bh.ses.Clear()
+	////refresh background session
+	//refreshBackgroundSession(ctx, bh.ses, ses, batchFetcher)
+	//return bh
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: ses.backSes,
+		ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, false),
 	}
-	prev := bh.ses.GetOutputCallback()
-	defer func() {
-		bh.ses.SetOutputCallback(prev)
-	}()
 	bh.ses.SetOutputCallback(batchFetcher)
 	return bh
 }
@@ -2084,8 +2121,12 @@ func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *S
 	prevProto := ses.ReplaceProtocol(&FakeProtocol{})
 	// inherit database
 	ses.SetDatabaseName(prevDB)
+	proc := ses.GetTxnCompileCtx().GetProcess()
 	//restore normal protocol and output callback
 	defer func() {
+		p := ses.GetTxnCompileCtx().GetProcess()
+		p.FreeVectors()
+		ses.GetTxnCompileCtx().SetProcess(proc)
 		ses.SetOptionBits(prevOptionBits)
 		ses.SetServerStatus(prevServerStatus)
 		ses.SetOutputCallback(getDataFromPipeline)
@@ -2109,13 +2150,21 @@ var NewBackgroundHandler = func(
 	upstream *Session,
 	mp *mpool.MPool,
 	pu *config.ParameterUnit) BackgroundExec {
-	backSes := upstream.backSes
-	if backSes == nil {
-		backSes = NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false)
-	}
+	//if upstream.backSes == nil {
+	//	upstream.backSes = NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false)
+	//}
+	//backSes := upstream.backSes
+	//bh := &BackgroundHandler{
+	//	mce: NewMysqlCmdExecutor(),
+	//	ses: backSes,
+	//}
+	//bh.ses.Clear()
+	////refresh background session
+	//refreshBackgroundSession(reqCtx, bh.ses, upstream, fakeDataSetFetcher)
+	//return bh
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: backSes,
+		ses: NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false),
 	}
 	return bh
 }
@@ -2127,8 +2176,7 @@ func (bh *BackgroundHandler) Close() {
 
 func (bh *BackgroundHandler) Clear() {
 	bh.ses.mrs = nil
-	bh.ses.ClearAllMysqlResultSet()
-	bh.ses.ClearResultBatches()
+	bh.ses.Clear()
 }
 
 func (bh *BackgroundHandler) Exec(ctx context.Context, sql string) error {
@@ -2268,7 +2316,24 @@ func (sh *SqlHelper) ExecSql(sql string) (ret []interface{}, err error) {
 	}
 
 	if len(erArray) == 0 {
+		fmt.Fprintln(os.Stderr, "sqlhelper", "no result", "==>", sql)
 		return nil, nil
+	} else {
+		fmt.Fprintln(os.Stderr, "sqlhelper", "has result", "==>", sql)
+		if execResultArrayHasData(erArray) {
+			res := erArray[0].(*MysqlResultSet)
+			cnt := res.GetColumnCount()
+			for i := uint64(0); i < erArray[0].GetRowCount(); i++ {
+				for j := uint64(0); j < cnt; j++ {
+					str, err := erArray[0].GetString(ctx, i, j)
+					if err != nil {
+						return nil, err
+					}
+					fmt.Fprint(os.Stderr, str, " ")
+				}
+				fmt.Fprintln(os.Stderr)
+			}
+		}
 	}
 
 	return erArray[0].(*MysqlResultSet).Data[0], nil
