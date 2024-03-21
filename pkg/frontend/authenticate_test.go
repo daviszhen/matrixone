@@ -7466,7 +7466,6 @@ type backgroundExecTest struct {
 	sql2result map[string]ExecResult
 }
 
-
 func (bt *backgroundExecTest) ExecStmt(ctx context.Context, statement tree.Statement) error {
 	//TODO implement me
 	panic("implement me")

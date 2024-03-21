@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	gotrace "runtime/trace"
 	"sort"
 	"strconv"
@@ -4184,8 +4183,6 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 	//the ses.GetUserName returns the user_name with the account_name.
 	//here,we only need the user_name.
 	userNameOnly := rootName
-
-	fmt.Fprintln(os.Stderr, "input: ", input.getSql())
 
 	proc := process.New(
 		requestCtx,

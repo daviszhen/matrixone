@@ -6400,15 +6400,11 @@ func verifyPrivilegeEntryInMultiPrivilegeLevels(
 			return false, err
 		}
 
-		fmt.Fprintln(os.Stderr, sql)
 		if execResultArrayHasData(erArray) {
-			fmt.Fprintln(os.Stderr, "==>", "has privilege")
 			if cache != nil && enableCache {
 				cache.add(entry.objType, pl, dbName, entry.tableName, entry.privilegeId)
 			}
 			return true, nil
-		} else {
-			fmt.Fprintln(os.Stderr, "==>", "no privilege")
 		}
 	}
 	return false, nil
@@ -6541,7 +6537,6 @@ func determineUserHasPrivilegeSet(ctx context.Context, ses *Session, priv *privi
 	if err != nil {
 		return false, err
 	}
-	fmt.Fprintln(os.Stderr, "=>", "priv cache", enableCache)
 	if enableCache {
 		yes, err = checkPrivilegeInCache(ctx, ses, priv, enableCache)
 		if err != nil {
@@ -6550,7 +6545,6 @@ func determineUserHasPrivilegeSet(ctx context.Context, ses *Session, priv *privi
 		if yes {
 			return true, nil
 		}
-		fmt.Fprintln(os.Stderr, "=>", "priv cache", "no hit")
 	}
 
 	tenant := ses.GetTenantInfo()
@@ -6575,7 +6569,7 @@ func determineUserHasPrivilegeSet(ctx context.Context, ses *Session, priv *privi
 	//step 1: The Set R1 {default role id}
 	//The primary role (in use)
 	roleSetOfKthIteration.Insert((int64)(tenant.GetDefaultRoleID()))
-	fmt.Fprintln(os.Stderr, "account", "==>", tenant.String())
+
 	err = bh.Exec(ctx, "begin;")
 	defer func() {
 		err = finishTxn(ctx, bh, err)
@@ -6593,7 +6587,6 @@ func determineUserHasPrivilegeSet(ctx context.Context, ses *Session, priv *privi
 
 	//init RVisited = Rk
 	roleSetOfKthIteration.Scan(func(roleId int64) bool {
-		fmt.Fprintln(os.Stderr, "role", "==>", roleId)
 		roleSetOfVisited.Insert(roleId)
 		return true
 	})
