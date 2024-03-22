@@ -649,6 +649,7 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 		if err != nil {
 			panic(err)
 		}
+		v2.MempoolGauge.Inc()
 	}
 	ses.proc = process.New(
 		context.TODO(),
@@ -666,6 +667,7 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	runtime.SetFinalizer(ses, func(ss *Session) {
 		ss.Close()
 	})
+	v2.SessionGauge.Inc()
 	return ses
 }
 
@@ -707,16 +709,14 @@ func (ses *Session) Close() {
 	//  The mpool cleanup must be placed at the end,
 	// and you must wait for all resources to be cleaned up before you can delete the mpool
 	if ses.proc != nil {
-		ses.proc.FreeVectors()
-		bats := ses.proc.GetValueScanBatchs()
-		for _, bat := range bats {
-			bat.Clean(ses.proc.Mp())
-		}
+		ses.proc.Free()
+		ses.proc = nil
 	}
 	if ses.isNotBackgroundSession {
 		mp := ses.GetMemPool()
 		mpool.DeleteMPool(mp)
 		ses.SetMemPool(nil)
+		v2.MempoolGauge.Dec()
 	}
 	if ses.buf != nil {
 		ses.buf.Free()
@@ -724,6 +724,7 @@ func (ses *Session) Close() {
 	}
 
 	ses.timestampMap = nil
+	v2.SessionGauge.Dec()
 }
 
 // BackgroundSession executing the sql in background

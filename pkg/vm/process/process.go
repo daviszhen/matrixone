@@ -16,6 +16,7 @@ package process
 
 import (
 	"context"
+	v2 "github.com/matrixorigin/matrixone/pkg/util/metric/v2"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,7 @@ func New(
 	hakeeper logservice.CNHAKeeperClient,
 	udfService udf.Service,
 	aicm *defines.AutoIncrCacheManager) *Process {
+	v2.ProcessGauge.Inc()
 	return &Process{
 		mp:           m,
 		Ctx:          ctx,
@@ -295,7 +297,16 @@ func (proc *Process) PutBatch(bat *batch.Batch) {
 	bat.SetRowCount(0)
 }
 
+func (proc *Process) Free() {
+	proc.FreeVectors()
+	bats := proc.GetValueScanBatchs()
+	for _, bat := range bats {
+		bat.Clean(proc.Mp())
+	}
+}
+
 func (proc *Process) FreeVectors() {
+	v2.ProcessGauge.Dec()
 	proc.vp.freeVectors(proc.Mp())
 }
 

@@ -170,6 +170,9 @@ func initProxyMetrics() {
 
 func initFrontendMetrics() {
 	registry.MustRegister(acceptConnDurationHistogram)
+	registry.MustRegister(SessionGauge)
+	registry.MustRegister(ProcessGauge)
+	registry.MustRegister(MempoolGauge)
 }
 
 func initPipelineMetrics() {

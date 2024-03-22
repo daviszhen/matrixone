@@ -4057,6 +4057,9 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 		pu.HAKeeperClient,
 		pu.UdfService,
 		ses.GetAutoIncrCacheManager())
+	defer func() {
+		proc.Free()
+	}()
 	proc.CopyVectorPool(ses.proc)
 	proc.CopyValueScanBatch(ses.proc)
 	proc.Id = mce.getNextProcessId()

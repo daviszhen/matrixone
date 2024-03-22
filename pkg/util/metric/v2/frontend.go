@@ -38,4 +38,38 @@ var (
 	CheckRoleDurationHistogram        = acceptConnDurationHistogram.WithLabelValues("check-role")
 	CheckDbNameDurationHistogram      = acceptConnDurationHistogram.WithLabelValues("check-dbname")
 	InitGlobalSysVarDurationHistogram = acceptConnDurationHistogram.WithLabelValues("init-global-sys-var")
+
+	//sessionCounter = prometheus.NewCounterVec(
+	//	prometheus.CounterOpts{
+	//		Namespace: "mo",
+	//		Subsystem: "frontend",
+	//		Name:      "session_counter",
+	//		Help:      "Count of session",
+	//	}, []string{"type"})
+	//SessionNewCounter = sessionCounter.WithLabelValues("session")
+	//ProcessCounter    = sessionCounter.WithLabelValues("proc")
+
+	SessionGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mo",
+			Subsystem: "frontend",
+			Name:      "active_session_count",
+			Help:      "session created but not closed",
+		})
+
+	ProcessGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mo",
+			Subsystem: "frontend",
+			Name:      "active_process_count",
+			Help:      "process created but not closed",
+		})
+
+	MempoolGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mo",
+			Subsystem: "frontend",
+			Name:      "active_mempool_count",
+			Help:      "mempool created but not closed",
+		})
 )
