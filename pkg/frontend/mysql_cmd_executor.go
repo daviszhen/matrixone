@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	gotrace "runtime/trace"
 	"sort"
 	"strconv"
@@ -4172,8 +4171,6 @@ func (mce *MysqlCmdExecutor) doComQuery(requestCtx context.Context, input *UserI
 		inMemStreamScan = batchValue
 	}
 
-	fmt.Fprintln(os.Stderr, "input", "==>", input.getSql())
-
 	beginInstant := time.Now()
 	requestCtx = appendStatementAt(requestCtx, beginInstant)
 
@@ -4515,17 +4512,17 @@ func (mce *MysqlCmdExecutor) setResponse(cwIndex, cwsLen int, rspLen uint64) *Re
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
 func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			moe, ok := e.(*moerr.Error)
-			if !ok {
-				err = moerr.ConvertPanicError(requestCtx, e)
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
-			} else {
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
-			}
-		}
-	}()
+	//defer func() {
+	//	if e := recover(); e != nil {
+	//		moe, ok := e.(*moerr.Error)
+	//		if !ok {
+	//			err = moerr.ConvertPanicError(requestCtx, e)
+	//			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
+	//		} else {
+	//			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
+	//		}
+	//	}
+	//}()
 
 	var span trace.Span
 	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.ExecRequest",
