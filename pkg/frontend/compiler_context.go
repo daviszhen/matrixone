@@ -38,13 +38,12 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/common"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"go.uber.org/zap"
 )
 
 type TxnCompilerContext struct {
 	dbName               string
 	txnHandler           *TxnHandler
-	ses                  *Session
+	ses                  TempInter
 	proc                 *process.Process
 	buildAlterView       bool
 	dbOfView, nameOfView string
@@ -57,7 +56,7 @@ var _ plan2.CompilerContext = &TxnCompilerContext{}
 func (tcc *TxnCompilerContext) GetStatsCache() *plan2.StatsCache {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
-	return tcc.ses.statsCache
+	return tcc.ses.GetStatsCache()
 }
 
 func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
@@ -84,7 +83,7 @@ func (tcc *TxnCompilerContext) SetSession(ses *Session) {
 	tcc.ses = ses
 }
 
-func (tcc *TxnCompilerContext) GetSession() *Session {
+func (tcc *TxnCompilerContext) GetSession() TempInter {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	return tcc.ses
@@ -119,11 +118,11 @@ func (tcc *TxnCompilerContext) GetRootSql() string {
 }
 
 func (tcc *TxnCompilerContext) GetAccountId() (uint32, error) {
-	return tcc.ses.accountId, nil
+	return tcc.ses.GetAccountId(), nil
 }
 
 func (tcc *TxnCompilerContext) GetContext() context.Context {
-	return tcc.ses.requestCtx
+	return tcc.ses.GetRequestContext()
 }
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
@@ -135,13 +134,8 @@ func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 		return false
 	}
 	//open database
-	ses := tcc.GetSession()
 	_, err = tcc.GetTxnHandler().GetStorage().Database(txnCtx, name, txn)
 	if err != nil {
-		logError(ses, ses.GetDebugString(),
-			"Failed to get database",
-			zap.String("databaseName", name),
-			zap.Error(err))
 		return false
 	}
 
@@ -203,10 +197,6 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	//open database
 	db, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
 	if err != nil {
-		logError(ses, ses.GetDebugString(),
-			"Failed to get database",
-			zap.String("databaseName", dbName),
-			zap.Error(err))
 		return nil, nil, err
 	}
 
@@ -221,10 +211,6 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	if err != nil {
 		tmpTable, e := tcc.getTmpRelation(txnCtx, engine.GetTempTableName(dbName, tableName))
 		if e != nil {
-			logError(ses, ses.GetDebugString(),
-				"Failed to get table",
-				zap.String("tableName", tableName),
-				zap.Error(err))
 			return nil, nil, err
 		} else {
 			table = tmpTable
@@ -234,16 +220,13 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 }
 
 func (tcc *TxnCompilerContext) getTmpRelation(_ context.Context, tableName string) (engine.Relation, error) {
-	e := tcc.ses.storage
+	e := tcc.ses.GetStorage()
 	txnCtx, txn, err := tcc.txnHandler.GetTxn()
 	if err != nil {
 		return nil, err
 	}
 	db, err := e.Database(txnCtx, defines.TEMPORARY_DBNAME, txn)
 	if err != nil {
-		logError(tcc.ses, tcc.ses.GetDebugString(),
-			"Failed to get temp database",
-			zap.Error(err))
 		return nil, err
 	}
 	table, err := db.Relation(txnCtx, tableName, nil)
@@ -712,7 +695,7 @@ func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.Subscri
 	if err != nil {
 		return nil, err
 	}
-	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession(), txn)
+	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession().(*Session), txn)
 	if err != nil {
 		return nil, err
 	}
@@ -720,7 +703,7 @@ func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.Subscri
 }
 
 func (tcc *TxnCompilerContext) CheckSubscriptionValid(subName, accName, pubName string) error {
-	_, err := checkSubscriptionValidCommon(tcc.GetContext(), tcc.GetSession(), subName, accName, pubName)
+	_, err := checkSubscriptionValidCommon(tcc.GetContext(), tcc.GetSession().(*Session), subName, accName, pubName)
 	return err
 }
 
@@ -736,7 +719,7 @@ func (tcc *TxnCompilerContext) GetQueryingSubscription() *plan.SubscriptionMeta 
 }
 
 func (tcc *TxnCompilerContext) IsPublishing(dbName string) (bool, error) {
-	return isDbPublishing(tcc.GetContext(), dbName, tcc.GetSession())
+	return isDbPublishing(tcc.GetContext(), dbName, tcc.GetSession().(*Session))
 }
 
 // makeResultMetaPath gets query result meta path

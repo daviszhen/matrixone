@@ -165,6 +165,7 @@ type BackgroundExec interface {
 }
 
 var _ BackgroundExec = &BackgroundHandler{}
+var _ BackgroundExec = &backExec{}
 
 type unknownStatementType struct {
 	tree.StatementType

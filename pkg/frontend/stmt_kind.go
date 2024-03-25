@@ -127,7 +127,7 @@ If it is Case4, Then
 
 	Create/Drop database commits current txn. a new txn for the next statement if needed.
 */
-func statementCanBeExecutedInUncommittedTransaction(ses *Session, stmt tree.Statement) (bool, error) {
+func statementCanBeExecutedInUncommittedTransaction(ses TempInter, stmt tree.Statement) (bool, error) {
 	switch st := stmt.(type) {
 	//ddl statement
 	case *tree.CreateTable, *tree.CreateIndex, *tree.CreateView, *tree.AlterView, *tree.AlterTable:
@@ -181,7 +181,7 @@ func statementCanBeExecutedInUncommittedTransaction(ses *Session, stmt tree.Stat
 		if err != nil {
 			return false, err
 		}
-		preStmt, err := mysql.ParseOne(ses.requestCtx, st.Sql, v.(int64))
+		preStmt, err := mysql.ParseOne(ses.GetRequestContext(), st.Sql, v.(int64))
 		if err != nil {
 			return false, err
 		}

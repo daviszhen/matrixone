@@ -164,7 +164,7 @@ func (mce *MysqlCmdExecutor) handleDropConnector(ctx context.Context, st *tree.D
 
 func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, cwIndex, cwsLen int) error {
 	var err error
-	ses := mce.GetSession()
+	ses := mce.GetSession().(*Session)
 	proto := ses.GetMysqlProtocol()
 	if err := showConnectors(ses); err != nil {
 		return err

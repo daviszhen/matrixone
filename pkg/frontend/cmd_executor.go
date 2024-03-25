@@ -33,7 +33,7 @@ import (
 type CmdExecutor interface {
 	SetSession(*Session)
 
-	GetSession() *Session
+	GetSession() TempInter
 
 	// ExecRequest execute the request and get the response
 	ExecRequest(context.Context, *Session, *Request) (*Response, error)
@@ -81,7 +81,7 @@ func (ui *UserInput) isInternal() bool {
 	return ui.getStmt() != nil
 }
 
-func (ui *UserInput) genSqlSourceType(ses *Session) {
+func (ui *UserInput) genSqlSourceType(ses TempInter) {
 	sql := ui.getSql()
 	ui.sqlSourceType = nil
 	if ui.getStmt() != nil {

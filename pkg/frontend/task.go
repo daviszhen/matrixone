@@ -24,7 +24,7 @@ import (
 )
 
 func (mce *MysqlCmdExecutor) handlePauseDaemonTask(ctx context.Context, st *tree.PauseDaemonTask) error {
-	ses := mce.ses
+	ses := mce.ses.(*Session)
 	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.requestCtx,
@@ -61,7 +61,7 @@ func (mce *MysqlCmdExecutor) handlePauseDaemonTask(ctx context.Context, st *tree
 }
 
 func (mce *MysqlCmdExecutor) handleCancelDaemonTask(ctx context.Context, st *tree.CancelDaemonTask) error {
-	ses := mce.ses
+	ses := mce.ses.(*Session)
 	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.requestCtx,
@@ -96,7 +96,7 @@ func (mce *MysqlCmdExecutor) handleCancelDaemonTask(ctx context.Context, st *tre
 }
 
 func (mce *MysqlCmdExecutor) handleResumeDaemonTask(ctx context.Context, st *tree.ResumeDaemonTask) error {
-	ses := mce.ses
+	ses := mce.ses.(*Session)
 	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.requestCtx,

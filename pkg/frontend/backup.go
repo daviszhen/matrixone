@@ -23,7 +23,7 @@ import (
 )
 
 func (mce *MysqlCmdExecutor) handleStartBackup(ctx context.Context, sb *tree.BackupStart) error {
-	return doBackup(ctx, mce.GetSession(), sb)
+	return doBackup(ctx, mce.GetSession().(*Session), sb)
 }
 
 func doBackup(ctx context.Context, ses *Session, bs *tree.BackupStart) error {

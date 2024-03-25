@@ -45,6 +45,7 @@ import (
 
 var _ ComputationWrapper = &TxnComputationWrapper{}
 var _ ComputationWrapper = &NullComputationWrapper{}
+var _ ComputationWrapper = &BackComputationWrapper{}
 
 type NullComputationWrapper struct {
 	*TxnComputationWrapper
@@ -465,4 +466,66 @@ func getStatementStartAt(ctx context.Context) time.Time {
 		return time.Now()
 	}
 	return v.(time.Time)
+}
+
+type BackComputationWrapper struct {
+	stmt    tree.Statement
+	proc    *process.Process
+	backCtx *backExecCtx
+	uuid    uuid.UUID
+}
+
+func InitBackComputationWrapper(backCtx *backExecCtx, stmt tree.Statement, proc *process.Process) *BackComputationWrapper {
+	uuid, _ := uuid.NewV7()
+	return &BackComputationWrapper{
+		stmt:    stmt,
+		proc:    proc,
+		backCtx: backCtx,
+		uuid:    uuid,
+	}
+}
+
+func (bcw *BackComputationWrapper) Run(ts uint64) (*util2.RunResult, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) GetAst() tree.Statement {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) GetProcess() *process.Process {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) GetColumns() ([]interface{}, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) GetUUID() []byte {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) RecordExecPlan(ctx context.Context) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) GetLoadTag() bool {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (bcw *BackComputationWrapper) GetServerStatus() uint16 {
+	//TODO implement me
+	panic("implement me")
 }

@@ -44,7 +44,7 @@ var (
 type TxnHandler struct {
 	storage     engine.Engine
 	txnClient   TxnClient
-	ses         *Session
+	ses         TempInter
 	txnOperator TxnOperator
 
 	// it is for the transaction and different from the requestCtx.
@@ -95,7 +95,7 @@ func (th *TxnHandler) createTxnCtx() (context.Context, error) {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.NodeIDKey{}, v)
 	}
 	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(reqCtx))
-	if th.ses != nil && th.ses.tenant != nil && th.ses.tenant.User == db_holder.MOLoggerUser {
+	if th.ses != nil && th.ses.GetTenantInfo() != nil && th.ses.GetTenantInfo().User == db_holder.MOLoggerUser {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.IsMoLogger{}, true)
 	}
 
@@ -308,14 +308,14 @@ func (th *TxnHandler) SetSession(ses *Session) {
 	th.ses = ses
 }
 
-func (th *TxnHandler) GetSession() *Session {
+func (th *TxnHandler) GetSession() TempInter {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.ses
 }
 
 func (th *TxnHandler) CommitTxn() error {
-	_, span := trace.Start(th.ses.requestCtx, "TxnHandler.CommitTxn",
+	_, span := trace.Start(th.ses.GetRequestContext(), "TxnHandler.CommitTxn",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(th.ses.GetTxnId(), th.ses.GetStmtId(), th.ses.GetSqlOfStmt()))
 
@@ -332,13 +332,12 @@ func (th *TxnHandler) CommitTxn() error {
 	}
 	if txnOp == nil {
 		th.SetTxnOperatorInvalid()
-		logError(ses, sessionInfo, "CommitTxn: txn operator is null")
 	}
 	if txnCtx == nil {
 		panic("context should not be nil")
 	}
-	if ses.tempTablestorage != nil {
-		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.tempTablestorage)
+	if ses.GetTempTableStorage() != nil {
+		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.GetTempTableStorage())
 	}
 	storage := th.GetStorage()
 	ctx2, cancel := context.WithTimeout(
@@ -373,12 +372,7 @@ func (th *TxnHandler) CommitTxn() error {
 		th.ses.SetTxnId(txnOp.Txn().ID)
 		err = txnOp.Commit(ctx2)
 		if err != nil {
-			txnId := txnOp.Txn().DebugString()
 			th.SetTxnOperatorInvalid()
-			logError(ses, sessionInfo,
-				"CommitTxn: txn operator commit failed",
-				zap.String("txnId", txnId),
-				zap.Error(err))
 		}
 		ses.updateLastCommitTS(txnOp.Txn().CommitTS)
 	}
@@ -388,7 +382,7 @@ func (th *TxnHandler) CommitTxn() error {
 }
 
 func (th *TxnHandler) RollbackTxn() error {
-	_, span := trace.Start(th.ses.requestCtx, "TxnHandler.RollbackTxn",
+	_, span := trace.Start(th.ses.GetRequestContext(), "TxnHandler.RollbackTxn",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(th.ses.GetTxnId(), th.ses.GetStmtId(), th.ses.GetSqlOfStmt()))
 
@@ -405,15 +399,12 @@ func (th *TxnHandler) RollbackTxn() error {
 	}
 	if txnOp == nil {
 		th.SetTxnOperatorInvalid()
-		logError(ses, ses.GetDebugString(),
-			"RollbackTxn: txn operator is null",
-			zap.String("sessionInfo", sessionInfo))
 	}
 	if txnCtx == nil {
 		panic("context should not be nil")
 	}
-	if ses.tempTablestorage != nil {
-		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.tempTablestorage)
+	if ses.GetTempTableStorage() != nil {
+		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.GetTempTableStorage())
 	}
 	storage := th.GetStorage()
 	ctx2, cancel := context.WithTimeout(
@@ -441,12 +432,7 @@ func (th *TxnHandler) RollbackTxn() error {
 		th.ses.SetTxnId(txnOp.Txn().ID)
 		err = txnOp.Rollback(ctx2)
 		if err != nil {
-			txnId := txnOp.Txn().DebugString()
 			th.SetTxnOperatorInvalid()
-			logError(ses, ses.GetDebugString(),
-				"RollbackTxn: txn operator commit failed",
-				zap.String("txnId", txnId),
-				zap.Error(err))
 		}
 	}
 	th.SetTxnOperatorInvalid()
@@ -464,9 +450,6 @@ func (th *TxnHandler) GetTxn() (context.Context, TxnOperator, error) {
 	ses := th.GetSession()
 	txnCtx, txnOp, err := ses.TxnCreate()
 	if err != nil {
-		logError(ses, ses.GetDebugString(),
-			"Failed to get transaction",
-			zap.Error(err))
 		return nil, nil, err
 	}
 	return txnCtx, txnOp, err

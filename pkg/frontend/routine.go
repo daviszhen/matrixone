@@ -379,6 +379,13 @@ func (rt *Routine) cleanup() {
 		if ses != nil {
 			ses.Close()
 		}
+		rt.protocol = nil
+		rt.executor = nil
+		rt.cancelRoutineCtx = nil
+		rt.cancelRoutineFunc = nil
+		rt.cancelRequestFunc = nil
+		rt.parameters = nil
+		rt.ses = nil
 	})
 }
 

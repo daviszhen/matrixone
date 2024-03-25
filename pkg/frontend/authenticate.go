@@ -7560,7 +7560,7 @@ func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err
 		seqCurValues:         make(map[uint64]string),
 		seqLastValue:         new(string),
 	}
-	bh := NewBackgroundHandler(ctx, upstream, mp, pu)
+	bh := NewBackgroundExec(ctx, upstream, mp, pu)
 	defer bh.Close()
 
 	//USE the mo_catalog
@@ -8496,7 +8496,7 @@ func (mce *MysqlCmdExecutor) Upload(ctx context.Context, localPath string, stora
 		},
 	}
 
-	fileService := mce.ses.proc.FileService
+	fileService := mce.routineMgr.pu.FileService
 	_ = fileService.Delete(ctx, ioVector.FilePath)
 	err := fileService.Write(ctx, ioVector)
 	err = errors.Join(err, loadLocalErrGroup.Wait())

@@ -24,6 +24,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fagongzi/goetty/v2"
@@ -51,6 +52,7 @@ type RoutineManager struct {
 	accountRoutine   *AccountRoutineManager
 	baseService      BaseService
 	sessionManager   *queryservice.SessionManager
+	counter          atomic.Int64
 }
 
 type AccountRoutineManager struct {
@@ -59,6 +61,7 @@ type AccountRoutineManager struct {
 	killIdQueue       map[int64]KillRecord
 	accountRoutineMu  sync.RWMutex
 	accountId2Routine map[int64]map[*Routine]uint64
+	counter2          atomic.Int64
 }
 
 type KillRecord struct {
@@ -84,6 +87,7 @@ func (ar *AccountRoutineManager) recordRountine(tenantID int64, rt *Routine, ver
 		ar.accountId2Routine[tenantID] = make(map[*Routine]uint64)
 	}
 	ar.accountId2Routine[tenantID][rt] = version
+	ar.counter2.Add(1)
 }
 
 func (ar *AccountRoutineManager) deleteRoutine(tenantID int64, rt *Routine) {
@@ -96,6 +100,7 @@ func (ar *AccountRoutineManager) deleteRoutine(tenantID int64, rt *Routine) {
 	_, ok := ar.accountId2Routine[tenantID]
 	if ok {
 		delete(ar.accountId2Routine[tenantID], rt)
+		ar.counter2.Add(-1)
 	}
 	if len(ar.accountId2Routine[tenantID]) == 0 {
 		delete(ar.accountId2Routine, tenantID)
@@ -200,6 +205,7 @@ func (rm *RoutineManager) deleteRoutine(rs goetty.IOSession) *Routine {
 	defer rm.mu.Unlock()
 	if rt, ok = rm.clients[rs]; ok {
 		delete(rm.clients, rs)
+		rm.counter.Add(-1)
 	}
 	if rt != nil {
 		connID := rt.getConnectionID()
@@ -246,6 +252,7 @@ func (rm *RoutineManager) GetAccountRoutineManager() *AccountRoutineManager {
 }
 
 func (rm *RoutineManager) Created(rs goetty.IOSession) {
+	rm.counter.Add(1)
 	logutil.Debugf("get the connection from %s", rs.RemoteAddress())
 	createdStart := time.Now()
 	pu := rm.getParameterUnit()
@@ -671,7 +678,7 @@ func NewRoutineManager(ctx context.Context, pu *config.ParameterUnit, aicm *defi
 	}
 
 	//add debug routine
-	if pu.SV.PrintDebug {
+	{
 		go func() {
 			for {
 				select {
@@ -679,8 +686,8 @@ func NewRoutineManager(ctx context.Context, pu *config.ParameterUnit, aicm *defi
 					return
 				default:
 				}
-				rm.printDebug()
-				time.Sleep(time.Duration(pu.SV.PrintDebugInterval) * time.Minute)
+				fmt.Fprintln(os.Stderr, "conn counter", rm.counter.Load(), rm.accountRoutine.counter2.Load(), rm.sessionManager.Counter3.Load(), pu.Counter4.Load())
+				time.Sleep(time.Second * 3)
 			}
 		}()
 	}
