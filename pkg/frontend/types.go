@@ -165,6 +165,7 @@ type BackgroundExec interface {
 
 	GetExecResultBatches() []*batch.Batch
 	ClearExecResultBatches()
+	Clear()
 }
 
 var _ BackgroundExec = &BackgroundHandler{}

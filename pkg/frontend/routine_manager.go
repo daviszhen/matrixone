@@ -204,7 +204,6 @@ func (rm *RoutineManager) deleteRoutine(rs goetty.IOSession) *Routine {
 	if rt, ok = rm.clients[rs]; ok {
 		delete(rm.clients, rs)
 	}
-
 	if rt != nil {
 		connID := rt.getConnectionID()
 		if _, ok = rm.routinesByConnID[connID]; ok {
@@ -278,6 +277,8 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	ses.SetFromRealUser(true)
 	ses.setRoutineManager(rm)
 	ses.setRoutine(routine)
+	ses.backSes = NewBackgroundSession(cancelCtx, ses, ses.mp, pu, GSysVariables, false)
+	ses.shareTxnBackSess = NewBackgroundSession(cancelCtx, ses, ses.mp, pu, GSysVariables, true)
 
 	ses.timestampMap[TSCreatedStart] = createdStart
 	defer func() {
@@ -541,9 +542,11 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 	//handle request
 	err = routine.handleRequest(req)
 	if err != nil {
-		logError(routine.ses, routine.ses.GetDebugString(),
-			"Error occurred",
-			zap.Error(err))
+		if !skipClientQuit(err.Error()) {
+			logError(routine.ses, routine.ses.GetDebugString(),
+				"Error occurred",
+				zap.Error(err))
+		}
 		return err
 	}
 

@@ -302,6 +302,9 @@ type Session struct {
 	fromProxy bool
 
 	disableTrace bool
+
+	backSes          *BackgroundSession
+	shareTxnBackSess *BackgroundSession
 }
 
 func (ses *Session) ClearStmtProfile() {
@@ -586,12 +589,12 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	var txnOp TxnOperator
 	var err error
 	if sharedTxnHandler != nil {
-		if !sharedTxnHandler.IsValidTxnOperator() {
-			panic("shared txn is invalid")
-		}
+		//if !sharedTxnHandler.IsValidTxnOperator() {
+		//	panic("shared txn is invalid")
+		//}
 		txnCtx, txnOp, err = sharedTxnHandler.GetTxnOperator()
 		if err != nil {
-			panic(err)
+			//panic(err)
 		}
 	}
 	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, txnCtx, txnOp)
@@ -717,6 +720,17 @@ func (ses *Session) Close() {
 			bat.Clean(ses.proc.Mp())
 		}
 	}
+	for _, bat := range ses.resultBatches {
+		bat.Clean(ses.mp)
+	}
+	if ses.isNotBackgroundSession {
+		if ses.backSes != nil {
+			ses.backSes.Close()
+		}
+		if ses.shareTxnBackSess != nil {
+			ses.shareTxnBackSess.Close()
+		}
+	}
 	if ses.isNotBackgroundSession {
 		mp := ses.GetMemPool()
 		mpool.DeleteMPool(mp)
@@ -728,6 +742,14 @@ func (ses *Session) Close() {
 	}
 
 	ses.timestampMap = nil
+}
+
+func (ses *Session) Clear() {
+	if ses == nil {
+		return
+	}
+	ses.ClearAllMysqlResultSet()
+	ses.ClearResultBatches()
 }
 
 // BackgroundSession executing the sql in background
@@ -745,7 +767,7 @@ func NewBackgroundSession(reqCtx context.Context, upstream *Session, mp *mpool.M
 	var sharedTxnHandler *TxnHandler
 	if shareTxn {
 		sharedTxnHandler = upstream.GetTxnHandler()
-		if sharedTxnHandler == nil || !sharedTxnHandler.IsValidTxnOperator() {
+		if sharedTxnHandler == nil /* || !sharedTxnHandler.IsValidTxnOperator() */ {
 			panic("invalid shared txn handler")
 		}
 	}
@@ -952,19 +974,73 @@ func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
 		ses.GetParameterUnit())
 }
 
+func refreshBackgroundSession(reqCtx context.Context,
+	backSess *BackgroundSession,
+	upstream *Session,
+	callback func(interface{}, *batch.Batch) error) {
+	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(reqCtx)
+	backSess.upstream = upstream
+	backSess.SetOutputCallback(callback)
+	backSess.SetRequestContext(cancelBackgroundCtx)
+	backSess.UpdateDebugString()
+	backSess.SetDatabaseName(upstream.GetDatabaseName())
+	//TODO: For seq init values.
+	backSess.InheritSequenceData(upstream)
+	backSess.cancel = cancelBackgroundFunc
+	backSess.SetOptionBits(OPTION_AUTOCOMMIT)
+	backSess.ClearServerStatus(0)
+}
+
 // GetShareTxnBackgroundExec returns a background executor running the sql in a shared transaction.
 // newRawBatch denotes we need the raw batch instead of mysql result set.
 func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch bool) BackgroundExec {
-	bh := &BackgroundHandler{
-		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, true),
+	{
+		bh := &BackgroundHandler{
+			mce: NewMysqlCmdExecutor(),
+			ses: ses.shareTxnBackSess,
+		}
+		//the derived statement execute in a shared transaction in background session
+		bh.ses.ReplaceDerivedStmt(true)
+		var callback func(interface{}, *batch.Batch) error
+		if newRawBatch {
+			callback = batchFetcher
+		} else {
+			callback = fakeDataSetFetcher
+		}
+		bh.ses.Clear()
+
+		//refresh background session
+		refreshBackgroundSession(ctx, bh.ses, ses, callback)
+		pu := ses.pu
+		var txnCtx context.Context
+		var txnOp TxnOperator
+		var err error
+		if ses.GetTxnHandler() != nil {
+			txnCtx, txnOp, err = ses.GetTxnHandler().GetTxnOperator()
+			if err != nil {
+				panic(err)
+			}
+		}
+
+		bh.ses.txnHandler = InitTxnHandler(pu.StorageEngine, pu.TxnClient, txnCtx, txnOp)
+		bh.ses.txnHandler.SetSession(bh.ses.Session)
+		bh.ses.txnCompileCtx = InitTxnCompilerContext(bh.ses.txnHandler, ses.protocol.GetDatabaseName())
+		bh.ses.txnCompileCtx.SetSession(bh.ses.Session)
+		return bh
 	}
-	//the derived statement execute in a shared transaction in background session
-	bh.ses.ReplaceDerivedStmt(true)
-	if newRawBatch {
-		bh.ses.SetOutputCallback(batchFetcher)
+
+	{
+		//bh := &BackgroundHandler{
+		//	mce: NewMysqlCmdExecutor(),
+		//	ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, true),
+		//}
+		////the derived statement execute in a shared transaction in background session
+		//bh.ses.ReplaceDerivedStmt(true)
+		//if newRawBatch {
+		//	bh.ses.SetOutputCallback(batchFetcher)
+		//}
 	}
-	return bh
+	return nil
 }
 
 var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) BackgroundExec {
@@ -974,10 +1050,18 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) *BackgroundHandler {
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, false),
+		ses: ses.backSes,
 	}
-	bh.ses.SetOutputCallback(batchFetcher)
+	bh.ses.Clear()
+	//refresh background session
+	refreshBackgroundSession(ctx, bh.ses, ses, batchFetcher)
 	return bh
+	//bh := &BackgroundHandler{
+	//	mce: NewMysqlCmdExecutor(),
+	//	ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, false),
+	//}
+	//bh.ses.SetOutputCallback(batchFetcher)
+	//return bh
 }
 
 func (ses *Session) GetIsInternal() bool {
@@ -1102,6 +1186,9 @@ func (ses *Session) SetRequestContext(reqCtx context.Context) {
 }
 
 func (ses *Session) GetRequestContext() context.Context {
+	if ses == nil {
+		panic("nil session")
+	}
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	return ses.requestCtx
@@ -2095,8 +2182,8 @@ func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *S
 	prevProto := ses.ReplaceProtocol(&FakeProtocol{})
 	// inherit database
 	ses.SetDatabaseName(prevDB)
-	//restore normal protocol and output callback
 	proc := ses.GetTxnCompileCtx().GetProcess()
+	//restore normal protocol and output callback
 	defer func() {
 		//@todo we need to improve: make one session, one proc, one txnOperator
 		p := ses.GetTxnCompileCtx().GetProcess()
@@ -2125,16 +2212,33 @@ var NewBackgroundHandler = func(
 	upstream *Session,
 	mp *mpool.MPool,
 	pu *config.ParameterUnit) BackgroundExec {
+	if upstream.backSes == nil {
+		upstream.backSes = NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false)
+	}
+	backSes := upstream.backSes
 	bh := &BackgroundHandler{
 		mce: NewMysqlCmdExecutor(),
-		ses: NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false),
+		ses: backSes,
 	}
+	bh.ses.Clear()
+	//refresh background session
+	refreshBackgroundSession(reqCtx, bh.ses, upstream, fakeDataSetFetcher)
 	return bh
+	//bh := &BackgroundHandler{
+	//	mce: NewMysqlCmdExecutor(),
+	//	ses: NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false),
+	//}
+	//return bh
 }
 
 func (bh *BackgroundHandler) Close() {
 	bh.mce.Close()
-	bh.ses.Close()
+	bh.Clear()
+}
+
+func (bh *BackgroundHandler) Clear() {
+	bh.ses.mrs = nil
+	bh.ses.Clear()
 }
 
 func (bh *BackgroundHandler) Exec(ctx context.Context, sql string) error {
