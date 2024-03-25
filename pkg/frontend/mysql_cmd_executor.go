@@ -4376,13 +4376,7 @@ func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Sessio
 	doComQuery := mce.GetDoQueryFunc()
 	switch req.GetCmd() {
 	case COM_QUIT:
-		/*resp = NewResponse(
-			OkResponse,
-			0,
-			int(COM_QUIT),
-			nil,
-		)*/
-		return resp, moerr.NewInternalError(requestCtx, quitStr)
+		return resp, moerr.GetMysqlClientQuit()
 	case COM_QUERY:
 		var query = string(req.GetData().([]byte))
 		mce.addSqlCount(1)

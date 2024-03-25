@@ -7428,6 +7428,8 @@ func (bt *backgroundExecTest) init() {
 func (bt *backgroundExecTest) Close() {
 }
 
+func (bt *backgroundExecTest) Clear() {}
+
 func (bt *backgroundExecTest) Exec(ctx context.Context, s string) error {
 	bt.currentSql = s
 	return nil

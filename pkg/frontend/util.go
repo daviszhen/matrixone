@@ -735,7 +735,7 @@ func needConvertedToAccessDeniedError(errMsg string) bool {
 }
 
 const (
-	quitStr = "!!!COM_QUIT!!!"
+	quitStr = "MysqlClientQuit"
 )
 
 // makeExecuteSql appends the PREPARE sql and its values of parameters for the EXECUTE statement.
@@ -895,4 +895,8 @@ func getRandomErrorRollbackWholeTxn() error {
 	default:
 		panic(fmt.Sprintf("usp error code %d", arr[x]))
 	}
+}
+
+func skipClientQuit(info string) bool {
+	return strings.Contains(info, quitStr)
 }

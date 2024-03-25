@@ -192,6 +192,9 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 	sess := NewSession(ie.proto, mp, ie.pu, GSysVariables, true, ie.aicm, nil)
 	sess.SetRequestContext(ctx)
 	sess.SetConnectContext(ctx)
+	sess.disableTrace = true
+	sess.backSes = NewBackgroundSession(ctx, sess, sess.mp, ie.pu, GSysVariables, false)
+	sess.shareTxnBackSess = NewBackgroundSession(ctx, sess, sess.mp, ie.pu, GSysVariables, true)
 
 	t, _ := GetTenantInfo(ctx, DefaultTenantMoAdmin)
 	sess.SetTenantInfo(t)
