@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"math"
 	"sort"
 	"strings"
@@ -658,6 +659,9 @@ func TestGetExprValue(t *testing.T) {
 		ses.requestCtx = ctx
 		ses.connectCtx = ctx
 		ses.SetDatabaseName("db")
+		var c clock.Clock
+		_, err := ses.SetTempTableStorage(c)
+		assert.Nil(t, err)
 		exe := NewMysqlCmdExecutor()
 		exe.ChooseDoQueryFunc(pu.SV.EnableDoComQueryInProgress)
 		exe.SetSession(ses)
@@ -762,6 +766,9 @@ func TestGetExprValue(t *testing.T) {
 		ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ses.requestCtx = ctx
 		ses.connectCtx = ctx
+		var c clock.Clock
+		_, err := ses.SetTempTableStorage(c)
+		assert.Nil(t, err)
 		exe := NewMysqlCmdExecutor()
 		exe.ChooseDoQueryFunc(pu.SV.EnableDoComQueryInProgress)
 		exe.SetSession(ses)

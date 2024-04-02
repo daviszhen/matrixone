@@ -88,6 +88,8 @@ func TestTxnHandler_NewTxn(t *testing.T) {
 			connectCtx: ctx,
 			gSysVars:   &gSys,
 		}
+		var c clock.Clock
+		_, _ = txn.ses.(*Session).SetTempTableStorage(c)
 		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		_, _, err = txn.NewTxn()
@@ -151,11 +153,13 @@ func TestTxnHandler_CommitTxn(t *testing.T) {
 			connectCtx: ctx,
 			gSysVars:   &gSys,
 		}
+		var c clock.Clock
+		_, _ = txn.ses.(*Session).SetTempTableStorage(c)
 		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		err = txn.CommitTxn()
 		convey.So(err, convey.ShouldBeNil)
-		convey.ShouldEqual(timestamp.Timestamp{PhysicalTime: idx}, txn.ses.lastCommitTS)
+		convey.ShouldEqual(timestamp.Timestamp{PhysicalTime: idx}, txn.ses.getLastCommitTS())
 
 		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
@@ -163,7 +167,7 @@ func TestTxnHandler_CommitTxn(t *testing.T) {
 		idx++
 		err = txn.CommitTxn()
 		convey.So(err, convey.ShouldNotBeNil)
-		convey.ShouldEqual(timestamp.Timestamp{PhysicalTime: idx}, txn.ses.lastCommitTS)
+		convey.ShouldEqual(timestamp.Timestamp{PhysicalTime: idx}, txn.ses.getLastCommitTS())
 	})
 }
 
@@ -204,6 +208,8 @@ func TestTxnHandler_RollbackTxn(t *testing.T) {
 			pu:         pu,
 			connectCtx: ctx,
 		}
+		var c clock.Clock
+		_, _ = txn.ses.(*Session).SetTempTableStorage(c)
 		_, _, err = txn.NewTxn()
 		convey.So(err, convey.ShouldBeNil)
 		err = txn.RollbackTxn()
@@ -240,6 +246,8 @@ func TestSession_TxnBegin(t *testing.T) {
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session.SetRequestContext(ctx)
 		session.SetConnectContext(ctx)
+		var c clock.Clock
+		_, _ = session.SetTempTableStorage(c)
 		return session
 	}
 	convey.Convey("new session", t, func() {
@@ -714,7 +722,7 @@ func Test_doSelectGlobalSystemVariable(t *testing.T) {
 		bh := &backgroundExecTest{}
 		bh.init()
 
-		bhStub := gostub.StubFunc(&NewBackgroundHandler, bh)
+		bhStub := gostub.StubFunc(&NewBackgroundExec, bh)
 		defer bhStub.Reset()
 
 		stmt := &tree.ShowVariables{
@@ -744,7 +752,7 @@ func Test_doSelectGlobalSystemVariable(t *testing.T) {
 		bh := &backgroundExecTest{}
 		bh.init()
 
-		bhStub := gostub.StubFunc(&NewBackgroundHandler, bh)
+		bhStub := gostub.StubFunc(&NewBackgroundExec, bh)
 		defer bhStub.Reset()
 
 		stmt := &tree.ShowVariables{

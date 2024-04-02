@@ -989,9 +989,9 @@ func (ses *Session) IfInitedTempEngine() bool {
 func (ses *Session) GetTempTableStorage() *memorystorage.Storage {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
-	//if ses.tempTablestorage == nil {
-	//	panic("temp table storage is not initialized")
-	//}
+	if ses.tempTablestorage == nil {
+		panic("temp table storage is not initialized")
+	}
 	return ses.tempTablestorage
 }
 

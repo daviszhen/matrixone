@@ -45,7 +45,7 @@ func TestDoShowSubscriptions(t *testing.T) {
 	bh := &backgroundExecTest{}
 	bh.init()
 
-	bhStub := gostub.StubFunc(&NewBackgroundHandler, bh)
+	bhStub := gostub.StubFunc(&NewBackgroundExec, bh)
 	defer bhStub.Reset()
 
 	sql, err := getSqlForShowSubscriptions(ctx, tenant.TenantID)

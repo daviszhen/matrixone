@@ -17,6 +17,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"io"
 	"testing"
 
@@ -74,6 +75,8 @@ func newTestSession(t *testing.T, ctrl *gomock.Controller) *Session {
 	testutil.SetupAutoIncrService()
 	//new session
 	ses := NewSession(proto, testPool, pu, GSysVariables, true, nil, nil)
+	var c clock.Clock
+	_, _ = ses.SetTempTableStorage(c)
 	return ses
 }
 

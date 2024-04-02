@@ -25,6 +25,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/pb/txn"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/smartystreets/goconvey/convey"
 	"sync"
@@ -249,6 +250,8 @@ func newMockErrSession(t *testing.T, ctx context.Context, ctrl *gomock.Controlle
 	ses.txnHandler.storage = eng
 	ses.connectCtx = ctx
 	ses.requestCtx = ctx
+	var c clock.Clock
+	_, _ = ses.SetTempTableStorage(c)
 	return ses
 }
 
@@ -279,6 +282,8 @@ func newMockErrSession2(t *testing.T, ctx context.Context, ctrl *gomock.Controll
 	ses.txnHandler.storage = eng
 	ses.connectCtx = ctx
 	ses.requestCtx = ctx
+	var c clock.Clock
+	_, _ = ses.SetTempTableStorage(c)
 	return ses
 }
 

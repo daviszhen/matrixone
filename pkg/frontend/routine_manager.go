@@ -677,21 +677,6 @@ func NewRoutineManager(ctx context.Context, pu *config.ParameterUnit, aicm *defi
 		}
 	}
 
-	//add debug routine
-	{
-		go func() {
-			for {
-				select {
-				case <-rm.ctx.Done():
-					return
-				default:
-				}
-				fmt.Fprintln(os.Stderr, "conn counter", rm.counter.Load(), rm.accountRoutine.counter2.Load(), rm.sessionManager.Counter3.Load(), pu.Counter4.Load())
-				time.Sleep(time.Second * 3)
-			}
-		}()
-	}
-
 	// add kill connect routine
 	go func() {
 		for {
