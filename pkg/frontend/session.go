@@ -1055,16 +1055,16 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		backCtx.SetOptionBits(OPTION_AUTOCOMMIT)
 		backCtx.GetTxnCompileCtx().SetSession(backCtx)
 		backCtx.GetTxnHandler().SetSession(backCtx)
-		var accountId uint32
-		accountId, err = defines.GetAccountId(ctx)
-		if err != nil {
-			panic(err)
-		}
-		backCtx.tenant = &TenantInfo{
-			TenantID:      accountId,
-			UserID:        defines.GetUserId(ctx),
-			DefaultRoleID: defines.GetRoleId(ctx),
-		}
+		//var accountId uint32
+		//accountId, err = defines.GetAccountId(ctx)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//backCtx.tenant = &TenantInfo{
+		//	TenantID:      accountId,
+		//	UserID:        defines.GetUserId(ctx),
+		//	DefaultRoleID: defines.GetRoleId(ctx),
+		//}
 		bh := &backExec{
 			mce:     NewMysqlCmdExecutor(),
 			backCtx: backCtx,
@@ -1119,17 +1119,17 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 	}
 	backCtx.GetTxnCompileCtx().SetSession(backCtx)
 	backCtx.GetTxnHandler().SetSession(backCtx)
-	var accountId uint32
-	var err error
-	accountId, err = defines.GetAccountId(ctx)
-	if err != nil {
-		panic(err)
-	}
-	backCtx.tenant = &TenantInfo{
-		TenantID:      accountId,
-		UserID:        defines.GetUserId(ctx),
-		DefaultRoleID: defines.GetRoleId(ctx),
-	}
+	//var accountId uint32
+	//var err error
+	//accountId, err = defines.GetAccountId(ctx)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//backCtx.tenant = &TenantInfo{
+	//	TenantID:      accountId,
+	//	UserID:        defines.GetUserId(ctx),
+	//	DefaultRoleID: defines.GetRoleId(ctx),
+	//}
 	bh := &backExec{
 		mce:     NewMysqlCmdExecutor(),
 		backCtx: backCtx,
@@ -2314,17 +2314,17 @@ var NewBackgroundExec = func(
 	}
 	backCtx.GetTxnCompileCtx().SetSession(backCtx)
 	backCtx.GetTxnHandler().SetSession(backCtx)
-	var accountId uint32
-	var err error
-	accountId, err = defines.GetAccountId(reqCtx)
-	if err != nil {
-		panic(err)
-	}
-	backCtx.tenant = &TenantInfo{
-		TenantID:      accountId,
-		UserID:        defines.GetUserId(reqCtx),
-		DefaultRoleID: defines.GetRoleId(reqCtx),
-	}
+	//var accountId uint32
+	//var err error
+	//accountId, err = defines.GetAccountId(reqCtx)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//backCtx.tenant = &TenantInfo{
+	//	TenantID:      accountId,
+	//	UserID:        defines.GetUserId(reqCtx),
+	//	DefaultRoleID: defines.GetRoleId(reqCtx),
+	//}
 
 	bh := &backExec{
 		mce:     NewMysqlCmdExecutor(),
@@ -2346,6 +2346,12 @@ func (back *backExec) Close() {
 }
 
 func (back *backExec) Exec(ctx context.Context, sql string) error {
+	back.mce.SetSession(back.backCtx)
+	if ctx == nil {
+		ctx = back.backCtx.GetRequestContext()
+	} else {
+		back.backCtx.SetRequestContext(ctx)
+	}
 	_, err := defines.GetAccountId(ctx)
 	if err != nil {
 		return err

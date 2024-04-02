@@ -719,7 +719,7 @@ func (tcc *TxnCompilerContext) GetQueryingSubscription() *plan.SubscriptionMeta 
 }
 
 func (tcc *TxnCompilerContext) IsPublishing(dbName string) (bool, error) {
-	return isDbPublishing(tcc.GetContext(), dbName, tcc.GetSession().(*Session))
+	return isDbPublishing(tcc.GetContext(), dbName, tcc.GetSession())
 }
 
 // makeResultMetaPath gets query result meta path

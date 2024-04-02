@@ -23,7 +23,7 @@ import (
 
 // CmdExecutor handle the command from the client
 type CmdExecutor interface {
-	SetSession(*Session)
+	SetSession(inter TempInter)
 
 	GetSession() TempInter
 

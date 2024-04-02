@@ -173,7 +173,7 @@ func (mce *MysqlCmdExecutor) GetDoQueryFunc() doComQueryFunc {
 	return mce.doQueryFunc
 }
 
-func (mce *MysqlCmdExecutor) SetSession(ses *Session) {
+func (mce *MysqlCmdExecutor) SetSession(ses TempInter) {
 	mce.mu.Lock()
 	defer mce.mu.Unlock()
 	mce.ses = ses
@@ -4529,8 +4529,19 @@ func (backCtx *backExecCtx) SetTxnId(id []byte) {
 	backCtx.stmtProfile.SetTxnId(id)
 }
 
+// GetTenantName return tenant name according to GetTenantInfo and stmt.
+//
+// With stmt = nil, should be only called in TxnHandler.NewTxn, TxnHandler.CommitTxn, TxnHandler.RollbackTxn
+func (backCtx *backExecCtx) GetTenantNameWithStmt(stmt tree.Statement) string {
+	tenant := sysAccountName
+	if backCtx.GetTenantInfo() != nil && (stmt == nil || !IsPrepareStatement(stmt)) {
+		tenant = backCtx.GetTenantInfo().GetTenant()
+	}
+	return tenant
+}
+
 func (backCtx *backExecCtx) GetTenantName() string {
-	return backCtx.tenant.GetTenant()
+	return backCtx.GetTenantNameWithStmt(nil)
 }
 
 func (backCtx *backExecCtx) getLastCommitTS() timestamp.Timestamp {
@@ -4636,14 +4647,6 @@ func (backCtx *backExecCtx) clear() {
 	backCtx.allResultSet = nil
 	backCtx.resultBatches = nil
 	backCtx.gSysVars = nil
-}
-
-func (backCtx *backExecCtx) GetTenantNameWithStmt(stmt tree.Statement) string {
-	tenant := sysAccountName
-	if backCtx.tenant != nil && (stmt == nil || !IsPrepareStatement(stmt)) {
-		tenant = backCtx.tenant.GetTenant()
-	}
-	return tenant
 }
 
 func (backCtx *backExecCtx) InActiveTransaction() bool {

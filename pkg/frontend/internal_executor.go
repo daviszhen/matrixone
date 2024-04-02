@@ -65,7 +65,7 @@ func applyOverride(sess *Session, opts ie.SessionOverrideOptions) {
 
 type internalMiniExec interface {
 	doComQuery(requestCtx context.Context, input *UserInput) error
-	SetSession(*Session)
+	SetSession(inter TempInter)
 }
 
 type internalExecutor struct {

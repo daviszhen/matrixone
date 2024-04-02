@@ -3481,7 +3481,7 @@ func checkSubscriptionValid(ctx context.Context, ses TempInter, createSql string
 	return checkSubscriptionValidCommon(ctx, ses, subName, accName, pubName)
 }
 
-func isDbPublishing(ctx context.Context, dbName string, ses *Session) (ok bool, err error) {
+func isDbPublishing(ctx context.Context, dbName string, ses TempInter) (ok bool, err error) {
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 	var (
@@ -4116,8 +4116,9 @@ func doDropAccount(ctx context.Context, ses *Session, da *tree.DropAccount) (err
 	defer bh.Close()
 
 	//set backgroundHandler's default schema
-	if handler, ok := bh.(*BackgroundHandler); ok {
-		handler.ses.Session.txnCompileCtx.dbName = catalog.MO_CATALOG
+	if handler, ok := bh.(*backExec); ok {
+		handler.backCtx.
+			txnCompileCtx.dbName = catalog.MO_CATALOG
 	}
 
 	var sql, db, table string

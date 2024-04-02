@@ -164,7 +164,6 @@ type BackgroundExec interface {
 	Clear()
 }
 
-var _ BackgroundExec = &BackgroundHandler{}
 var _ BackgroundExec = &backExec{}
 
 type unknownStatementType struct {
