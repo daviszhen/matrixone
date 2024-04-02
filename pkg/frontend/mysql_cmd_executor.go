@@ -24,6 +24,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	"io"
 	gotrace "runtime/trace"
@@ -1921,7 +1922,7 @@ func buildMoExplainQuery(explainColName string, buffer *explain.ExplainDataBuffe
 	return err
 }
 
-func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerContext, stmt tree.Statement) (*plan2.Plan, error) {
+func buildPlan(requestCtx context.Context, ses TempInter, ctx plan2.CompilerContext, stmt tree.Statement) (*plan2.Plan, error) {
 	start := time.Now()
 	defer func() {
 		v2.TxnStatementBuildPlanDurationHistogram.Observe(time.Since(start).Seconds())
@@ -1935,12 +1936,14 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	var err error
 	isPrepareStmt := false
 	if ses != nil {
-		ses.accountId, err = defines.GetAccountId(requestCtx)
+		var accId uint32
+		accId, err = defines.GetAccountId(requestCtx)
 		if err != nil {
 			return nil, err
 		}
-		if len(ses.sql) > 8 {
-			prefix := strings.ToLower(ses.sql[:8])
+		ses.SetAccountId(accId)
+		if len(ses.GetSql()) > 8 {
+			prefix := strings.ToLower(ses.GetSql()[:8])
 			isPrepareStmt = prefix == "execute " || prefix == "prepare "
 		}
 	}
@@ -1953,8 +1956,8 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 		}
 	}
 	if ret != nil {
-		if ses != nil && ses.GetTenantInfo() != nil {
-			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, ret)
+		if ses != nil && ses.GetTenantInfo() != nil && !ses.IsBackgroundSession() {
+			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses.(*Session), stmt, ret)
 			if err != nil {
 				return nil, err
 			}
@@ -1982,8 +1985,8 @@ func buildPlan(requestCtx context.Context, ses *Session, ctx plan2.CompilerConte
 	}
 	if ret != nil {
 		ret.IsPrepare = isPrepareStmt
-		if ses != nil && ses.GetTenantInfo() != nil {
-			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, ret)
+		if ses != nil && ses.GetTenantInfo() != nil && !ses.IsBackgroundSession() {
+			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses.(*Session), stmt, ret)
 			if err != nil {
 				return nil, err
 			}
@@ -2107,7 +2110,7 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 	return cw, nil
 }
 
-var GetComputationWrapperInBack = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, backCtx *backExecCtx) ([]ComputationWrapper, error) {
+var GetComputationWrapperInBack = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses TempInter) ([]ComputationWrapper, error) {
 	var cw []ComputationWrapper = nil
 
 	var stmts []tree.Statement = nil
@@ -2122,562 +2125,22 @@ var GetComputationWrapperInBack = func(db string, input *UserInput, user string,
 			return nil, err
 		}
 		stmts = append(stmts, cmdFieldStmt)
+	} else {
+		var v interface{}
+		v, err = ses.GetGlobalVar("lower_case_table_names")
+		if err != nil {
+			v = int64(1)
+		}
+		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, input.getSql(), v.(int64))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, stmt := range stmts {
-		cw = append(cw, InitBackComputationWrapper(backCtx, stmt, proc))
+		cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
 	}
 	return cw, nil
-}
-
-func getStmtExecutor(ses *Session, proc *process.Process, base *baseStmtExecutor, stmt tree.Statement) (StmtExecutor, error) {
-	var err error
-	var ret StmtExecutor
-	switch st := stmt.(type) {
-	//PART 1: the statements with the result set
-	case *tree.Select:
-		ret = &SelectExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sel: st,
-		}
-	case *tree.ValuesStatement:
-		ret = &ValuesStmtExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sel: st,
-		}
-	case *tree.ShowCreateTable:
-		ret = &ShowCreateTableExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sct: st,
-		}
-	case *tree.ShowCreateDatabase:
-		ret = &ShowCreateDatabaseExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			scd: st,
-		}
-	case *tree.ShowTables:
-		ret = &ShowTablesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			st: st,
-		}
-	case *tree.ShowSequences:
-		ret = &ShowSequencesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ss: st,
-		}
-	case *tree.ShowDatabases:
-		ret = &ShowDatabasesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sd: st,
-		}
-	case *tree.ShowColumns:
-		ret = &ShowColumnsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sc: st,
-		}
-	case *tree.ShowProcessList:
-		ret = &ShowProcessListExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			spl: st,
-		}
-	case *tree.ShowStatus:
-		ret = &ShowStatusExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ss: st,
-		}
-	case *tree.ShowTableStatus:
-		ret = &ShowTableStatusExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sts: st,
-		}
-	case *tree.ShowGrants:
-		ret = &ShowGrantsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sg: st,
-		}
-	case *tree.ShowIndex:
-		ret = &ShowIndexExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			si: st,
-		}
-	case *tree.ShowCreateView:
-		ret = &ShowCreateViewExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			scv: st,
-		}
-	case *tree.ShowTarget:
-		ret = &ShowTargetExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			st: st,
-		}
-	case *tree.ExplainFor:
-		ret = &ExplainForExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ef: st,
-		}
-	case *tree.ExplainStmt:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ExplainStmtExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			es: st,
-		}
-	case *tree.ShowVariables:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ShowVariablesExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sv: st,
-		}
-	case *tree.ShowErrors:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ShowErrorsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			se: st,
-		}
-	case *tree.ShowWarnings:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &ShowWarningsExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			sw: st,
-		}
-	case *tree.AnalyzeStmt:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &AnalyzeStmtExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			as: st,
-		}
-	case *tree.ExplainAnalyze:
-		ret = &ExplainAnalyzeExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			ea: st,
-		}
-	case *InternalCmdFieldList:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &InternalCmdFieldListExecutor{
-			resultSetStmtExecutor: &resultSetStmtExecutor{
-				base,
-			},
-			icfl: st,
-		}
-	//PART 2: the statement with the status only
-	case *tree.BeginTransaction:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &BeginTxnExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			bt: st,
-		}
-	case *tree.CommitTransaction:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CommitTxnExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ct: st,
-		}
-	case *tree.RollbackTransaction:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &RollbackTxnExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			rt: st,
-		}
-	case *tree.SetRole:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &SetRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sr: st,
-		}
-	case *tree.Use:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &UseExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			u: st,
-		}
-	case *tree.MoDump:
-		//TODO:
-		err = moerr.NewInternalError(proc.Ctx, "needs to add modump")
-	case *tree.DropDatabase:
-		ret = &DropDatabaseExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dd: st,
-		}
-	case *tree.PrepareStmt:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &PrepareStmtExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ps: st,
-		}
-	case *tree.PrepareString:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &PrepareStringExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ps: st,
-		}
-	case *tree.Deallocate:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DeallocateExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			d: st,
-		}
-	case *tree.SetVar:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &SetVarExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sv: st,
-		}
-	case *tree.Delete:
-		ret = &DeleteExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			d: st,
-		}
-	case *tree.Update:
-		ret = &UpdateExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			u: st,
-		}
-	case *tree.CreatePublication:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreatePublicationExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cp: st,
-		}
-	case *tree.AlterPublication:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &AlterPublicationExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ap: st,
-		}
-	case *tree.DropPublication:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropPublicationExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dp: st,
-		}
-	case *tree.CreateAccount:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreateAccountExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ca: st,
-		}
-	case *tree.DropAccount:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropAccountExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			da: st,
-		}
-	case *tree.AlterAccount:
-		ret = &AlterAccountExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			aa: st,
-		}
-	case *tree.CreateUser:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreateUserExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cu: st,
-		}
-	case *tree.DropUser:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropUserExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			du: st,
-		}
-	case *tree.AlterUser:
-		ret = &AlterUserExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			au: st,
-		}
-	case *tree.CreateRole:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &CreateRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cr: st,
-		}
-	case *tree.DropRole:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &DropRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dr: st,
-		}
-	case *tree.Grant:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &GrantExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			g: st,
-		}
-	case *tree.Revoke:
-		base.ComputationWrapper = InitNullComputationWrapper(ses, st, proc)
-		ret = &RevokeExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			r: st,
-		}
-	case *tree.CreateTable:
-		ret = &CreateTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ct: st,
-		}
-	case *tree.DropTable:
-		ret = &DropTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dt: st,
-		}
-	case *tree.CreateDatabase:
-		ret = &CreateDatabaseExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cd: st,
-		}
-	case *tree.CreateIndex:
-		ret = &CreateIndexExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ci: st,
-		}
-	case *tree.DropIndex:
-		ret = &DropIndexExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			di: st,
-		}
-	case *tree.CreateSequence:
-		ret = &CreateSequenceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cs: st,
-		}
-	case *tree.DropSequence:
-		ret = &DropSequenceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			ds: st,
-		}
-	case *tree.AlterSequence:
-		ret = &AlterSequenceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cs: st,
-		}
-	case *tree.CreateView:
-		ret = &CreateViewExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			cv: st,
-		}
-	case *tree.AlterView:
-		ret = &AlterViewExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			av: st,
-		}
-	case *tree.AlterTable:
-		ret = &AlterTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			at: st,
-		}
-	case *tree.DropView:
-		ret = &DropViewExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			dv: st,
-		}
-	case *tree.Insert:
-		ret = &InsertExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			i: st,
-		}
-	case *tree.Replace:
-		ret = &ReplaceExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			r: st,
-		}
-	case *tree.Load:
-		ret = &LoadExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			l: st,
-		}
-	case *tree.SetDefaultRole:
-		ret = &SetDefaultRoleExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sdr: st,
-		}
-	case *tree.SetPassword:
-		ret = &SetPasswordExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			sp: st,
-		}
-	case *tree.TruncateTable:
-		ret = &TruncateTableExecutor{
-			statusStmtExecutor: &statusStmtExecutor{
-				base,
-			},
-			tt: st,
-		}
-	//PART 3: hybrid
-	case *tree.Execute:
-		ret = &ExecuteExecutor{
-			baseStmtExecutor: base,
-			e:                st,
-		}
-	default:
-		return nil, moerr.NewInternalError(proc.Ctx, "no such statement %s", stmt.String())
-	}
-	return ret, err
-}
-
-var GetStmtExecList = func(db, sql, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]StmtExecutor, error) {
-	var stmtExecList []StmtExecutor = nil
-	var stmtExec StmtExecutor
-	var stmts []tree.Statement = nil
-	var cmdFieldStmt *InternalCmdFieldList
-	var err error
-
-	appendStmtExec := func(se StmtExecutor) {
-		stmtExecList = append(stmtExecList, se)
-	}
-
-	if isCmdFieldListSql(sql) {
-		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, sql)
-		if err != nil {
-			return nil, err
-		}
-		stmts = append(stmts, cmdFieldStmt)
-	} else {
-		v, err := ses.GetGlobalVar("lower_case_table_names")
-		if err != nil {
-			return nil, err
-		}
-		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, sql, v.(int64))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for _, stmt := range stmts {
-		cw := InitTxnComputationWrapper(ses, stmt, proc)
-		base := &baseStmtExecutor{}
-		base.ComputationWrapper = cw
-		stmtExec, err = getStmtExecutor(ses, proc, base, stmt)
-		if err != nil {
-			return nil, err
-		}
-		appendStmtExec(stmtExec)
-	}
-	return stmtExecList, nil
 }
 
 func incStatementCounter(tenant string, stmt tree.Statement) {
@@ -4750,12 +4213,28 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
+	var columns []interface{}
+	var mrs *MysqlResultSet
+	mrs = backCtx.GetMysqlResultSet()
 	// cw.Compile might rewrite sql, here we fetch the latest version
 	switch stmt.(type) {
 	//produce result set
 	case *tree.Select:
 		//no select into in the background exec
-
+		columns, err = cw.GetColumns()
+		if err != nil {
+			//logError(backCtx, backCtx.GetDebugString(),
+			//	"Failed to get columns from computation handler",
+			//	zap.Error(err))
+			return
+		}
+		for _, c := range columns {
+			mysqlc := c.(Column)
+			mrs.AddColumn(mysqlc)
+		}
+		if c, ok := cw.(*TxnComputationWrapper); ok {
+			backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+		}
 		runBegin := time.Now()
 		/*
 			Step 2: Start pipeline
@@ -4776,7 +4255,20 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		*tree.ShowIndex, *tree.ShowCreateView, *tree.ShowTarget, *tree.ShowCollation, *tree.ValuesStatement,
 		*tree.ExplainFor, *tree.ExplainStmt, *tree.ShowTableNumber, *tree.ShowColumnNumber, *tree.ShowTableValues, *tree.ShowLocks, *tree.ShowNodeList, *tree.ShowFunctionOrProcedureStatus,
 		*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages:
-
+		columns, err = cw.GetColumns()
+		if err != nil {
+			//logError(ses, ses.GetDebugString(),
+			//	"Failed to get columns from computation handler",
+			//	zap.Error(err))
+			return
+		}
+		for _, c := range columns {
+			mysqlc := c.(Column)
+			mrs.AddColumn(mysqlc)
+		}
+		if c, ok := cw.(*TxnComputationWrapper); ok {
+			backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+		}
 		runBegin := time.Now()
 		/*
 			Step 2: Start pipeline
@@ -4839,6 +4331,7 @@ type backExecCtx struct {
 
 	//all the result set of executing the sql in background task
 	allResultSet []*MysqlResultSet
+	rs           *plan.ResultColDef
 
 	// result batches of executing the sql in background task
 	// set by func batchFetcher
@@ -4856,6 +4349,49 @@ type backExecCtx struct {
 	lastCommitTS timestamp.Timestamp
 	upstream     *Session
 	sql          string
+	accountId    uint32
+	label        map[string]string
+	timeZone     *time.Location
+}
+
+func (backCtx *backExecCtx) GetUpstream() TempInter {
+	return backCtx.upstream
+}
+
+func (backCtx *backExecCtx) EnableInitTempEngine() {
+
+}
+
+func (backCtx *backExecCtx) SetTempEngine(ctx context.Context, te engine.Engine) error {
+	return nil
+}
+
+func (backCtx *backExecCtx) SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error) {
+	return nil, nil
+}
+
+func (backCtx *backExecCtx) getCNLabels() map[string]string {
+	return backCtx.label
+}
+
+func (backCtx *backExecCtx) SetData(i [][]interface{}) {
+
+}
+
+func (backCtx *backExecCtx) GetIsInternal() bool {
+	return false
+}
+
+func (backCtx *backExecCtx) SetPlan(plan *plan.Plan) {
+}
+
+func (backCtx *backExecCtx) SetAccountId(u uint32) {
+	backCtx.accountId = u
+}
+
+func (backCtx *backExecCtx) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (backCtx *backExecCtx) SetRequestContext(ctx context.Context) {
@@ -5037,7 +4573,7 @@ func (backCtx *backExecCtx) GetUserDefinedVar(name string) (SystemVariableType, 
 }
 
 func (backCtx *backExecCtx) GetSessionVar(name string) (interface{}, error) {
-	return nil, moerr.NewInternalError(backCtx.requestCtx, "do not support system variable in background exec")
+	return nil, nil
 }
 
 func (backCtx *backExecCtx) getGlobalSystemVariableValue(name string) (interface{}, error) {
@@ -5058,7 +4594,7 @@ func (backCtx *backExecCtx) GetTenantInfo() *TenantInfo {
 }
 
 func (backCtx *backExecCtx) GetAccountId() uint32 {
-	return backCtx.tenant.GetTenantID()
+	return backCtx.accountId
 }
 
 func (backCtx *backExecCtx) GetSql() string {
@@ -5070,7 +4606,7 @@ func (backCtx *backExecCtx) GetUserName() string {
 }
 
 func (backCtx *backExecCtx) GetStatsCache() *plan2.StatsCache {
-	return &plan2.StatsCache{}
+	return nil
 }
 
 func (backCtx *backExecCtx) GetRequestContext() context.Context {
@@ -5078,7 +4614,7 @@ func (backCtx *backExecCtx) GetRequestContext() context.Context {
 }
 
 func (backCtx *backExecCtx) GetTimeZone() *time.Location {
-	return &time.Location{}
+	return backCtx.timeZone
 }
 
 func (backCtx *backExecCtx) clear() {
@@ -5232,6 +4768,7 @@ func (backCtx *backExecCtx) GetDatabaseName() string {
 
 func (backCtx *backExecCtx) SetDatabaseName(s string) {
 	backCtx.proto.SetDatabaseName(s)
+	backCtx.GetTxnCompileCtx().SetDatabase(s)
 }
 
 func (backCtx *backExecCtx) ServerStatusIsSet(bit uint16) bool {
@@ -5342,6 +4879,7 @@ func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
 		Host:          pu.SV.Host,
 		Database:      backCtx.proto.GetDatabaseName(),
 		Version:       makeServerVersion(pu, serverVersion.Load().(string)),
+		TimeZone:      backCtx.GetTimeZone(),
 		StorageEngine: pu.StorageEngine,
 		Buf:           backCtx.buf,
 	}
@@ -5453,17 +4991,17 @@ func (mce *MysqlCmdExecutor) setResponse(cwIndex, cwsLen int, rspLen uint64) *Re
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
 func (mce *MysqlCmdExecutor) ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			moe, ok := e.(*moerr.Error)
-			if !ok {
-				err = moerr.ConvertPanicError(requestCtx, e)
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
-			} else {
-				resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
-			}
-		}
-	}()
+	//defer func() {
+	//	if e := recover(); e != nil {
+	//		moe, ok := e.(*moerr.Error)
+	//		if !ok {
+	//			err = moerr.ConvertPanicError(requestCtx, e)
+	//			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), err)
+	//		} else {
+	//			resp = NewGeneralErrorResponse(COM_QUERY, mce.ses.GetServerStatus(), moe)
+	//		}
+	//	}
+	//}()
 
 	var span trace.Span
 	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.ExecRequest",

@@ -45,7 +45,6 @@ import (
 
 var _ ComputationWrapper = &TxnComputationWrapper{}
 var _ ComputationWrapper = &NullComputationWrapper{}
-var _ ComputationWrapper = &BackComputationWrapper{}
 
 type NullComputationWrapper struct {
 	*TxnComputationWrapper
@@ -89,14 +88,14 @@ type TxnComputationWrapper struct {
 	stmt      tree.Statement
 	plan      *plan2.Plan
 	proc      *process.Process
-	ses       *Session
+	ses       TempInter
 	compile   *compile.Compile
 	runResult *util2.RunResult
 
 	uuid uuid.UUID
 }
 
-func InitTxnComputationWrapper(ses *Session, stmt tree.Statement, proc *process.Process) *TxnComputationWrapper {
+func InitTxnComputationWrapper(ses TempInter, stmt tree.Statement, proc *process.Process) *TxnComputationWrapper {
 	uuid, _ := uuid.NewV7()
 	return &TxnComputationWrapper{
 		stmt: stmt,
@@ -161,7 +160,7 @@ func (cwft *TxnComputationWrapper) GetColumns() ([]interface{}, error) {
 		c.SetOrgTable(col.TblName)
 		c.SetAutoIncr(col.Typ.AutoIncr)
 		c.SetSchema(col.DbName)
-		err = convertEngineTypeToMysqlType(cwft.ses.requestCtx, types.T(col.Typ.Id), c)
+		err = convertEngineTypeToMysqlType(cwft.ses.GetRequestContext(), types.T(col.Typ.Id), c)
 		if err != nil {
 			return nil, err
 		}
@@ -197,7 +196,10 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	defer span.End(trace.WithStatementExtra(cwft.ses.GetTxnId(), cwft.ses.GetStmtId(), cwft.ses.GetSqlOfStmt()))
 
 	var err error
-	defer RecordStatementTxnID(requestCtx, cwft.ses)
+	if ses, ok := cwft.ses.(*Session); ok {
+		defer RecordStatementTxnID(requestCtx, ses)
+	}
+
 	if cwft.ses.IfInitedTempEngine() {
 		requestCtx = context.WithValue(requestCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
 		cwft.ses.SetRequestContext(requestCtx)
@@ -242,22 +244,27 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 	cacheHit := cwft.plan != nil
 	if !cacheHit {
 		cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
-	} else if cwft.ses != nil && cwft.ses.GetTenantInfo() != nil {
-		cwft.ses.accountId, err = defines.GetAccountId(requestCtx)
+	} else if cwft.ses != nil && cwft.ses.GetTenantInfo() != nil && !cwft.ses.IsBackgroundSession() {
+		var accId uint32
+		accId, err = defines.GetAccountId(requestCtx)
 		if err != nil {
 			return nil, err
 		}
-		err = authenticateCanExecuteStatementAndPlan(requestCtx, cwft.ses, cwft.stmt, cwft.plan)
+		cwft.ses.SetAccountId(accId)
+		err = authenticateCanExecuteStatementAndPlan(requestCtx, cwft.ses.(*Session), cwft.stmt, cwft.plan)
 	}
 	if err != nil {
 		return nil, err
 	}
-	cwft.ses.p = cwft.plan
-	if ids := isResultQuery(cwft.plan); ids != nil {
-		if err = checkPrivilege(ids, requestCtx, cwft.ses); err != nil {
-			return nil, err
+	if !cwft.ses.IsBackgroundSession() {
+		cwft.ses.SetPlan(cwft.plan)
+		if ids := isResultQuery(cwft.plan); ids != nil {
+			if err = checkPrivilege(ids, requestCtx, cwft.ses.(*Session)); err != nil {
+				return nil, err
+			}
 		}
 	}
+
 	if _, ok := cwft.stmt.(*tree.Execute); ok {
 		executePlan := cwft.plan.GetDcl().GetExecute()
 		stmtName := executePlan.GetName()
@@ -269,7 +276,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 
 		// TODO check if schema change, obj.Obj is zero all the time in 0.6
 		for _, obj := range preparePlan.GetSchemas() {
-			newObj, newTableDef := cwft.ses.txnCompileCtx.Resolve(obj.SchemaName, obj.ObjName)
+			newObj, newTableDef := cwft.ses.GetTxnCompileCtx().Resolve(obj.SchemaName, obj.ObjName)
 			if newObj == nil {
 				return nil, moerr.NewInternalError(requestCtx, "table '%s' in prepare statement '%s' does not exist anymore", obj.ObjName, stmtName)
 			}
@@ -324,7 +331,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		// reset some special stmt for execute statement
 		switch cwft.stmt.(type) {
 		case *tree.ShowTableStatus:
-			cwft.ses.showStmtType = ShowTableStatus
+			cwft.ses.SetShowStmtType(ShowTableStatus)
 			cwft.ses.SetData(nil)
 		case *tree.SetVar, *tree.ShowVariables, *tree.ShowErrors, *tree.ShowWarnings:
 			return nil, nil
@@ -364,7 +371,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		cwft.ses.GetStorage(),
 		cwft.proc,
 		cwft.stmt,
-		cwft.ses.isInternal,
+		cwft.ses.GetIsInternal(),
 		deepcopy.Copy(cwft.ses.getCNLabels()).(map[string]string),
 		getStatementStartAt(requestCtx),
 	)
@@ -420,7 +427,7 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, u interfa
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx()
 
 		// 3. init temp-db to store temporary relations
-		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.txnHandler.txnOperator)
+		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.GetTxnHandler().txnOperator)
 		if err != nil {
 			return nil, err
 		}
@@ -442,10 +449,6 @@ func (cwft *TxnComputationWrapper) GetUUID() []byte {
 }
 
 func (cwft *TxnComputationWrapper) Run(ts uint64) (*util2.RunResult, error) {
-	logDebug(cwft.ses, cwft.ses.GetDebugString(), "compile.Run begin")
-	defer func() {
-		logDebug(cwft.ses, cwft.ses.GetDebugString(), "compile.Run end")
-	}()
 	runResult, err := cwft.compile.Run(ts)
 	cwft.runResult = runResult
 	cwft.compile = nil
@@ -466,66 +469,4 @@ func getStatementStartAt(ctx context.Context) time.Time {
 		return time.Now()
 	}
 	return v.(time.Time)
-}
-
-type BackComputationWrapper struct {
-	stmt    tree.Statement
-	proc    *process.Process
-	backCtx *backExecCtx
-	uuid    uuid.UUID
-}
-
-func InitBackComputationWrapper(backCtx *backExecCtx, stmt tree.Statement, proc *process.Process) *BackComputationWrapper {
-	uuid, _ := uuid.NewV7()
-	return &BackComputationWrapper{
-		stmt:    stmt,
-		proc:    proc,
-		backCtx: backCtx,
-		uuid:    uuid,
-	}
-}
-
-func (bcw *BackComputationWrapper) Run(ts uint64) (*util2.RunResult, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) GetAst() tree.Statement {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) GetProcess() *process.Process {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) GetColumns() ([]interface{}, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) Compile(requestCtx context.Context, u interface{}, fill func(interface{}, *batch.Batch) error) (interface{}, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) GetUUID() []byte {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) RecordExecPlan(ctx context.Context) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) GetLoadTag() bool {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (bcw *BackComputationWrapper) GetServerStatus() uint16 {
-	//TODO implement me
-	panic("implement me")
 }

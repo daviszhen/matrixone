@@ -77,7 +77,7 @@ func (tcc *TxnCompilerContext) GetBuildingAlterView() (bool, string, string) {
 	return tcc.buildAlterView, tcc.dbOfView, tcc.nameOfView
 }
 
-func (tcc *TxnCompilerContext) SetSession(ses *Session) {
+func (tcc *TxnCompilerContext) SetSession(ses TempInter) {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	tcc.ses = ses
@@ -695,7 +695,7 @@ func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.Subscri
 	if err != nil {
 		return nil, err
 	}
-	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession().(*Session), txn)
+	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession(), txn)
 	if err != nil {
 		return nil, err
 	}

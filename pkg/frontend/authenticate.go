@@ -3292,7 +3292,7 @@ func doSwitchRole(ctx context.Context, ses *Session, sr *tree.SetRole) (err erro
 	return err
 }
 
-func getSubscriptionMeta(ctx context.Context, dbName string, ses *Session, txn TxnOperator) (*plan.SubscriptionMeta, error) {
+func getSubscriptionMeta(ctx context.Context, dbName string, ses TempInter, txn TxnOperator) (*plan.SubscriptionMeta, error) {
 	dbMeta, err := ses.GetParameterUnit().StorageEngine.Database(ctx, dbName, txn)
 	if err != nil {
 		logutil.Errorf("Get Subscription database %s meta error: %s", dbName, err.Error())
@@ -3316,7 +3316,7 @@ func isSubscriptionValid(accountList string, accName string) bool {
 	return strings.Contains(accountList, accName)
 }
 
-func checkSubscriptionValidCommon(ctx context.Context, ses *Session, subName, accName, pubName string) (subs *plan.SubscriptionMeta, err error) {
+func checkSubscriptionValidCommon(ctx context.Context, ses TempInter, subName, accName, pubName string) (subs *plan.SubscriptionMeta, err error) {
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 	var (
@@ -3434,14 +3434,14 @@ func checkSubscriptionValidCommon(ctx context.Context, ses *Session, subName, ac
 			return nil, moerr.NewInternalError(newCtx, "the account %s is not allowed to subscribe the publication %s", tenantName, pubName)
 		}
 	} else if !isSubscriptionValid(accountList, tenantInfo.GetTenant()) {
-		logError(ses, ses.GetDebugString(),
-			"checkSubscriptionValidCommon",
-			zap.String("subName", subName),
-			zap.String("accName", accName),
-			zap.String("pubName", pubName),
-			zap.String("databaseName", databaseName),
-			zap.String("accountList", accountList),
-			zap.String("tenant", tenantInfo.GetTenant()))
+		//logError(ses, ses.GetDebugString(),
+		//	"checkSubscriptionValidCommon",
+		//	zap.String("subName", subName),
+		//	zap.String("accName", accName),
+		//	zap.String("pubName", pubName),
+		//	zap.String("databaseName", databaseName),
+		//	zap.String("accountList", accountList),
+		//	zap.String("tenant", tenantInfo.GetTenant()))
 		return nil, moerr.NewInternalError(newCtx, "the account %s is not allowed to subscribe the publication %s", tenantInfo.GetTenant(), pubName)
 	}
 
@@ -3456,7 +3456,7 @@ func checkSubscriptionValidCommon(ctx context.Context, ses *Session, subName, ac
 	return subs, err
 }
 
-func checkSubscriptionValid(ctx context.Context, ses *Session, createSql string) (*plan.SubscriptionMeta, error) {
+func checkSubscriptionValid(ctx context.Context, ses TempInter, createSql string) (*plan.SubscriptionMeta, error) {
 	var (
 		err                       error
 		lowerAny                  any

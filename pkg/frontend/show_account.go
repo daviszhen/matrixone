@@ -444,8 +444,9 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 		}
 	}
 
-	rsOfMoAccount = bh.ses.GetAllMysqlResultSet()[0]
-	MoAccountColumns = bh.ses.rs
+	backCtx := bh.(*backExec)
+	rsOfMoAccount = backCtx.backCtx.allResultSet[0]
+	MoAccountColumns = backCtx.backCtx.rs
 	bh.ClearExecResultSet()
 
 	// step 2
@@ -489,8 +490,8 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 		eachAccountInfo = nil
 	}
 
-	rsOfEachAccount := bh.ses.GetAllMysqlResultSet()[0]
-	EachAccountColumns = bh.ses.rs
+	rsOfEachAccount := backCtx.backCtx.allResultSet[0]
+	EachAccountColumns = backCtx.backCtx.rs
 	bh.ClearExecResultSet()
 
 	//step4: generate mysql result set
@@ -591,7 +592,7 @@ func initOutputRs(rs *MysqlResultSet, rsOfMoAccount *MysqlResultSet, rsOfEachAcc
 
 // getAccountInfo gets account info from mo_account under sys account
 func getAccountInfo(ctx context.Context,
-	bh *BackgroundHandler,
+	bh BackgroundExec,
 	sql string,
 	returnAccountIds bool) ([]*batch.Batch, [][]int32, error) {
 	var err error
@@ -622,7 +623,7 @@ func getAccountInfo(ctx context.Context,
 }
 
 // getTableStats gets the table statistics for the account
-func getTableStats(ctx context.Context, bh *BackgroundHandler, accountId int32) (*batch.Batch, error) {
+func getTableStats(ctx context.Context, bh BackgroundExec, accountId int32) (*batch.Batch, error) {
 	var sql string
 	var err error
 	var rs []*batch.Batch

@@ -118,6 +118,7 @@ type TempInter interface {
 	GetTenantInfo() *TenantInfo
 	GetStorage() engine.Engine
 	GetBackgroundExec(ctx context.Context) BackgroundExec
+	GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec
 	getGlobalSystemVariableValue(name string) (interface{}, error)
 	GetSessionVar(name string) (interface{}, error)
 	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
@@ -164,6 +165,16 @@ type TempInter interface {
 	SetMysqlResultSet(mrs *MysqlResultSet)
 	GetConnectionID() uint32
 	SetRequestContext(ctx context.Context)
+	IsDerivedStmt() bool
+	SetAccountId(uint32)
+	SetPlan(plan *plan.Plan)
+	SetData([][]interface{})
+	GetIsInternal() bool
+	getCNLabels() map[string]string
+	SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error)
+	SetTempEngine(ctx context.Context, te engine.Engine) error
+	EnableInitTempEngine()
+	GetUpstream() TempInter
 }
 
 type Session struct {
@@ -360,9 +371,18 @@ type Session struct {
 	fromProxy bool
 
 	disableTrace bool
+}
 
-	backSes          *BackgroundSession
-	shareTxnBackSess *BackgroundSession
+func (ses *Session) GetUpstream() TempInter {
+	return ses.upstream
+}
+
+func (ses *Session) SetPlan(plan *plan.Plan) {
+	ses.p = plan
+}
+
+func (ses *Session) SetAccountId(u uint32) {
+	ses.accountId = u
 }
 
 func (ses *Session) GetStmtProfile() *process.StmtProfile {
@@ -801,14 +821,6 @@ func (ses *Session) Close() {
 		bat.Clean(ses.mp)
 	}
 	if ses.isNotBackgroundSession {
-		if ses.backSes != nil {
-			ses.backSes.Close()
-		}
-		if ses.shareTxnBackSess != nil {
-			ses.shareTxnBackSess.Close()
-		}
-	}
-	if ses.isNotBackgroundSession {
 		mp := ses.GetMemPool()
 		mpool.DeleteMPool(mp)
 		ses.SetMemPool(nil)
@@ -827,63 +839,6 @@ func (ses *Session) Clear() {
 	}
 	ses.ClearAllMysqlResultSet()
 	ses.ClearResultBatches()
-}
-
-// BackgroundSession executing the sql in background
-type BackgroundSession struct {
-	*Session
-	cancel   context.CancelFunc
-	shareTxn bool
-}
-
-// NewBackgroundSession generates an independent background session executing the sql
-func NewBackgroundSession(reqCtx context.Context, upstream *Session, mp *mpool.MPool, PU *config.ParameterUnit, gSysVars *GlobalSystemVariables, shareTxn bool) *BackgroundSession {
-	connCtx := upstream.GetConnectContext()
-	aicm := upstream.GetAutoIncrCacheManager()
-	var ses *Session
-	var sharedTxnHandler *TxnHandler
-	if shareTxn {
-		sharedTxnHandler = upstream.GetTxnHandler()
-		if sharedTxnHandler == nil /* || !sharedTxnHandler.IsValidTxnOperator() */ {
-			panic("invalid shared txn handler")
-		}
-	}
-	ses = NewSession(&FakeProtocol{}, mp, PU, gSysVars, false, aicm, sharedTxnHandler)
-	ses.upstream = upstream
-	ses.SetOutputCallback(fakeDataSetFetcher)
-	if stmt := motrace.StatementFromContext(reqCtx); stmt != nil {
-		// Reset background session id as frontend stmt id
-		ses.uuid = stmt.StatementID
-		logutil.Debugf("session uuid: %s -> background session uuid: %s", uuid.UUID(stmt.SessionID).String(), ses.uuid.String())
-	}
-	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(reqCtx)
-	ses.SetRequestContext(cancelBackgroundCtx)
-	ses.SetConnectContext(connCtx)
-	ses.UpdateDebugString()
-	ses.SetDatabaseName(upstream.GetDatabaseName())
-	//TODO: For seq init values.
-	ses.InheritSequenceData(upstream)
-	backSes := &BackgroundSession{
-		Session:  ses,
-		cancel:   cancelBackgroundFunc,
-		shareTxn: shareTxn,
-	}
-	return backSes
-}
-
-func (bgs *BackgroundSession) isShareTxn() bool {
-	return bgs.shareTxn
-}
-
-func (bgs *BackgroundSession) Close() {
-	if bgs.cancel != nil {
-		bgs.cancel()
-	}
-
-	if bgs.Session != nil {
-		bgs.Session.Close()
-	}
-	bgs = nil
 }
 
 func (ses *Session) GetIncBlockIdx() int {
@@ -1051,23 +1006,6 @@ func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
 		ses.GetParameterUnit())
 }
 
-func refreshBackgroundSession(reqCtx context.Context,
-	backSess *BackgroundSession,
-	upstream *Session,
-	callback func(interface{}, *batch.Batch) error) {
-	cancelBackgroundCtx, cancelBackgroundFunc := context.WithCancel(reqCtx)
-	backSess.upstream = upstream
-	backSess.SetOutputCallback(callback)
-	backSess.SetRequestContext(cancelBackgroundCtx)
-	backSess.UpdateDebugString()
-	backSess.SetDatabaseName(upstream.GetDatabaseName())
-	//TODO: For seq init values.
-	backSess.InheritSequenceData(upstream)
-	backSess.cancel = cancelBackgroundFunc
-	backSess.SetOptionBits(OPTION_AUTOCOMMIT)
-	backSess.ClearServerStatus(0)
-}
-
 // GetShareTxnBackgroundExec returns a background executor running the sql in a shared transaction.
 // newRawBatch denotes we need the raw batch instead of mysql result set.
 func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch bool) BackgroundExec {
@@ -1111,11 +1049,27 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 			optionBits:           0,
 			shareTxn:             false,
 			gSysVars:             GSysVariables,
+			label:                make(map[string]string),
+			timeZone:             time.Local,
+		}
+		backCtx.SetOptionBits(OPTION_AUTOCOMMIT)
+		backCtx.GetTxnCompileCtx().SetSession(backCtx)
+		backCtx.GetTxnHandler().SetSession(backCtx)
+		var accountId uint32
+		accountId, err = defines.GetAccountId(ctx)
+		if err != nil {
+			panic(err)
+		}
+		backCtx.tenant = &TenantInfo{
+			TenantID:      accountId,
+			UserID:        defines.GetUserId(ctx),
+			DefaultRoleID: defines.GetRoleId(ctx),
 		}
 		bh := &backExec{
 			mce:     NewMysqlCmdExecutor(),
 			backCtx: backCtx,
 		}
+		bh.mce.ses = bh.backCtx
 		//the derived statement execute in a shared transaction in background session
 		bh.backCtx.ReplaceDerivedStmt(true)
 		return bh
@@ -1135,15 +1089,61 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 	return nil
 }
 
-func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) *BackgroundHandler {
-	bh := &BackgroundHandler{
-		mce: NewMysqlCmdExecutor(),
-		ses: ses.backSes,
+func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
+	pu := ses.GetParameterUnit()
+	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, nil, nil)
+	backCtx := &backExecCtx{
+		requestCtx:           ses.GetRequestContext(),
+		connectCtx:           ses.GetConnectContext(),
+		pu:                   pu,
+		pool:                 ses.GetMemPool(),
+		txnClient:            pu.TxnClient,
+		autoIncrCacheManager: ses.GetAutoIncrCacheManager(),
+		proto:                &FakeProtocol{},
+		buf:                  buffer.New(),
+		stmtProfile:          process.StmtProfile{},
+		tenant:               nil,
+		txnHandler:           txnHandler,
+		txnCompileCtx:        InitTxnCompilerContext(txnHandler, ""),
+		mrs:                  nil,
+		outputCallback:       batchFetcher2,
+		allResultSet:         nil,
+		resultBatches:        nil,
+		serverStatus:         0,
+		derivedStmt:          false,
+		optionBits:           0,
+		shareTxn:             false,
+		gSysVars:             GSysVariables,
+		label:                make(map[string]string),
+		timeZone:             time.Local,
 	}
-	bh.ses.Clear()
-	//refresh background session
-	refreshBackgroundSession(ctx, bh.ses, ses, batchFetcher)
+	backCtx.GetTxnCompileCtx().SetSession(backCtx)
+	backCtx.GetTxnHandler().SetSession(backCtx)
+	var accountId uint32
+	var err error
+	accountId, err = defines.GetAccountId(ctx)
+	if err != nil {
+		panic(err)
+	}
+	backCtx.tenant = &TenantInfo{
+		TenantID:      accountId,
+		UserID:        defines.GetUserId(ctx),
+		DefaultRoleID: defines.GetRoleId(ctx),
+	}
+	bh := &backExec{
+		mce:     NewMysqlCmdExecutor(),
+		backCtx: backCtx,
+	}
+	bh.mce.ses = bh.backCtx
 	return bh
+	//bh := &BackgroundHandler{
+	//	mce: NewMysqlCmdExecutor(),
+	//	ses: ses.backSes,
+	//}
+	//bh.ses.Clear()
+	////refresh background session
+	//refreshBackgroundSession(ctx, bh.ses, ses, batchFetcher)
+	//return bh
 	//bh := &BackgroundHandler{
 	//	mce: NewMysqlCmdExecutor(),
 	//	ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, false),
@@ -2281,141 +2281,6 @@ func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *S
 	return mce.GetDoQueryFunc()(ctx, &UserInput{stmt: stmt})
 }
 
-type BackgroundHandler struct {
-	mce *MysqlCmdExecutor
-	ses *BackgroundSession
-}
-
-// NewBackgroundHandler with first two parameters.
-// connCtx as the parent of the txnCtx
-var NewBackgroundHandler = func(
-	reqCtx context.Context,
-	upstream *Session,
-	mp *mpool.MPool,
-	pu *config.ParameterUnit) BackgroundExec {
-	if upstream.backSes == nil {
-		upstream.backSes = NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false)
-	}
-	backSes := upstream.backSes
-	bh := &BackgroundHandler{
-		mce: NewMysqlCmdExecutor(),
-		ses: backSes,
-	}
-	bh.ses.Clear()
-	//refresh background session
-	refreshBackgroundSession(reqCtx, bh.ses, upstream, fakeDataSetFetcher)
-	return bh
-	//bh := &BackgroundHandler{
-	//	mce: NewMysqlCmdExecutor(),
-	//	ses: NewBackgroundSession(reqCtx, upstream, mp, pu, GSysVariables, false),
-	//}
-	//return bh
-}
-
-func (bh *BackgroundHandler) Close() {
-	bh.mce.Close()
-	bh.Clear()
-}
-
-func (bh *BackgroundHandler) Clear() {
-	bh.ses.mrs = nil
-	bh.ses.Clear()
-}
-
-func (bh *BackgroundHandler) Exec(ctx context.Context, sql string) error {
-	bh.mce.SetSession(bh.ses.Session)
-	if ctx == nil {
-		ctx = bh.ses.GetRequestContext()
-	} else {
-		bh.ses.SetRequestContext(ctx)
-	}
-	_, err := defines.GetAccountId(ctx)
-	if err != nil {
-		return err
-	}
-	bh.mce.ChooseDoQueryFunc(bh.ses.GetParameterUnit().SV.EnableDoComQueryInProgress)
-
-	// For determine this is a background sql.
-	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	bh.mce.GetSession().SetRequestContext(ctx)
-
-	//logutil.Debugf("-->bh:%s", sql)
-	v, err := bh.ses.GetGlobalVar("lower_case_table_names")
-	if err != nil {
-		return err
-	}
-	statements, err := mysql.Parse(ctx, sql, v.(int64))
-	if err != nil {
-		return err
-	}
-	if len(statements) > 1 {
-		return moerr.NewInternalError(ctx, "Exec() can run one statement at one time. but get '%d' statements now, sql = %s", len(statements), sql)
-	}
-	//share txn can not run transaction statement
-	if bh.ses.isShareTxn() {
-		for _, stmt := range statements {
-			switch stmt.(type) {
-			case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-				return moerr.NewInternalError(ctx, "Exec() can not run transaction statement in share transaction, sql = %s", sql)
-			}
-		}
-	}
-	logDebug(bh.mce.GetSession().(*Session), bh.ses.GetDebugString(), "query trace(backgroundExecSql)",
-		logutil.ConnectionIdField(bh.ses.GetConnectionID()),
-		logutil.QueryField(SubStringFromBegin(sql, int(bh.ses.GetParameterUnit().SV.LengthOfQueryPrinted))))
-	return bh.mce.GetDoQueryFunc()(ctx, &UserInput{sql: sql})
-}
-
-func (bh *BackgroundHandler) ExecStmt(ctx context.Context, stmt tree.Statement) error {
-	bh.mce.SetSession(bh.ses.Session)
-	if ctx == nil {
-		ctx = bh.ses.GetRequestContext()
-	} else {
-		bh.ses.SetRequestContext(ctx)
-	}
-	_, err := defines.GetAccountId(ctx)
-	if err != nil {
-		return err
-	}
-	bh.mce.ChooseDoQueryFunc(bh.ses.GetParameterUnit().SV.EnableDoComQueryInProgress)
-
-	// For determine this is a background sql.
-	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	bh.mce.GetSession().SetRequestContext(ctx)
-
-	//share txn can not run transaction statement
-	if bh.ses.isShareTxn() {
-		switch stmt.(type) {
-		case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-			return moerr.NewInternalError(ctx, "Exec() can not run transaction statement in share transaction")
-		}
-	}
-	logDebug(bh.ses.Session, bh.ses.GetDebugString(), "query trace(backgroundExecStmt)",
-		logutil.ConnectionIdField(bh.ses.GetConnectionID()))
-	return bh.mce.GetDoQueryFunc()(ctx, &UserInput{stmt: stmt})
-}
-
-func (bh *BackgroundHandler) GetExecResultSet() []interface{} {
-	mrs := bh.ses.GetAllMysqlResultSet()
-	ret := make([]interface{}, len(mrs))
-	for i, mr := range mrs {
-		ret[i] = mr
-	}
-	return ret
-}
-
-func (bh *BackgroundHandler) ClearExecResultSet() {
-	bh.ses.ClearAllMysqlResultSet()
-}
-
-func (bh *BackgroundHandler) ClearExecResultBatches() {
-	bh.ses.ClearResultBatches()
-}
-
-func (bh *BackgroundHandler) GetExecResultBatches() []*batch.Batch {
-	return bh.ses.GetResultBatches()
-}
-
 var NewBackgroundExec = func(
 	reqCtx context.Context,
 	upstream *Session,
@@ -2444,7 +2309,23 @@ var NewBackgroundExec = func(
 		optionBits:           0,
 		shareTxn:             false,
 		gSysVars:             GSysVariables,
+		label:                make(map[string]string),
+		timeZone:             time.Local,
 	}
+	backCtx.GetTxnCompileCtx().SetSession(backCtx)
+	backCtx.GetTxnHandler().SetSession(backCtx)
+	var accountId uint32
+	var err error
+	accountId, err = defines.GetAccountId(reqCtx)
+	if err != nil {
+		panic(err)
+	}
+	backCtx.tenant = &TenantInfo{
+		TenantID:      accountId,
+		UserID:        defines.GetUserId(reqCtx),
+		DefaultRoleID: defines.GetRoleId(reqCtx),
+	}
+
 	bh := &backExec{
 		mce:     NewMysqlCmdExecutor(),
 		backCtx: backCtx,

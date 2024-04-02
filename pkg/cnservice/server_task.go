@@ -330,6 +330,7 @@ func (s *service) registerExecutorsLocked() {
 	s.task.runner.RegisterExecutor(task.TaskCode_SystemInit,
 		func(ctx context.Context, t task.Task) error {
 			if err := frontend.InitSysTenant(moServerCtx, s.mo.GetRoutineManager().GetAutoIncrCacheManager()); err != nil {
+				panic(err)
 				return err
 			}
 			if err := sysview.InitSchema(moServerCtx, ieFactory); err != nil {

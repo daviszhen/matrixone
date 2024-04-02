@@ -110,11 +110,13 @@ func (th *TxnHandler) createTxnCtx() (context.Context, error) {
 func (th *TxnHandler) AttachTempStorageToTxnCtx() error {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	ctx, err := th.createTxnCtx()
-	if err != nil {
-		return err
+	if th.ses.IfInitedTempEngine() {
+		ctx, err := th.createTxnCtx()
+		if err != nil {
+			return err
+		}
+		th.txnCtx = context.WithValue(ctx, defines.TemporaryTN{}, th.ses.GetTempTableStorage())
 	}
-	th.txnCtx = context.WithValue(ctx, defines.TemporaryTN{}, th.ses.GetTempTableStorage())
 	return nil
 }
 
@@ -302,7 +304,7 @@ func (th *TxnHandler) GetTxnOperator() (context.Context, TxnOperator, error) {
 	return ctx, th.txnOperator, nil
 }
 
-func (th *TxnHandler) SetSession(ses *Session) {
+func (th *TxnHandler) SetSession(ses TempInter) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	th.ses = ses
@@ -336,7 +338,7 @@ func (th *TxnHandler) CommitTxn() error {
 	if txnCtx == nil {
 		panic("context should not be nil")
 	}
-	if ses.GetTempTableStorage() != nil {
+	if ses.IfInitedTempEngine() && ses.GetTempTableStorage() != nil {
 		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.GetTempTableStorage())
 	}
 	storage := th.GetStorage()
@@ -403,7 +405,7 @@ func (th *TxnHandler) RollbackTxn() error {
 	if txnCtx == nil {
 		panic("context should not be nil")
 	}
-	if ses.GetTempTableStorage() != nil {
+	if ses.IfInitedTempEngine() && ses.GetTempTableStorage() != nil {
 		txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.GetTempTableStorage())
 	}
 	storage := th.GetStorage()
