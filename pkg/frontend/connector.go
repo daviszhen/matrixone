@@ -162,7 +162,7 @@ func (mce *MysqlCmdExecutor) handleDropConnector(ctx context.Context, st *tree.D
 	return nil
 }
 
-func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, cwIndex, cwsLen int) error {
+func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, isLastStmt bool) error {
 	var err error
 	ses := mce.GetSession()
 	proto := ses.GetMysqlProtocol()
@@ -171,7 +171,7 @@ func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, cwIndex, 
 	}
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
 	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
 		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
 	}

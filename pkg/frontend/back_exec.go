@@ -220,7 +220,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.ShowConnectors:
 		selfHandle = true
-		if err = mce.handleShowConnectors(requestCtx, i, len(cws)); err != nil {
+		if err = mce.handleShowConnectors(requestCtx, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.Deallocate:
@@ -243,7 +243,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.ShowVariables:
 		selfHandle = true
-		err = mce.handleShowVariables(st, proc, i, len(cws))
+		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		}
@@ -363,7 +363,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.CallStmt:
 		selfHandle = true
-		if err = mce.handleCallProcedure(requestCtx, st, proc, i, len(cws)); err != nil {
+		if err = mce.handleCallProcedure(requestCtx, st, proc); err != nil {
 			return
 		}
 	case *tree.Grant:
@@ -458,7 +458,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 			return
 		}
 	case *tree.ShowVariables:
-		err = mce.handleShowVariables(st, proc, i, len(cws))
+		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		} else {
@@ -747,7 +747,7 @@ func (backCtx *backExecCtx) GetServerStatus() uint16 {
 	return backCtx.serverStatus
 }
 
-func (backCtx *backExecCtx) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, cwIndex, cwsLen int) *Response {
+func (backCtx *backExecCtx) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response {
 	return nil
 }
 

@@ -791,7 +791,7 @@ func Test_handleShowVariables(t *testing.T) {
 		proto.SetSession(ses)
 
 		sv := &tree.ShowVariables{Global: false}
-		convey.So(mce.handleShowVariables(sv, nil, 0, 1), convey.ShouldBeNil)
+		convey.So(mce.handleShowVariables(sv, nil, true), convey.ShouldBeNil)
 
 		bh := &backgroundExecTest{}
 		bh.init()
@@ -808,7 +808,7 @@ func Test_handleShowVariables(t *testing.T) {
 
 		bh.sql2result[sql] = newMrsForSystemVariablesOfAccount(rows)
 		sv = &tree.ShowVariables{Global: true}
-		convey.So(mce.handleShowVariables(sv, nil, 0, 1), convey.ShouldBeNil)
+		convey.So(mce.handleShowVariables(sv, nil, true), convey.ShouldBeNil)
 	})
 }
 

@@ -623,7 +623,7 @@ func (mce *MysqlCmdExecutor) handleSelectVariables(ve *tree.VarExpr, cwIndex, cw
 	mrs.AddRow(row)
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, mrs)
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, false)
 
 	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
 		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed.")
@@ -940,7 +940,7 @@ func (mce *MysqlCmdExecutor) handleShowErrors(cwIndex, cwsLen int) error {
 	}
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, false)
 
 	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
 		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
@@ -1073,7 +1073,7 @@ func doShowVariables(ses *Session, proc *process.Process, sv *tree.ShowVariables
 /*
 handle show variables
 */
-func (mce *MysqlCmdExecutor) handleShowVariables(sv *tree.ShowVariables, proc *process.Process, cwIndex, cwsLen int) error {
+func (mce *MysqlCmdExecutor) handleShowVariables(sv *tree.ShowVariables, proc *process.Process, isLastStmt bool) error {
 	ses := mce.GetSession()
 	proto := ses.GetMysqlProtocol()
 	err := doShowVariables(ses.(*Session), proc, sv)
@@ -1081,7 +1081,7 @@ func (mce *MysqlCmdExecutor) handleShowVariables(sv *tree.ShowVariables, proc *p
 		return err
 	}
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
 
 	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
 		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
@@ -1433,7 +1433,7 @@ func (mce *MysqlCmdExecutor) handleDropProcedure(ctx context.Context, dp *tree.D
 	return doDropProcedure(ctx, mce.GetSession().(*Session), dp)
 }
 
-func (mce *MysqlCmdExecutor) handleCallProcedure(ctx context.Context, call *tree.CallStmt, proc *process.Process, cwIndex, cwsLen int) error {
+func (mce *MysqlCmdExecutor) handleCallProcedure(ctx context.Context, call *tree.CallStmt, proc *process.Process) error {
 	ses := mce.GetSession().(*Session)
 	proto := ses.GetMysqlProtocol()
 	results, err := doInterpretCall(ctx, mce.GetSession().(*Session), call)
@@ -1450,7 +1450,7 @@ func (mce *MysqlCmdExecutor) handleCallProcedure(ctx context.Context, call *tree
 	} else {
 		for i, result := range results {
 			mer := NewMysqlExecutionResult(0, 0, 0, 0, result.(*MysqlResultSet))
-			resp = mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, i, len(results))
+			resp = mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, i == len(results)-1)
 			if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
 				return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
 			}
@@ -1523,7 +1523,7 @@ func (mce *MysqlCmdExecutor) handleShowAccounts(ctx context.Context, sa *tree.Sh
 		return err
 	}
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, false)
 
 	if err = proto.SendResponse(ctx, resp); err != nil {
 		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
@@ -1541,7 +1541,7 @@ func (mce *MysqlCmdExecutor) handleShowCollation(sc *tree.ShowCollation, proc *p
 		return err
 	}
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, false)
 
 	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
 		return moerr.NewInternalError(ses.requestCtx, "routine send response failed. error:%v ", err)
@@ -1718,7 +1718,7 @@ func (mce *MysqlCmdExecutor) handleShowSubscriptions(ctx context.Context, ss *tr
 		return err
 	}
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, false)
 
 	if err = proto.SendResponse(ctx, resp); err != nil {
 		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
@@ -1813,7 +1813,7 @@ func (mce *MysqlCmdExecutor) handleShowBackendServers(ctx context.Context, cwInd
 	}
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
+	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, false)
 	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
 		return moerr.NewInternalError(ses.requestCtx, "routine send response failed, error: %v ", err)
 	}
@@ -2681,7 +2681,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	case *tree.ShowConnectors:
 		selfHandle = true
-		if err = mce.handleShowConnectors(requestCtx, i, len(cws)); err != nil {
+		if err = mce.handleShowConnectors(requestCtx, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.Deallocate:
@@ -2704,7 +2704,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	case *tree.ShowVariables:
 		selfHandle = true
-		err = mce.handleShowVariables(st, proc, i, len(cws))
+		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		}
@@ -2854,7 +2854,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 		}
 	case *tree.CallStmt:
 		selfHandle = true
-		if err = mce.handleCallProcedure(requestCtx, st, proc, i, len(cws)); err != nil {
+		if err = mce.handleCallProcedure(requestCtx, st, proc); err != nil {
 			return
 		}
 	case *tree.Grant:
@@ -2954,7 +2954,7 @@ func (mce *MysqlCmdExecutor) executeStmt(requestCtx context.Context,
 			return
 		}
 	case *tree.ShowVariables:
-		err = mce.handleShowVariables(st, proc, i, len(cws))
+		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		} else {
@@ -3609,7 +3609,7 @@ func checkNodeCanCache(p *plan2.Plan) bool {
 }
 
 func (mce *MysqlCmdExecutor) setResponse(cwIndex, cwsLen int, rspLen uint64) *Response {
-	return mce.ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", cwIndex, cwsLen)
+	return mce.ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", false)
 }
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
@@ -4119,8 +4119,8 @@ func (mce *MysqlCmdExecutor) handleSetOption(ctx context.Context, data []byte) (
 	return nil
 }
 
-func setResponse(ses *Session, cwIndex, cwsLen int, rspLen uint64) *Response {
-	return ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", cwIndex, cwsLen)
+func setResponse(ses *Session, isLastStmt bool, rspLen uint64) *Response {
+	return ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", isLastStmt)
 }
 
 // response the client
@@ -4151,7 +4151,7 @@ func respClientFunc(requestCtx context.Context,
 		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
 		*tree.LockTableStmt, *tree.UnLockTableStmt,
 		*tree.CreateStage, *tree.DropStage, *tree.AlterStage, *tree.CreateStream, *tree.AlterSequence:
-		resp := setResponse(ses, execCtx.i, len(execCtx.cws), rspLen)
+		resp := setResponse(ses, execCtx.isLastStmt, rspLen)
 		if _, ok := execCtx.stmt.(*tree.Insert); ok {
 			resp.lastInsertId = execCtx.proc.GetLastInsertID()
 			if execCtx.proc.GetLastInsertID() != 0 {
@@ -4194,7 +4194,7 @@ func respClientFunc(requestCtx context.Context,
 				return err
 			}
 		} else {
-			resp := setResponse(ses, execCtx.i, len(execCtx.cws), rspLen)
+			resp := setResponse(ses, execCtx.isLastStmt, rspLen)
 			if err2 := ses.GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
 				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
 				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
@@ -4204,14 +4204,14 @@ func respClientFunc(requestCtx context.Context,
 
 	case *tree.SetVar, *tree.SetTransaction, *tree.BackupStart, *tree.CreateConnector, *tree.DropConnector,
 		*tree.PauseDaemonTask, *tree.ResumeDaemonTask, *tree.CancelDaemonTask:
-		resp := setResponse(ses, execCtx.i, len(execCtx.cws), rspLen)
+		resp := setResponse(ses, execCtx.isLastStmt, rspLen)
 		if err2 := ses.GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
 			return moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
 		}
 	case *tree.Deallocate:
 		//we will not send response in COM_STMT_CLOSE command
 		if ses.GetCmd() != COM_STMT_CLOSE {
-			resp := setResponse(ses, execCtx.i, len(execCtx.cws), rspLen)
+			resp := setResponse(ses, execCtx.isLastStmt, rspLen)
 			if err2 := ses.GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
 				err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
 				logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
@@ -4220,7 +4220,7 @@ func respClientFunc(requestCtx context.Context,
 		}
 
 	case *tree.Reset:
-		resp := setResponse(ses, execCtx.i, len(execCtx.cws), rspLen)
+		resp := setResponse(ses, execCtx.isLastStmt, rspLen)
 		if err2 := ses.GetMysqlProtocol().SendResponse(requestCtx, resp); err2 != nil {
 			err = moerr.NewInternalError(requestCtx, "routine send response failed. error:%v ", err2)
 			logStatementStatus(requestCtx, ses, execCtx.stmt, fail, err)
