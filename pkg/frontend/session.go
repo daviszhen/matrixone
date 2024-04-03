@@ -2283,17 +2283,17 @@ func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *S
 
 var NewBackgroundExec = func(
 	reqCtx context.Context,
-	upstream *Session,
+	upstream TempInter,
 	mp *mpool.MPool,
 	pu *config.ParameterUnit) BackgroundExec {
 	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, nil, nil)
 	backCtx := &backExecCtx{
 		requestCtx:           reqCtx,
-		connectCtx:           upstream.connectCtx,
+		connectCtx:           upstream.GetConnectContext(),
 		pu:                   pu,
 		pool:                 mp,
 		txnClient:            pu.TxnClient,
-		autoIncrCacheManager: upstream.autoIncrCacheManager,
+		autoIncrCacheManager: upstream.GetAutoIncrCacheManager(),
 		proto:                &FakeProtocol{},
 		buf:                  buffer.New(),
 		stmtProfile:          process.StmtProfile{},

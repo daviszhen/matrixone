@@ -4592,8 +4592,11 @@ func (backCtx *backExecCtx) getGlobalSystemVariableValue(name string) (interface
 }
 
 func (backCtx *backExecCtx) GetBackgroundExec(ctx context.Context) BackgroundExec {
-	//TODO implement me
-	panic("implement me")
+	return NewBackgroundExec(
+		ctx,
+		backCtx,
+		backCtx.GetMemPool(),
+		backCtx.GetParameterUnit())
 }
 
 func (backCtx *backExecCtx) GetStorage() engine.Engine {
