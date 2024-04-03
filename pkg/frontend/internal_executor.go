@@ -23,8 +23,6 @@ import (
 
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/common/runtime"
-	"github.com/matrixorigin/matrixone/pkg/config"
-	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	ie "github.com/matrixorigin/matrixone/pkg/util/internalExecutor"
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
@@ -66,22 +64,18 @@ func applyOverride(sess *Session, opts ie.SessionOverrideOptions) {
 type internalExecutor struct {
 	sync.Mutex
 	proto        *internalProtocol
-	pu           *config.ParameterUnit
 	baseSessOpts ie.SessionOverrideOptions
-	aicm         *defines.AutoIncrCacheManager
 }
 
-func NewInternalExecutor(pu *config.ParameterUnit, aicm *defines.AutoIncrCacheManager) *internalExecutor {
-	return newIe(pu, aicm)
+func NewInternalExecutor() *internalExecutor {
+	return newIe()
 }
 
-func newIe(pu *config.ParameterUnit, aicm *defines.AutoIncrCacheManager) *internalExecutor {
+func newIe() *internalExecutor {
 	proto := &internalProtocol{result: &internalExecResult{}}
 	ret := &internalExecutor{
 		proto:        proto,
-		pu:           pu,
 		baseSessOpts: ie.NewOptsBuilder().Finish(),
-		aicm:         aicm,
 	}
 	return ret
 }
@@ -175,12 +169,12 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 	//
 	// Session does not have a close call.   We need a Close() call in the Exec/Query method above.
 	//
-	mp, err := mpool.NewMPool("internal_exec_cmd_session", ie.pu.SV.GuestMmuLimitation, mpool.NoFixed)
+	mp, err := mpool.NewMPool("internal_exec_cmd_session", gPu.SV.GuestMmuLimitation, mpool.NoFixed)
 	if err != nil {
 		logutil.Fatalf("internalExecutor cannot create mpool in newCmdSession")
 		panic(err)
 	}
-	sess := NewSession(ie.proto, mp, ie.pu, GSysVariables, true, ie.aicm, nil)
+	sess := NewSession(ie.proto, mp, GSysVariables, true, nil)
 	sess.SetRequestContext(ctx)
 	sess.SetConnectContext(ctx)
 	sess.disableTrace = true

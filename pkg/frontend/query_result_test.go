@@ -74,7 +74,7 @@ func newTestSession(t *testing.T, ctrl *gomock.Controller) *Session {
 
 	testutil.SetupAutoIncrService()
 	//new session
-	ses := NewSession(proto, testPool, pu, GSysVariables, true, nil, nil)
+	ses := NewSession(proto, testPool, pu, GSysVariables, nil)
 	var c clock.Clock
 	_, _ = ses.SetTempTableStorage(c)
 	return ses

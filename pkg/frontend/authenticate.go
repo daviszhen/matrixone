@@ -3293,7 +3293,7 @@ func doSwitchRole(ctx context.Context, ses *Session, sr *tree.SetRole) (err erro
 }
 
 func getSubscriptionMeta(ctx context.Context, dbName string, ses TempInter, txn TxnOperator) (*plan.SubscriptionMeta, error) {
-	dbMeta, err := ses.GetParameterUnit().StorageEngine.Database(ctx, dbName, txn)
+	dbMeta, err := gPu.StorageEngine.Database(ctx, dbName, txn)
 	if err != nil {
 		logutil.Errorf("Get Subscription database %s meta error: %s", dbName, err.Error())
 		return nil, moerr.NewNoDB(ctx)
@@ -4356,7 +4356,7 @@ func doDropAccount(ctx context.Context, ses *Session, da *tree.DropAccount) (err
 func postDropSuspendAccount(
 	ctx context.Context, ses *Session, accountName string, accountID int64, version uint64,
 ) (err error) {
-	qs := ses.GetParameterUnit().QueryService
+	qs := gPu.QueryService
 	if qs == nil {
 		return moerr.NewInternalError(ctx, "query service is not initialized")
 	}
@@ -7531,7 +7531,7 @@ func checkSysExistsOrNot(ctx context.Context, bh BackgroundExec, pu *config.Para
 
 // InitSysTenant initializes the tenant SYS before any tenants and accepting any requests
 // during the system is booting.
-func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err error) {
+func InitSysTenant(ctx context.Context) (err error) {
 	var exists bool
 	var mp *mpool.MPool
 	pu := config.GetParameterUnit(ctx)
@@ -7555,13 +7555,12 @@ func InitSysTenant(ctx context.Context, aicm *defines.AutoIncrCacheManager) (err
 	//Note: it is special here. The connection ctx here is ctx also.
 	//Actually, it is ok here. the ctx is moServerCtx instead of requestCtx
 	upstream := &Session{
-		connectCtx:           ctx,
-		autoIncrCacheManager: aicm,
-		protocol:             &FakeProtocol{},
-		seqCurValues:         make(map[uint64]string),
-		seqLastValue:         new(string),
+		connectCtx:   ctx,
+		protocol:     &FakeProtocol{},
+		seqCurValues: make(map[uint64]string),
+		seqLastValue: new(string),
 	}
-	bh := NewBackgroundExec(ctx, upstream, mp, pu)
+	bh := NewBackgroundExec(ctx, upstream, mp)
 	defer bh.Close()
 
 	//USE the mo_catalog
@@ -7682,7 +7681,7 @@ func createTablesInMoCatalog(ctx context.Context, bh BackgroundExec, tenant *Ten
 	//setp6: add new entries to the mo_mysql_compatibility_mode
 	for _, variable := range gSysVarsDefs {
 		if _, ok := configInitVariables[variable.Name]; ok {
-			addsql := addInitSystemVariablesSql(sysAccountID, sysAccountName, variable.Name, pu)
+			addsql := addInitSystemVariablesSql(sysAccountID, sysAccountName, variable.Name)
 			if len(addsql) != 0 {
 				addSqlIntoSet(addsql)
 			}
@@ -7844,7 +7843,7 @@ func InitGeneralTenant(ctx context.Context, ses *Session, ca *tree.CreateAccount
 		}
 
 		// create tables for new account
-		rtnErr = createTablesInMoCatalogOfGeneralTenant2(bh, ca, newTenantCtx, newTenant, ses.pu)
+		rtnErr = createTablesInMoCatalogOfGeneralTenant2(bh, ca, newTenantCtx, newTenant)
 		if rtnErr != nil {
 			return rtnErr
 		}
@@ -7958,7 +7957,7 @@ func createTablesInMoCatalogOfGeneralTenant(ctx context.Context, bh BackgroundEx
 	return newTenant, newTenantCtx, err
 }
 
-func createTablesInMoCatalogOfGeneralTenant2(bh BackgroundExec, ca *tree.CreateAccount, newTenantCtx context.Context, newTenant *TenantInfo, pu *config.ParameterUnit) error {
+func createTablesInMoCatalogOfGeneralTenant2(bh BackgroundExec, ca *tree.CreateAccount, newTenantCtx context.Context, newTenant *TenantInfo) error {
 	var err error
 	var initDataSqls []string
 	newTenantCtx, span := trace.Debug(newTenantCtx, "createTablesInMoCatalogOfGeneralTenant2")
@@ -8045,7 +8044,7 @@ func createTablesInMoCatalogOfGeneralTenant2(bh BackgroundExec, ca *tree.CreateA
 	//setp6: add new entries to the mo_mysql_compatibility_mode
 	for _, variable := range gSysVarsDefs {
 		if _, ok := configInitVariables[variable.Name]; ok {
-			addsql := addInitSystemVariablesSql(int(newTenant.GetTenantID()), newTenant.GetTenant(), variable.Name, pu)
+			addsql := addInitSystemVariablesSql(int(newTenant.GetTenantID()), newTenant.GetTenant(), variable.Name)
 			if len(addsql) != 0 {
 				addSqlIntoSet(addsql)
 			}
@@ -8497,7 +8496,7 @@ func Upload(ctx context.Context, ses *Session, localPath string, storageDir stri
 		},
 	}
 
-	fileService := ses.GetParameterUnit().FileService
+	fileService := gPu.FileService
 	_ = fileService.Delete(ctx, ioVector.FilePath)
 	err := fileService.Write(ctx, ioVector)
 	err = errors.Join(err, loadLocalErrGroup.Wait())
@@ -9358,26 +9357,26 @@ func isSuperUser(username string) bool {
 	return u == dumpName || u == rootName
 }
 
-func addInitSystemVariablesSql(accountId int, accountName, variable_name string, pu *config.ParameterUnit) string {
+func addInitSystemVariablesSql(accountId int, accountName, variable_name string) string {
 	var initMoMysqlCompatibilityMode string
 
 	switch variable_name {
 	case SaveQueryResult:
-		if strings.ToLower(pu.SV.SaveQueryResult) == "on" {
-			initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "save_query_result", getVariableValue(pu.SV.SaveQueryResult), true)
+		if strings.ToLower(gPu.SV.SaveQueryResult) == "on" {
+			initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "save_query_result", getVariableValue(gPu.SV.SaveQueryResult), true)
 
 		} else {
 			initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "save_query_result", getVariableValue("off"), true)
 		}
 
 	case QueryResultMaxsize:
-		initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "query_result_maxsize", getVariableValue(pu.SV.QueryResultMaxsize), true)
+		initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "query_result_maxsize", getVariableValue(gPu.SV.QueryResultMaxsize), true)
 
 	case QueryResultTimeout:
-		initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "query_result_timeout", getVariableValue(pu.SV.QueryResultTimeout), true)
+		initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "query_result_timeout", getVariableValue(gPu.SV.QueryResultTimeout), true)
 
 	case LowerCaseTableNames:
-		initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "lower_case_table_names", getVariableValue(pu.SV.LowerCaseTableNames), true)
+		initMoMysqlCompatibilityMode = fmt.Sprintf(initMoMysqlCompatbilityModeWithoutDataBaseFormat, accountId, accountName, "lower_case_table_names", getVariableValue(gPu.SV.LowerCaseTableNames), true)
 	}
 
 	return initMoMysqlCompatibilityMode
@@ -9390,7 +9389,7 @@ func postAlterSessionStatus(
 	accountName string,
 	tenantId int64,
 	status string) error {
-	qs := ses.GetParameterUnit().QueryService
+	qs := gPu.QueryService
 	if qs == nil {
 		return moerr.NewInternalError(ctx, "query service is not initialized")
 	}

@@ -28,10 +28,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
-	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/defines"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/pb/query"
@@ -123,7 +121,6 @@ type TempInter interface {
 	GetSessionVar(name string) (interface{}, error)
 	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
 	GetConnectContext() context.Context
-	GetParameterUnit() *config.ParameterUnit
 	IfInitedTempEngine() bool
 	GetTempTableStorage() *memorystorage.Storage
 	GetDebugString() string
@@ -154,7 +151,6 @@ type TempInter interface {
 	SetShowStmtType(statement ShowStatementType)
 	SetSql(sql string)
 	GetMemPool() *mpool.MPool
-	GetAutoIncrCacheManager() *defines.AutoIncrCacheManager
 	GetProc() *process.Process
 	GetLastInsertID() uint64
 	GetSqlHelper() *SqlHelper
@@ -203,8 +199,6 @@ type Session struct {
 
 	// the process of the session
 	proc *process.Process
-
-	pu *config.ParameterUnit
 
 	isInternal bool
 
@@ -302,10 +296,7 @@ type Session struct {
 
 	planCache *planCache
 
-	statsCache *plan2.StatsCache
-
-	autoIncrCacheManager *defines.AutoIncrCacheManager
-
+	statsCache   *plan2.StatsCache
 	seqCurValues map[uint64]string
 
 	/*
@@ -638,19 +629,6 @@ func (ses *Session) ResetPacketCounter() {
 	ses.payloadCounter = 0
 }
 
-// The update version. Four function.
-func (ses *Session) SetAutoIncrCacheManager(aicm *defines.AutoIncrCacheManager) {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	ses.autoIncrCacheManager = aicm
-}
-
-func (ses *Session) GetAutoIncrCacheManager() *defines.AutoIncrCacheManager {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	return ses.autoIncrCacheManager
-}
-
 // SetTStmt do set the Session.tStmt
 // 1. init-set at RecordStatement, which means the statement is started.
 // 2. reset at logStatementStringStatus, which means the statement is finished.
@@ -701,10 +679,8 @@ func (e *errInfo) length() int {
 	return len(e.codes)
 }
 
-func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
-	gSysVars *GlobalSystemVariables, isNotBackgroundSession bool,
-	aicm *defines.AutoIncrCacheManager, sharedTxnHandler *TxnHandler) *Session {
-	pu.Counter4.Add(1)
+func NewSession(proto Protocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *TxnHandler) *Session {
+	gPu.Counter4.Add(1)
 	//if the sharedTxnHandler exists,we use its txnCtx and txnOperator in this session.
 	//Currently, we only use the sharedTxnHandler in the background session.
 	var txnCtx context.Context
@@ -719,16 +695,15 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 			//panic(err)
 		}
 	}
-	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, txnCtx, txnOp)
+	txnHandler := InitTxnHandler(gPu.StorageEngine, txnCtx, txnOp)
 
 	ses := &Session{
 		protocol:   proto,
 		mp:         mp,
-		pu:         pu,
 		txnHandler: txnHandler,
 		//TODO:fix database name after the catalog is ready
 		txnCompileCtx: InitTxnCompilerContext(txnHandler, proto.GetDatabaseName()),
-		storage:       &engine.EntireEngine{Engine: pu.StorageEngine},
+		storage:       &engine.EntireEngine{Engine: gPu.StorageEngine},
 		gSysVars:      gSysVars,
 
 		serverStatus: 0,
@@ -766,7 +741,6 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	ses.SetOptionBits(OPTION_AUTOCOMMIT)
 	ses.GetTxnCompileCtx().SetSession(ses)
 	ses.GetTxnHandler().SetSession(ses)
-	ses.SetAutoIncrCacheManager(aicm)
 	if ses.mp == nil {
 		// If no mp, we create one for session.  Use GuestMmuLimitation as cap.
 		// fixed pool size can be another param, or should be computed from cap,
@@ -775,7 +749,7 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 		// XXX MPOOL
 		// We don't have a way to close a session, so the only sane way of creating
 		// a mpool is to use NoFixed
-		ses.mp, err = mpool.NewMPool("pipeline-"+ses.GetUUIDString(), pu.SV.GuestMmuLimitation, mpool.NoFixed)
+		ses.mp, err = mpool.NewMPool("pipeline-"+ses.GetUUIDString(), gPu.SV.GuestMmuLimitation, mpool.NoFixed)
 		if err != nil {
 			panic(err)
 		}
@@ -783,14 +757,14 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 	ses.proc = process.New(
 		context.TODO(),
 		ses.mp,
-		ses.GetTxnHandler().GetTxnClient(),
+		gPu.TxnClient,
 		nil,
-		pu.FileService,
-		pu.LockService,
-		pu.QueryService,
-		pu.HAKeeperClient,
-		pu.UdfService,
-		ses.GetAutoIncrCacheManager())
+		gPu.FileService,
+		gPu.LockService,
+		gPu.QueryService,
+		gPu.HAKeeperClient,
+		gPu.UdfService,
+		gAicm)
 	ses.proc.SetStmtProfile(&ses.stmtProfile)
 
 	runtime.SetFinalizer(ses, func(ss *Session) {
@@ -800,7 +774,7 @@ func NewSession(proto Protocol, mp *mpool.MPool, pu *config.ParameterUnit,
 }
 
 func (ses *Session) Close() {
-	ses.pu.Counter4.Add(-1)
+	gPu.Counter4.Add(-1)
 	ses.mrs = nil
 	ses.data = nil
 	ses.ep = nil
@@ -1029,8 +1003,7 @@ func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
 	return NewBackgroundExec(
 		ctx,
 		ses,
-		ses.GetMemPool(),
-		ses.GetParameterUnit())
+		ses.GetMemPool())
 }
 
 // GetShareTxnBackgroundExec returns a background executor running the sql in a shared transaction.
@@ -1047,7 +1020,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 			}
 		}
 
-		txnHandler := InitTxnHandler(ses.pu.StorageEngine, ses.pu.TxnClient, txnCtx, txnOp)
+		txnHandler := InitTxnHandler(gPu.StorageEngine, txnCtx, txnOp)
 		var callback func(interface{}, *batch.Batch) error
 		if newRawBatch {
 			callback = batchFetcher2
@@ -1055,29 +1028,26 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 			callback = fakeDataSetFetcher2
 		}
 		backCtx := &backExecCtx{
-			requestCtx:           ctx,
-			connectCtx:           ses.connectCtx,
-			pu:                   ses.pu,
-			pool:                 ses.mp,
-			txnClient:            ses.pu.TxnClient,
-			autoIncrCacheManager: ses.autoIncrCacheManager,
-			proto:                &FakeProtocol{},
-			buf:                  buffer.New(),
-			stmtProfile:          process.StmtProfile{},
-			tenant:               nil,
-			txnHandler:           txnHandler,
-			txnCompileCtx:        InitTxnCompilerContext(txnHandler, ses.protocol.GetDatabaseName()),
-			mrs:                  nil,
-			outputCallback:       callback,
-			allResultSet:         nil,
-			resultBatches:        nil,
-			serverStatus:         0,
-			derivedStmt:          false,
-			optionBits:           0,
-			shareTxn:             false,
-			gSysVars:             GSysVariables,
-			label:                make(map[string]string),
-			timeZone:             time.Local,
+			requestCtx:     ctx,
+			connectCtx:     ses.connectCtx,
+			pool:           ses.mp,
+			proto:          &FakeProtocol{},
+			buf:            buffer.New(),
+			stmtProfile:    process.StmtProfile{},
+			tenant:         nil,
+			txnHandler:     txnHandler,
+			txnCompileCtx:  InitTxnCompilerContext(txnHandler, ses.protocol.GetDatabaseName()),
+			mrs:            nil,
+			outputCallback: callback,
+			allResultSet:   nil,
+			resultBatches:  nil,
+			serverStatus:   0,
+			derivedStmt:    false,
+			optionBits:     0,
+			shareTxn:       false,
+			gSysVars:       GSysVariables,
+			label:          make(map[string]string),
+			timeZone:       time.Local,
 		}
 		backCtx.SetOptionBits(OPTION_AUTOCOMMIT)
 		backCtx.GetTxnCompileCtx().SetSession(backCtx)
@@ -1115,32 +1085,28 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
-	pu := ses.GetParameterUnit()
-	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, nil, nil)
+	txnHandler := InitTxnHandler(gPu.StorageEngine, nil, nil)
 	backCtx := &backExecCtx{
-		requestCtx:           ses.GetRequestContext(),
-		connectCtx:           ses.GetConnectContext(),
-		pu:                   pu,
-		pool:                 ses.GetMemPool(),
-		txnClient:            pu.TxnClient,
-		autoIncrCacheManager: ses.GetAutoIncrCacheManager(),
-		proto:                &FakeProtocol{},
-		buf:                  buffer.New(),
-		stmtProfile:          process.StmtProfile{},
-		tenant:               nil,
-		txnHandler:           txnHandler,
-		txnCompileCtx:        InitTxnCompilerContext(txnHandler, ""),
-		mrs:                  nil,
-		outputCallback:       batchFetcher2,
-		allResultSet:         nil,
-		resultBatches:        nil,
-		serverStatus:         0,
-		derivedStmt:          false,
-		optionBits:           0,
-		shareTxn:             false,
-		gSysVars:             GSysVariables,
-		label:                make(map[string]string),
-		timeZone:             time.Local,
+		requestCtx:     ses.GetRequestContext(),
+		connectCtx:     ses.GetConnectContext(),
+		pool:           ses.GetMemPool(),
+		proto:          &FakeProtocol{},
+		buf:            buffer.New(),
+		stmtProfile:    process.StmtProfile{},
+		tenant:         nil,
+		txnHandler:     txnHandler,
+		txnCompileCtx:  InitTxnCompilerContext(txnHandler, ""),
+		mrs:            nil,
+		outputCallback: batchFetcher2,
+		allResultSet:   nil,
+		resultBatches:  nil,
+		serverStatus:   0,
+		derivedStmt:    false,
+		optionBits:     0,
+		shareTxn:       false,
+		gSysVars:       GSysVariables,
+		label:          make(map[string]string),
+		timeZone:       time.Local,
 	}
 	backCtx.GetTxnCompileCtx().SetSession(backCtx)
 	backCtx.GetTxnHandler().SetSession(backCtx)
@@ -1191,12 +1157,6 @@ func (ses *Session) GetMemPool() *mpool.MPool {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	return ses.mp
-}
-
-func (ses *Session) GetParameterUnit() *config.ParameterUnit {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	return ses.pu
 }
 
 func (ses *Session) GetData() [][]interface{} {
@@ -1796,15 +1756,9 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	if err != nil {
 		return nil, err
 	}
-	pu := ses.GetParameterUnit()
 	mp := ses.GetMemPool()
 	logDebugf(sessionInfo, "check tenant %s exists", tenant)
-	rsset, err = executeSQLInBackgroundSession(
-		sysTenantCtx,
-		ses,
-		mp,
-		pu,
-		sqlForCheckTenant)
+	rsset, err = executeSQLInBackgroundSession(sysTenantCtx, ses, mp, sqlForCheckTenant)
 	if err != nil {
 		return nil, err
 	}
@@ -1856,12 +1810,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	if err != nil {
 		return nil, err
 	}
-	rsset, err = executeSQLInBackgroundSession(
-		tenantCtx,
-		ses,
-		mp,
-		pu,
-		sqlForPasswordOfUser)
+	rsset, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, sqlForPasswordOfUser)
 	if err != nil {
 		return nil, err
 	}
@@ -1910,12 +1859,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 		if err != nil {
 			return nil, err
 		}
-		rsset, err = executeSQLInBackgroundSession(
-			tenantCtx,
-			ses,
-			mp,
-			pu,
-			sqlForCheckRoleExists)
+		rsset, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, sqlForCheckRoleExists)
 		if err != nil {
 			return nil, err
 		}
@@ -1930,12 +1874,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 		if err != nil {
 			return nil, err
 		}
-		rsset, err = executeSQLInBackgroundSession(
-			tenantCtx,
-			ses,
-			mp,
-			pu,
-			sqlForRoleOfUser)
+		rsset, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, sqlForRoleOfUser)
 		if err != nil {
 			return nil, err
 		}
@@ -1956,12 +1895,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 		logDebugf(sessionInfo, "check designated role of user %s.", tenant)
 		//the get name of default_role from mo_role
 		sql := getSqlForRoleNameOfRoleId(defaultRoleID)
-		rsset, err = executeSQLInBackgroundSession(
-			tenantCtx,
-			ses,
-			mp,
-			pu,
-			sql)
+		rsset, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, sql)
 		if err != nil {
 			return nil, err
 		}
@@ -1994,7 +1928,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	// If the login information contains the database name, verify if the database exists
 	if dbName != "" {
 		ses.timestampMap[TSCheckDbNameStart] = time.Now()
-		_, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, pu, "use "+dbName)
+		_, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, "use "+dbName)
 		if err != nil {
 			return nil, err
 		}
@@ -2026,15 +1960,9 @@ func (ses *Session) InitGlobalSystemVariables() error {
 
 		// get system variable from mo_mysql_compatibility mode
 		sqlForGetVariables := getSystemVariablesWithAccount(sysAccountID)
-		pu := ses.GetParameterUnit()
 		mp := ses.GetMemPool()
 
-		rsset, err = executeSQLInBackgroundSession(
-			sysTenantCtx,
-			ses,
-			mp,
-			pu,
-			sqlForGetVariables)
+		rsset, err = executeSQLInBackgroundSession(sysTenantCtx, ses, mp, sqlForGetVariables)
 		if err != nil {
 			return err
 		}
@@ -2072,15 +2000,9 @@ func (ses *Session) InitGlobalSystemVariables() error {
 
 		// get system variable from mo_mysql_compatibility mode
 		sqlForGetVariables := getSystemVariablesWithAccount(uint64(tenantInfo.GetTenantID()))
-		pu := ses.GetParameterUnit()
 		mp := ses.GetMemPool()
 
-		rsset, err = executeSQLInBackgroundSession(
-			tenantCtx,
-			ses,
-			mp,
-			pu,
-			sqlForGetVariables)
+		rsset, err = executeSQLInBackgroundSession(tenantCtx, ses, mp, sqlForGetVariables)
 		if err != nil {
 			return err
 		}
@@ -2150,325 +2072,6 @@ func changeVersion(ctx context.Context, ses *Session, db string) error {
 		ses.GetTenantInfo().SetVersion(version)
 	}
 	return err
-}
-
-// fakeDataSetFetcher2 gets the result set from the pipeline and save it in the session.
-// It will not send the result to the client.
-func fakeDataSetFetcher2(handle interface{}, dataSet *batch.Batch) error {
-	if handle == nil || dataSet == nil {
-		return nil
-	}
-
-	back := handle.(*backExecCtx)
-	oq := newFakeOutputQueue(back.mrs)
-	err := fillResultSet(oq, dataSet, back)
-	if err != nil {
-		return err
-	}
-	back.SetMysqlResultSetOfBackgroundTask(back.mrs)
-	return nil
-}
-
-// fakeDataSetFetcher gets the result set from the pipeline and save it in the session.
-// It will not send the result to the client.
-func fakeDataSetFetcher(handle interface{}, dataSet *batch.Batch) error {
-	if handle == nil || dataSet == nil {
-		return nil
-	}
-
-	ses := handle.(*Session)
-	oq := newFakeOutputQueue(ses.GetMysqlResultSet())
-	err := fillResultSet(oq, dataSet, ses)
-	if err != nil {
-		return err
-	}
-	ses.SetMysqlResultSetOfBackgroundTask(ses.GetMysqlResultSet())
-	return nil
-}
-
-func fillResultSet(oq outputPool, dataSet *batch.Batch, ses TempInter) error {
-	n := dataSet.RowCount()
-	for j := 0; j < n; j++ { //row index
-		//needCopyBytes = true. we need to copy the bytes from the batch.Batch
-		//to avoid the data being changed after the batch.Batch returned to the
-		//pipeline.
-		_, err := extractRowFromEveryVector(ses, dataSet, j, oq, true)
-		if err != nil {
-			return err
-		}
-	}
-	return oq.flush()
-}
-
-// batchFetcher2 gets the result batches from the pipeline and save the origin batches in the session.
-// It will not send the result to the client.
-func batchFetcher2(handle interface{}, dataSet *batch.Batch) error {
-	if handle == nil {
-		return nil
-	}
-	back := handle.(*backExecCtx)
-	back.SaveResultSet()
-	if dataSet == nil {
-		return nil
-	}
-	return back.AppendResultBatch(dataSet)
-}
-
-// batchFetcher gets the result batches from the pipeline and save the origin batches in the session.
-// It will not send the result to the client.
-func batchFetcher(handle interface{}, dataSet *batch.Batch) error {
-	if handle == nil {
-		return nil
-	}
-	ses := handle.(*Session)
-	ses.SaveResultSet()
-	if dataSet == nil {
-		return nil
-	}
-	return ses.AppendResultBatch(dataSet)
-}
-
-// getResultSet extracts the result set
-func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) {
-	results := bh.GetExecResultSet()
-	rsset := make([]ExecResult, len(results))
-	for i, value := range results {
-		if er, ok := value.(ExecResult); ok {
-			rsset[i] = er
-		} else {
-			return nil, moerr.NewInternalError(ctx, "it is not the type of result set")
-		}
-	}
-	return rsset, nil
-}
-
-// executeSQLInBackgroundSession executes the sql in an independent session and transaction.
-// It sends nothing to the client.
-func executeSQLInBackgroundSession(
-	reqCtx context.Context,
-	upstream *Session,
-	mp *mpool.MPool,
-	pu *config.ParameterUnit,
-	sql string) ([]ExecResult, error) {
-	bh := NewBackgroundExec(reqCtx, upstream, mp, pu)
-	defer bh.Close()
-	logutil.Debugf("background exec sql:%v", sql)
-	err := bh.Exec(reqCtx, sql)
-	logutil.Debugf("background exec sql done")
-	if err != nil {
-		return nil, err
-	}
-	return getResultSet(reqCtx, bh)
-}
-
-// executeStmtInSameSession executes the statement in the same session.
-// To be clear, only for the select statement derived from the set_var statement
-// in an independent transaction
-func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.Statement) error {
-	switch stmt.(type) {
-	case *tree.Select, *tree.ParenSelect:
-	default:
-		return moerr.NewInternalError(ctx, "executeStmtInSameSession can not run non select statement in the same session")
-	}
-
-	prevDB := ses.GetDatabaseName()
-	prevOptionBits := ses.GetOptionBits()
-	prevServerStatus := ses.GetServerStatus()
-	//autocommit = on
-	ses.setAutocommitOn()
-	//1. replace output callback by batchFetcher.
-	// the result batch will be saved in the session.
-	// you can get the result batch by calling GetResultBatches()
-	ses.SetOutputCallback(batchFetcher)
-	//2. replace protocol by FakeProtocol.
-	// Any response yielded during running query will be dropped by the FakeProtocol.
-	// The client will not receive any response from the FakeProtocol.
-	prevProto := ses.ReplaceProtocol(&FakeProtocol{})
-	// inherit database
-	ses.SetDatabaseName(prevDB)
-	proc := ses.GetTxnCompileCtx().GetProcess()
-	//restore normal protocol and output callback
-	defer func() {
-		//@todo we need to improve: make one session, one proc, one txnOperator
-		p := ses.GetTxnCompileCtx().GetProcess()
-		p.FreeVectors()
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.SetOptionBits(prevOptionBits)
-		ses.SetServerStatus(prevServerStatus)
-		ses.SetOutputCallback(getDataFromPipeline)
-		ses.ReplaceProtocol(prevProto)
-	}()
-	logDebug(ses, ses.GetDebugString(), "query trace(ExecStmtInSameSession)",
-		logutil.ConnectionIdField(ses.GetConnectionID()))
-	//3. execute the statement
-	return doComQuery(ctx, ses, &UserInput{stmt: stmt})
-}
-
-var NewBackgroundExec = func(
-	reqCtx context.Context,
-	upstream TempInter,
-	mp *mpool.MPool,
-	pu *config.ParameterUnit) BackgroundExec {
-	txnHandler := InitTxnHandler(pu.StorageEngine, pu.TxnClient, nil, nil)
-	backCtx := &backExecCtx{
-		requestCtx:           reqCtx,
-		connectCtx:           upstream.GetConnectContext(),
-		pu:                   pu,
-		pool:                 mp,
-		txnClient:            pu.TxnClient,
-		autoIncrCacheManager: upstream.GetAutoIncrCacheManager(),
-		proto:                &FakeProtocol{},
-		buf:                  buffer.New(),
-		stmtProfile:          process.StmtProfile{},
-		tenant:               nil,
-		txnHandler:           txnHandler,
-		txnCompileCtx:        InitTxnCompilerContext(txnHandler, ""),
-		mrs:                  nil,
-		outputCallback:       fakeDataSetFetcher2,
-		allResultSet:         nil,
-		resultBatches:        nil,
-		serverStatus:         0,
-		derivedStmt:          false,
-		optionBits:           0,
-		shareTxn:             false,
-		gSysVars:             GSysVariables,
-		label:                make(map[string]string),
-		timeZone:             time.Local,
-	}
-	backCtx.GetTxnCompileCtx().SetSession(backCtx)
-	backCtx.GetTxnHandler().SetSession(backCtx)
-	//var accountId uint32
-	//var err error
-	//accountId, err = defines.GetAccountId(reqCtx)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//backCtx.tenant = &TenantInfo{
-	//	TenantID:      accountId,
-	//	UserID:        defines.GetUserId(reqCtx),
-	//	DefaultRoleID: defines.GetRoleId(reqCtx),
-	//}
-
-	bh := &backExec{
-		backCtx: backCtx,
-	}
-
-	return bh
-}
-
-type backExec struct {
-	backCtx *backExecCtx
-}
-
-func (back *backExec) Close() {
-	back.Clear()
-}
-
-func (back *backExec) Exec(ctx context.Context, sql string) error {
-	if ctx == nil {
-		ctx = back.backCtx.GetRequestContext()
-	} else {
-		back.backCtx.SetRequestContext(ctx)
-	}
-	_, err := defines.GetAccountId(ctx)
-	if err != nil {
-		return err
-	}
-
-	// For determine this is a background sql.
-	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	back.backCtx.requestCtx = ctx
-	//logutil.Debugf("-->bh:%s", sql)
-	v, err := back.backCtx.GetGlobalVar("lower_case_table_names")
-	if err != nil {
-		return err
-	}
-	statements, err := mysql.Parse(ctx, sql, v.(int64))
-	if err != nil {
-		return err
-	}
-	if len(statements) > 1 {
-		return moerr.NewInternalError(ctx, "Exec() can run one statement at one time. but get '%d' statements now, sql = %s", len(statements), sql)
-	}
-	//share txn can not run transaction statement
-	if back.backCtx.isShareTxn() {
-		for _, stmt := range statements {
-			switch stmt.(type) {
-			case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-				return moerr.NewInternalError(ctx, "Exec() can not run transaction statement in share transaction, sql = %s", sql)
-			}
-		}
-	}
-	return doComQueryInBack(ctx, back.backCtx, &UserInput{sql: sql})
-}
-
-func (back *backExec) ExecStmt(ctx context.Context, statement tree.Statement) error {
-	return nil
-}
-
-func (back *backExec) GetExecResultSet() []interface{} {
-	mrs := back.backCtx.allResultSet
-	ret := make([]interface{}, len(mrs))
-	for i, mr := range mrs {
-		ret[i] = mr
-	}
-	return ret
-}
-
-func (back *backExec) ClearExecResultSet() {
-	back.backCtx.allResultSet = nil
-}
-
-func (back *backExec) GetExecResultBatches() []*batch.Batch {
-	return back.backCtx.resultBatches
-}
-
-func (back *backExec) ClearExecResultBatches() {
-	back.backCtx.resultBatches = nil
-}
-
-func (back *backExec) Clear() {
-	back.backCtx.clear()
-}
-
-type SqlHelper struct {
-	ses *Session
-}
-
-func (sh *SqlHelper) GetCompilerContext() any {
-	return sh.ses.txnCompileCtx
-}
-
-// Made for sequence func. nextval, setval.
-func (sh *SqlHelper) ExecSql(sql string) (ret []interface{}, err error) {
-	var erArray []ExecResult
-
-	ctx := sh.ses.GetRequestContext()
-	/*
-		if we run the transaction statement (BEGIN, ect) here , it creates an independent transaction.
-		if we do not run the transaction statement (BEGIN, ect) here, it runs the sql in the share transaction
-		and committed outside this function.
-		!!!NOTE: wen can not execute the transaction statement(BEGIN,COMMIT,ROLLBACK,START TRANSACTION ect) here.
-	*/
-	bh := sh.ses.GetShareTxnBackgroundExec(ctx, false)
-	defer bh.Close()
-
-	bh.ClearExecResultSet()
-	err = bh.Exec(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-
-	erArray, err = getResultSet(ctx, bh)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(erArray) == 0 {
-		return nil, nil
-	}
-
-	return erArray[0].(*MysqlResultSet).Data[0], nil
 }
 
 func (ses *Session) updateLastCommitTS(lastCommitTS timestamp.Timestamp) {

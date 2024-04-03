@@ -23,13 +23,15 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
-	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/defines"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect/mysql"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/txn/clock"
@@ -40,17 +42,213 @@ import (
 	"time"
 )
 
+type backExec struct {
+	backCtx *backExecCtx
+}
+
+func (back *backExec) Close() {
+	back.Clear()
+}
+
+func (back *backExec) Exec(ctx context.Context, sql string) error {
+	if ctx == nil {
+		ctx = back.backCtx.GetRequestContext()
+	} else {
+		back.backCtx.SetRequestContext(ctx)
+	}
+	_, err := defines.GetAccountId(ctx)
+	if err != nil {
+		return err
+	}
+
+	// For determine this is a background sql.
+	ctx = context.WithValue(ctx, defines.BgKey{}, true)
+	back.backCtx.requestCtx = ctx
+	//logutil.Debugf("-->bh:%s", sql)
+	v, err := back.backCtx.GetGlobalVar("lower_case_table_names")
+	if err != nil {
+		return err
+	}
+	statements, err := mysql.Parse(ctx, sql, v.(int64))
+	if err != nil {
+		return err
+	}
+	if len(statements) > 1 {
+		return moerr.NewInternalError(ctx, "Exec() can run one statement at one time. but get '%d' statements now, sql = %s", len(statements), sql)
+	}
+	//share txn can not run transaction statement
+	if back.backCtx.isShareTxn() {
+		for _, stmt := range statements {
+			switch stmt.(type) {
+			case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
+				return moerr.NewInternalError(ctx, "Exec() can not run transaction statement in share transaction, sql = %s", sql)
+			}
+		}
+	}
+	return doComQueryInBack(ctx, back.backCtx, &UserInput{sql: sql})
+}
+
+func (back *backExec) ExecStmt(ctx context.Context, statement tree.Statement) error {
+	return nil
+}
+
+func (back *backExec) GetExecResultSet() []interface{} {
+	mrs := back.backCtx.allResultSet
+	ret := make([]interface{}, len(mrs))
+	for i, mr := range mrs {
+		ret[i] = mr
+	}
+	return ret
+}
+
+func (back *backExec) ClearExecResultSet() {
+	back.backCtx.allResultSet = nil
+}
+
+func (back *backExec) GetExecResultBatches() []*batch.Batch {
+	return back.backCtx.resultBatches
+}
+
+func (back *backExec) ClearExecResultBatches() {
+	back.backCtx.resultBatches = nil
+}
+
+func (back *backExec) Clear() {
+	back.backCtx.clear()
+}
+
+// execute query
+func doComQueryInBack(requestCtx context.Context,
+	backCtx *backExecCtx,
+	input *UserInput) (retErr error) {
+	backCtx.SetSql(input.getSql())
+	//the ses.GetUserName returns the user_name with the account_name.
+	//here,we only need the user_name.
+	userNameOnly := rootName
+	proc := process.New(
+		requestCtx,
+		backCtx.pool,
+		gPu.TxnClient,
+		nil,
+		gPu.FileService,
+		gPu.LockService,
+		gPu.QueryService,
+		gPu.HAKeeperClient,
+		gPu.UdfService,
+		gAicm)
+	//proc.CopyVectorPool(ses.proc)
+	//proc.CopyValueScanBatch(ses.proc)
+	proc.Id = backCtx.getNextProcessId()
+	proc.Lim.Size = gPu.SV.ProcessLimitationSize
+	proc.Lim.BatchRows = gPu.SV.ProcessLimitationBatchRows
+	proc.Lim.MaxMsgSize = gPu.SV.MaxMessageSize
+	proc.Lim.PartitionRows = gPu.SV.ProcessLimitationPartitionRows
+	proc.SessionInfo = process.SessionInfo{
+		User:          backCtx.proto.GetUserName(),
+		Host:          gPu.SV.Host,
+		Database:      backCtx.proto.GetDatabaseName(),
+		Version:       makeServerVersion(gPu, serverVersion.Load().(string)),
+		TimeZone:      backCtx.GetTimeZone(),
+		StorageEngine: gPu.StorageEngine,
+		Buf:           backCtx.buf,
+	}
+	proc.SetStmtProfile(&backCtx.stmtProfile)
+	proc.SetResolveVariableFunc(backCtx.txnCompileCtx.ResolveVariable)
+	//!!!does not init sequence in the background exec
+	if backCtx.tenant != nil {
+		proc.SessionInfo.Account = backCtx.tenant.GetTenant()
+		proc.SessionInfo.AccountId = backCtx.tenant.GetTenantID()
+		proc.SessionInfo.Role = backCtx.tenant.GetDefaultRole()
+		proc.SessionInfo.RoleId = backCtx.tenant.GetDefaultRoleID()
+		proc.SessionInfo.UserId = backCtx.tenant.GetUserID()
+
+		if len(backCtx.tenant.GetVersion()) != 0 {
+			proc.SessionInfo.Version = backCtx.tenant.GetVersion()
+		}
+		userNameOnly = backCtx.tenant.GetUser()
+	} else {
+		var accountId uint32
+		accountId, retErr = defines.GetAccountId(requestCtx)
+		if retErr != nil {
+			return retErr
+		}
+		proc.SessionInfo.AccountId = accountId
+		proc.SessionInfo.UserId = defines.GetUserId(requestCtx)
+		proc.SessionInfo.RoleId = defines.GetRoleId(requestCtx)
+	}
+	var span trace.Span
+	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.doComQuery",
+		trace.WithKind(trace.SpanKindStatement))
+	defer span.End()
+
+	proc.SessionInfo.User = userNameOnly
+	backCtx.txnCompileCtx.SetProcess(proc)
+
+	cws, err := GetComputationWrapperInBack(backCtx.proto.GetDatabaseName(),
+		input,
+		backCtx.proto.GetUserName(),
+		gPu.StorageEngine,
+		proc, backCtx)
+
+	if err != nil {
+		retErr = err
+		if _, ok := err.(*moerr.Error); !ok {
+			retErr = moerr.NewParseError(requestCtx, err.Error())
+		}
+		return retErr
+	}
+
+	defer func() {
+		backCtx.mrs = nil
+	}()
+
+	sqlRecord := parsers.HandleSqlForRecord(input.getSql())
+
+	for i, cw := range cws {
+		backCtx.mrs = &MysqlResultSet{}
+		stmt := cw.GetAst()
+		tenant := backCtx.GetTenantNameWithStmt(stmt)
+
+		/*
+				if it is in an active or multi-statement transaction, we check the type of the statement.
+				Then we decide that if we can execute the statement.
+
+			If we check the active transaction, it will generate the case below.
+			case:
+			set autocommit = 0;  <- no active transaction
+			                     <- no active transaction
+			drop table test1;    <- no active transaction, no error
+			                     <- has active transaction
+			drop table test1;    <- has active transaction, error
+			                     <- has active transaction
+		*/
+		if backCtx.InActiveTransaction() {
+			err = canExecuteStatementInUncommittedTransaction(requestCtx, backCtx, stmt)
+			if err != nil {
+				return err
+			}
+		}
+
+		execCtx := &ExecCtx{
+			stmt:       stmt,
+			isLastStmt: i >= len(cws)-1,
+			tenant:     tenant,
+			userName:   userNameOnly,
+			sqlOfStmt:  sqlRecord[i],
+			cw:         cw,
+			proc:       proc,
+		}
+		err = executeStmtInBackWithTxn(requestCtx, backCtx, execCtx)
+		if err != nil {
+			return err
+		}
+	} // end of for
+
+	return nil
+}
+
 func executeStmtInBackWithTxn(requestCtx context.Context,
 	backCtx *backExecCtx,
-	stmt tree.Statement,
-	proc *process.Process,
-	cw ComputationWrapper,
-	i int,
-	cws []ComputationWrapper,
-	pu *config.ParameterUnit,
-	tenant string,
-	userName string,
-	sql string,
 	execCtx *ExecCtx,
 ) (err error) {
 	// defer transaction state management.
@@ -94,19 +292,11 @@ func executeStmtInBackWithTxn(requestCtx context.Context,
 		}
 		backCtx.GetTxnHandler().disableStartStmt()
 	}()
-	return executeStmtInBack(requestCtx, backCtx, proc, cw, i, cws, pu, tenant, userName, sql, execCtx)
+	return executeStmtInBack(requestCtx, backCtx, execCtx)
 }
 
 func executeStmtInBack(requestCtx context.Context,
 	backCtx *backExecCtx,
-	proc *process.Process,
-	cw ComputationWrapper,
-	i int,
-	cws []ComputationWrapper,
-	pu *config.ParameterUnit,
-	tenant string,
-	userName string,
-	sql string,
 	execCtx *ExecCtx,
 ) (err error) {
 	var cmpBegin time.Time
@@ -156,25 +346,18 @@ func executeStmtInBack(requestCtx context.Context,
 		if err != nil {
 			return
 		}
-	case *tree.MoDump:
-		selfHandle = true
-		//dump
-		err = handleDump(requestCtx, backCtx, st)
-		if err != nil {
-			return
-		}
 	case *tree.CreateDatabase:
-		err = inputNameIsInvalid(proc.Ctx, string(st.Name))
+		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
 		if err != nil {
 			return
 		}
 		if st.SubscriptionOption != nil && backCtx.tenant != nil && !backCtx.tenant.IsAdminRole() {
-			err = moerr.NewInternalError(proc.Ctx, "only admin can create subscription")
+			err = moerr.NewInternalError(execCtx.proc.Ctx, "only admin can create subscription")
 			return
 		}
-		st.Sql = sql
+		st.Sql = execCtx.sqlOfStmt
 	case *tree.DropDatabase:
-		err = inputNameIsInvalid(proc.Ctx, string(st.Name))
+		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
 		if err != nil {
 			return
 		}
@@ -182,29 +365,15 @@ func executeStmtInBack(requestCtx context.Context,
 		if string(st.Name) == backCtx.GetDatabaseName() {
 			backCtx.SetDatabaseName("")
 		}
-	case *tree.PrepareStmt,
-		*tree.PrepareString,
-		*tree.AnalyzeStmt,
-		*tree.ExplainAnalyze,
-		*tree.AlterDataBaseConfig, *tree.ShowTableStatus:
-		selfHandle = true
-		return moerr.NewInternalError(requestCtx, "does not support in background exec")
-
-	case *tree.Reset:
-		selfHandle = true
-		err = handleReset(requestCtx, backCtx, st)
-		if err != nil {
-			return
-		}
 	case *tree.SetVar:
 		selfHandle = true
-		err = handleSetVar(requestCtx, backCtx, st, sql)
+		err = handleSetVar(requestCtx, backCtx, st, execCtx.sqlOfStmt)
 		if err != nil {
 			return
 		}
 	case *tree.ShowVariables:
 		selfHandle = true
-		err = handleShowVariables(backCtx, st, proc, execCtx.isLastStmt)
+		err = handleShowVariables(backCtx, st, execCtx.proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		}
@@ -212,51 +381,6 @@ func executeStmtInBack(requestCtx context.Context,
 		selfHandle = true
 		err = handleShowErrors(backCtx, execCtx.isLastStmt)
 		if err != nil {
-			return
-		}
-	case *tree.ExplainStmt:
-		selfHandle = true
-		if err = handleExplainStmt(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *InternalCmdFieldList:
-		selfHandle = true
-		if err = handleCmdFieldList(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.CreatePublication:
-		selfHandle = true
-		if err = handleCreatePublication(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterPublication:
-		selfHandle = true
-		if err = handleAlterPublication(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropPublication:
-		selfHandle = true
-		if err = handleDropPublication(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.ShowSubscriptions:
-		selfHandle = true
-		if err = handleShowSubscriptions(requestCtx, backCtx, st, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.CreateStage:
-		selfHandle = true
-		if err = handleCreateStage(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropStage:
-		selfHandle = true
-		if err = handleDropStage(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterStage:
-		selfHandle = true
-		if err = handleAlterStage(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateAccount:
@@ -299,34 +423,6 @@ func executeStmtInBack(requestCtx context.Context,
 		if err = handleDropRole(requestCtx, backCtx, st); err != nil {
 			return
 		}
-	case *tree.CreateFunction:
-		selfHandle = true
-		if err = st.Valid(); err != nil {
-			return err
-		}
-		if err = handleCreateFunction(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropFunction:
-		selfHandle = true
-		if err = handleDropFunction(requestCtx, backCtx, st, proc); err != nil {
-			return
-		}
-	case *tree.CreateProcedure:
-		selfHandle = true
-		if err = handleCreateProcedure(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropProcedure:
-		selfHandle = true
-		if err = handleDropProcedure(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.CallStmt:
-		selfHandle = true
-		if err = handleCallProcedure(requestCtx, backCtx, st, proc); err != nil {
-			return
-		}
 	case *tree.Grant:
 		selfHandle = true
 		switch st.Typ {
@@ -359,14 +455,7 @@ func executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.ShowCollation:
 		selfHandle = true
-		if err = handleShowCollation(backCtx, st, proc, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.Load:
-		return moerr.NewInternalError(requestCtx, "does not support Loacd in background exec")
-	case *tree.ShowBackendServers:
-		selfHandle = true
-		if err = handleShowBackendServers(requestCtx, backCtx, execCtx.isLastStmt); err != nil {
+		if err = handleShowCollation(backCtx, st, execCtx.proc, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.SetTransaction:
@@ -378,7 +467,7 @@ func executeStmtInBack(requestCtx context.Context,
 		selfHandle = true
 	case *tree.ShowGrants:
 		if len(st.Username) == 0 {
-			st.Username = userName
+			st.Username = execCtx.userName
 		}
 		if len(st.Hostname) == 0 || st.Hostname == "%" {
 			st.Hostname = rootHost
@@ -396,21 +485,21 @@ func executeStmtInBack(requestCtx context.Context,
 
 	cmpBegin = time.Now()
 
-	if ret, err = cw.Compile(requestCtx, backCtx, backCtx.outputCallback); err != nil {
+	if ret, err = execCtx.cw.Compile(requestCtx, backCtx, backCtx.outputCallback); err != nil {
 		return
 	}
-	execCtx.stmt = cw.GetAst()
+	execCtx.stmt = execCtx.cw.GetAst()
 	// reset some special stmt for execute statement
 	switch st := execCtx.stmt.(type) {
 	case *tree.SetVar:
-		err = handleSetVar(requestCtx, backCtx, st, sql)
+		err = handleSetVar(requestCtx, backCtx, st, execCtx.sqlOfStmt)
 		if err != nil {
 			return
 		} else {
 			return
 		}
 	case *tree.ShowVariables:
-		err = handleShowVariables(backCtx, st, proc, execCtx.isLastStmt)
+		err = handleShowVariables(backCtx, st, execCtx.proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		} else {
@@ -440,7 +529,7 @@ func executeStmtInBack(requestCtx context.Context,
 	//produce result set
 	case *tree.Select:
 		//no select into in the background exec
-		columns, err = cw.GetColumns()
+		columns, err = execCtx.cw.GetColumns()
 		if err != nil {
 			//logError(backCtx, backCtx.GetDebugString(),
 			//	"Failed to get columns from computation handler",
@@ -451,7 +540,7 @@ func executeStmtInBack(requestCtx context.Context,
 			mysqlc := c.(Column)
 			mrs.AddColumn(mysqlc)
 		}
-		if c, ok := cw.(*TxnComputationWrapper); ok {
+		if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
 			backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
 		}
 		runBegin := time.Now()
@@ -474,7 +563,7 @@ func executeStmtInBack(requestCtx context.Context,
 		*tree.ShowIndex, *tree.ShowCreateView, *tree.ShowTarget, *tree.ShowCollation, *tree.ValuesStatement,
 		*tree.ExplainFor, *tree.ExplainStmt, *tree.ShowTableNumber, *tree.ShowColumnNumber, *tree.ShowTableValues, *tree.ShowLocks, *tree.ShowNodeList, *tree.ShowFunctionOrProcedureStatus,
 		*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages:
-		columns, err = cw.GetColumns()
+		columns, err = execCtx.cw.GetColumns()
 		if err != nil {
 			//logError(ses, ses.GetDebugString(),
 			//	"Failed to get columns from computation handler",
@@ -485,7 +574,7 @@ func executeStmtInBack(requestCtx context.Context,
 			mysqlc := c.(Column)
 			mrs.AddColumn(mysqlc)
 		}
-		if c, ok := cw.(*TxnComputationWrapper); ok {
+		if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
 			backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
 		}
 		runBegin := time.Now()
@@ -531,20 +620,228 @@ func executeStmtInBack(requestCtx context.Context,
 	return
 }
 
+var GetComputationWrapperInBack = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses TempInter) ([]ComputationWrapper, error) {
+	var cw []ComputationWrapper = nil
+
+	var stmts []tree.Statement = nil
+	var cmdFieldStmt *InternalCmdFieldList
+	var err error
+	// if the input is an option ast, we should use it directly
+	if input.getStmt() != nil {
+		stmts = append(stmts, input.getStmt())
+	} else if isCmdFieldListSql(input.getSql()) {
+		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, input.getSql())
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, cmdFieldStmt)
+	} else {
+		var v interface{}
+		v, err = ses.GetGlobalVar("lower_case_table_names")
+		if err != nil {
+			v = int64(1)
+		}
+		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, input.getSql(), v.(int64))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, stmt := range stmts {
+		cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
+	}
+	return cw, nil
+}
+
+var NewBackgroundExec = func(
+	reqCtx context.Context,
+	upstream TempInter,
+	mp *mpool.MPool) BackgroundExec {
+	txnHandler := InitTxnHandler(gPu.StorageEngine, nil, nil)
+	backCtx := &backExecCtx{
+		requestCtx:     reqCtx,
+		connectCtx:     upstream.GetConnectContext(),
+		pool:           mp,
+		proto:          &FakeProtocol{},
+		buf:            buffer.New(),
+		stmtProfile:    process.StmtProfile{},
+		tenant:         nil,
+		txnHandler:     txnHandler,
+		txnCompileCtx:  InitTxnCompilerContext(txnHandler, ""),
+		mrs:            nil,
+		outputCallback: fakeDataSetFetcher2,
+		allResultSet:   nil,
+		resultBatches:  nil,
+		serverStatus:   0,
+		derivedStmt:    false,
+		optionBits:     0,
+		shareTxn:       false,
+		gSysVars:       GSysVariables,
+		label:          make(map[string]string),
+		timeZone:       time.Local,
+	}
+	backCtx.GetTxnCompileCtx().SetSession(backCtx)
+	backCtx.GetTxnHandler().SetSession(backCtx)
+	//var accountId uint32
+	//var err error
+	//accountId, err = defines.GetAccountId(reqCtx)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//backCtx.tenant = &TenantInfo{
+	//	TenantID:      accountId,
+	//	UserID:        defines.GetUserId(reqCtx),
+	//	DefaultRoleID: defines.GetRoleId(reqCtx),
+	//}
+
+	bh := &backExec{
+		backCtx: backCtx,
+	}
+
+	return bh
+}
+
+// executeSQLInBackgroundSession executes the sql in an independent session and transaction.
+// It sends nothing to the client.
+func executeSQLInBackgroundSession(reqCtx context.Context, upstream *Session, mp *mpool.MPool, sql string) ([]ExecResult, error) {
+	bh := NewBackgroundExec(reqCtx, upstream, mp)
+	defer bh.Close()
+	logutil.Debugf("background exec sql:%v", sql)
+	err := bh.Exec(reqCtx, sql)
+	logutil.Debugf("background exec sql done")
+	if err != nil {
+		return nil, err
+	}
+	return getResultSet(reqCtx, bh)
+}
+
+// executeStmtInSameSession executes the statement in the same session.
+// To be clear, only for the select statement derived from the set_var statement
+// in an independent transaction
+func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.Statement) error {
+	switch stmt.(type) {
+	case *tree.Select, *tree.ParenSelect:
+	default:
+		return moerr.NewInternalError(ctx, "executeStmtInSameSession can not run non select statement in the same session")
+	}
+
+	prevDB := ses.GetDatabaseName()
+	prevOptionBits := ses.GetOptionBits()
+	prevServerStatus := ses.GetServerStatus()
+	//autocommit = on
+	ses.setAutocommitOn()
+	//1. replace output callback by batchFetcher.
+	// the result batch will be saved in the session.
+	// you can get the result batch by calling GetResultBatches()
+	ses.SetOutputCallback(batchFetcher)
+	//2. replace protocol by FakeProtocol.
+	// Any response yielded during running query will be dropped by the FakeProtocol.
+	// The client will not receive any response from the FakeProtocol.
+	prevProto := ses.ReplaceProtocol(&FakeProtocol{})
+	// inherit database
+	ses.SetDatabaseName(prevDB)
+	proc := ses.GetTxnCompileCtx().GetProcess()
+	//restore normal protocol and output callback
+	defer func() {
+		//@todo we need to improve: make one session, one proc, one txnOperator
+		p := ses.GetTxnCompileCtx().GetProcess()
+		p.FreeVectors()
+		ses.GetTxnCompileCtx().SetProcess(proc)
+		ses.SetOptionBits(prevOptionBits)
+		ses.SetServerStatus(prevServerStatus)
+		ses.SetOutputCallback(getDataFromPipeline)
+		ses.ReplaceProtocol(prevProto)
+	}()
+	logDebug(ses, ses.GetDebugString(), "query trace(ExecStmtInSameSession)",
+		logutil.ConnectionIdField(ses.GetConnectionID()))
+	//3. execute the statement
+	return doComQuery(ctx, ses, &UserInput{stmt: stmt})
+}
+
+// fakeDataSetFetcher2 gets the result set from the pipeline and save it in the session.
+// It will not send the result to the client.
+func fakeDataSetFetcher2(handle interface{}, dataSet *batch.Batch) error {
+	if handle == nil || dataSet == nil {
+		return nil
+	}
+
+	back := handle.(*backExecCtx)
+	oq := newFakeOutputQueue(back.mrs)
+	err := fillResultSet(oq, dataSet, back)
+	if err != nil {
+		return err
+	}
+	back.SetMysqlResultSetOfBackgroundTask(back.mrs)
+	return nil
+}
+
+func fillResultSet(oq outputPool, dataSet *batch.Batch, ses TempInter) error {
+	n := dataSet.RowCount()
+	for j := 0; j < n; j++ { //row index
+		//needCopyBytes = true. we need to copy the bytes from the batch.Batch
+		//to avoid the data being changed after the batch.Batch returned to the
+		//pipeline.
+		_, err := extractRowFromEveryVector(ses, dataSet, j, oq, true)
+		if err != nil {
+			return err
+		}
+	}
+	return oq.flush()
+}
+
+// batchFetcher2 gets the result batches from the pipeline and save the origin batches in the session.
+// It will not send the result to the client.
+func batchFetcher2(handle interface{}, dataSet *batch.Batch) error {
+	if handle == nil {
+		return nil
+	}
+	back := handle.(*backExecCtx)
+	back.SaveResultSet()
+	if dataSet == nil {
+		return nil
+	}
+	return back.AppendResultBatch(dataSet)
+}
+
+// batchFetcher gets the result batches from the pipeline and save the origin batches in the session.
+// It will not send the result to the client.
+func batchFetcher(handle interface{}, dataSet *batch.Batch) error {
+	if handle == nil {
+		return nil
+	}
+	ses := handle.(*Session)
+	ses.SaveResultSet()
+	if dataSet == nil {
+		return nil
+	}
+	return ses.AppendResultBatch(dataSet)
+}
+
+// getResultSet extracts the result set
+func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) {
+	results := bh.GetExecResultSet()
+	rsset := make([]ExecResult, len(results))
+	for i, value := range results {
+		if er, ok := value.(ExecResult); ok {
+			rsset[i] = er
+		} else {
+			return nil, moerr.NewInternalError(ctx, "it is not the type of result set")
+		}
+	}
+	return rsset, nil
+}
+
 type backExecCtx struct {
-	requestCtx           context.Context
-	connectCtx           context.Context
-	pu                   *config.ParameterUnit
-	pool                 *mpool.MPool
-	txnClient            TxnClient
-	autoIncrCacheManager *defines.AutoIncrCacheManager
-	proto                MysqlProtocol
-	buf                  *buffer.Buffer
-	stmtProfile          process.StmtProfile
-	tenant               *TenantInfo
-	txnHandler           *TxnHandler
-	txnCompileCtx        *TxnCompilerContext
-	mrs                  *MysqlResultSet
+	requestCtx    context.Context
+	connectCtx    context.Context
+	pool          *mpool.MPool
+	proto         MysqlProtocol
+	buf           *buffer.Buffer
+	stmtProfile   process.StmtProfile
+	tenant        *TenantInfo
+	txnHandler    *TxnHandler
+	txnCompileCtx *TxnCompilerContext
+	mrs           *MysqlResultSet
 	//it gets the result set from the pipeline and send it to the client
 	outputCallback func(interface{}, *batch.Batch) error
 
@@ -673,10 +970,6 @@ func (backCtx *backExecCtx) GetProc() *process.Process {
 
 func (backCtx *backExecCtx) GetLastInsertID() uint64 {
 	return 0
-}
-
-func (backCtx *backExecCtx) GetAutoIncrCacheManager() *defines.AutoIncrCacheManager {
-	return backCtx.autoIncrCacheManager
 }
 
 func (backCtx *backExecCtx) GetMemPool() *mpool.MPool {
@@ -812,10 +1105,6 @@ func (backCtx *backExecCtx) IfInitedTempEngine() bool {
 	return false
 }
 
-func (backCtx *backExecCtx) GetParameterUnit() *config.ParameterUnit {
-	return backCtx.pu
-}
-
 func (backCtx *backExecCtx) GetConnectContext() context.Context {
 	return backCtx.connectCtx
 }
@@ -836,12 +1125,11 @@ func (backCtx *backExecCtx) GetBackgroundExec(ctx context.Context) BackgroundExe
 	return NewBackgroundExec(
 		ctx,
 		backCtx,
-		backCtx.GetMemPool(),
-		backCtx.GetParameterUnit())
+		backCtx.GetMemPool())
 }
 
 func (backCtx *backExecCtx) GetStorage() engine.Engine {
-	return backCtx.pu.StorageEngine
+	return gPu.StorageEngine
 }
 
 func (backCtx *backExecCtx) GetTenantInfo() *TenantInfo {
@@ -875,10 +1163,7 @@ func (backCtx *backExecCtx) GetTimeZone() *time.Location {
 func (backCtx *backExecCtx) clear() {
 	backCtx.requestCtx = nil
 	backCtx.connectCtx = nil
-	backCtx.pu = nil
 	backCtx.pool = nil
-	backCtx.txnClient = nil
-	backCtx.autoIncrCacheManager = nil
 	backCtx.proto = nil
 	if backCtx.buf != nil {
 		backCtx.buf.Free()
@@ -1095,135 +1380,42 @@ func (backCtx *backExecCtx) ReplaceDerivedStmt(b bool) bool {
 	return prev
 }
 
-// execute query
-func doComQueryInBack(requestCtx context.Context,
-	backCtx *backExecCtx,
-	input *UserInput) (retErr error) {
-	backCtx.SetSql(input.getSql())
-	//the ses.GetUserName returns the user_name with the account_name.
-	//here,we only need the user_name.
-	pu := backCtx.pu
-	userNameOnly := rootName
-	proc := process.New(
-		requestCtx,
-		backCtx.pool,
-		backCtx.txnClient,
-		nil,
-		pu.FileService,
-		pu.LockService,
-		pu.QueryService,
-		pu.HAKeeperClient,
-		pu.UdfService,
-		backCtx.autoIncrCacheManager)
-	//proc.CopyVectorPool(ses.proc)
-	//proc.CopyValueScanBatch(ses.proc)
-	proc.Id = backCtx.getNextProcessId()
-	proc.Lim.Size = pu.SV.ProcessLimitationSize
-	proc.Lim.BatchRows = pu.SV.ProcessLimitationBatchRows
-	proc.Lim.MaxMsgSize = pu.SV.MaxMessageSize
-	proc.Lim.PartitionRows = pu.SV.ProcessLimitationPartitionRows
-	proc.SessionInfo = process.SessionInfo{
-		User:          backCtx.proto.GetUserName(),
-		Host:          pu.SV.Host,
-		Database:      backCtx.proto.GetDatabaseName(),
-		Version:       makeServerVersion(pu, serverVersion.Load().(string)),
-		TimeZone:      backCtx.GetTimeZone(),
-		StorageEngine: pu.StorageEngine,
-		Buf:           backCtx.buf,
-	}
-	proc.SetStmtProfile(&backCtx.stmtProfile)
-	proc.SetResolveVariableFunc(backCtx.txnCompileCtx.ResolveVariable)
-	//!!!does not init sequence in the background exec
-	if backCtx.tenant != nil {
-		proc.SessionInfo.Account = backCtx.tenant.GetTenant()
-		proc.SessionInfo.AccountId = backCtx.tenant.GetTenantID()
-		proc.SessionInfo.Role = backCtx.tenant.GetDefaultRole()
-		proc.SessionInfo.RoleId = backCtx.tenant.GetDefaultRoleID()
-		proc.SessionInfo.UserId = backCtx.tenant.GetUserID()
+type SqlHelper struct {
+	ses *Session
+}
 
-		if len(backCtx.tenant.GetVersion()) != 0 {
-			proc.SessionInfo.Version = backCtx.tenant.GetVersion()
-		}
-		userNameOnly = backCtx.tenant.GetUser()
-	} else {
-		var accountId uint32
-		accountId, retErr = defines.GetAccountId(requestCtx)
-		if retErr != nil {
-			return retErr
-		}
-		proc.SessionInfo.AccountId = accountId
-		proc.SessionInfo.UserId = defines.GetUserId(requestCtx)
-		proc.SessionInfo.RoleId = defines.GetRoleId(requestCtx)
-	}
-	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "MysqlCmdExecutor.doComQuery",
-		trace.WithKind(trace.SpanKindStatement))
-	defer span.End()
+func (sh *SqlHelper) GetCompilerContext() any {
+	return sh.ses.txnCompileCtx
+}
 
-	proc.SessionInfo.User = userNameOnly
-	backCtx.txnCompileCtx.SetProcess(proc)
+// Made for sequence func. nextval, setval.
+func (sh *SqlHelper) ExecSql(sql string) (ret []interface{}, err error) {
+	var erArray []ExecResult
 
-	cws, err := GetComputationWrapperInBack(backCtx.proto.GetDatabaseName(),
-		input,
-		backCtx.proto.GetUserName(),
-		pu.StorageEngine,
-		proc, backCtx)
+	ctx := sh.ses.GetRequestContext()
+	/*
+		if we run the transaction statement (BEGIN, ect) here , it creates an independent transaction.
+		if we do not run the transaction statement (BEGIN, ect) here, it runs the sql in the share transaction
+		and committed outside this function.
+		!!!NOTE: wen can not execute the transaction statement(BEGIN,COMMIT,ROLLBACK,START TRANSACTION ect) here.
+	*/
+	bh := sh.ses.GetShareTxnBackgroundExec(ctx, false)
+	defer bh.Close()
 
+	bh.ClearExecResultSet()
+	err = bh.Exec(ctx, sql)
 	if err != nil {
-		retErr = err
-		if _, ok := err.(*moerr.Error); !ok {
-			retErr = moerr.NewParseError(requestCtx, err.Error())
-		}
-		return retErr
+		return nil, err
 	}
 
-	defer func() {
-		backCtx.mrs = nil
-	}()
+	erArray, err = getResultSet(ctx, bh)
+	if err != nil {
+		return nil, err
+	}
 
-	sqlRecord := parsers.HandleSqlForRecord(input.getSql())
+	if len(erArray) == 0 {
+		return nil, nil
+	}
 
-	for i, cw := range cws {
-		backCtx.mrs = &MysqlResultSet{}
-		stmt := cw.GetAst()
-		tenant := backCtx.GetTenantNameWithStmt(stmt)
-
-		/*
-				if it is in an active or multi-statement transaction, we check the type of the statement.
-				Then we decide that if we can execute the statement.
-
-			If we check the active transaction, it will generate the case below.
-			case:
-			set autocommit = 0;  <- no active transaction
-			                     <- no active transaction
-			drop table test1;    <- no active transaction, no error
-			                     <- has active transaction
-			drop table test1;    <- has active transaction, error
-			                     <- has active transaction
-		*/
-		if backCtx.InActiveTransaction() {
-			err = canExecuteStatementInUncommittedTransaction(requestCtx, backCtx, stmt)
-			if err != nil {
-				return err
-			}
-		}
-
-		execCtx := &ExecCtx{
-			stmt:       stmt,
-			isLastStmt: i >= len(cws)-1,
-			tenant:     tenant,
-			userName:   userNameOnly,
-			sqlOfStmt:  sqlRecord[i],
-			cw:         cw,
-			i:          i,
-			cws:        cws,
-			proc:       proc,
-		}
-		err = executeStmtInBackWithTxn(requestCtx, backCtx, stmt, proc, cw, i, cws, pu, tenant, userNameOnly, sqlRecord[i], execCtx)
-		if err != nil {
-			return err
-		}
-	} // end of for
-
-	return nil
+	return erArray[0].(*MysqlResultSet).Data[0], nil
 }

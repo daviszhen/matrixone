@@ -77,7 +77,7 @@ func TestIeProto(t *testing.T) {
 	// Mock autoIncrCaches
 	aicm := &defines.AutoIncrCacheManager{}
 
-	executor := NewInternalExecutor(pu, aicm)
+	executor := NewInternalExecutor()
 	p := executor.proto
 	assert.True(t, p.IsEstablished())
 	p.SetEstablished()

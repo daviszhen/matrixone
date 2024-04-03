@@ -654,7 +654,7 @@ func TestGetExprValue(t *testing.T) {
 
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 
-		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, true, nil, nil)
+		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, nil)
 		ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ses.requestCtx = ctx
 		ses.connectCtx = ctx
@@ -759,7 +759,7 @@ func TestGetExprValue(t *testing.T) {
 
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 
-		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, true, nil, nil)
+		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, nil)
 		ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ses.requestCtx = ctx
 		ses.connectCtx = ctx
@@ -913,7 +913,7 @@ func Test_makeExecuteSql(t *testing.T) {
 	}
 
 	pu := config.NewParameterUnit(sv, eng, txnClient, nil)
-	ses1 := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, true, nil, nil)
+	ses1 := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, nil)
 
 	ses1.SetUserDefinedVar("var2", "val2", "set var2 = val2")
 	ses1.SetUserDefinedVar("var3", "val3", "set var3 = val3")
@@ -1080,4 +1080,69 @@ func Test_isErrorRollbackWholeTxn(t *testing.T) {
 	assert.Equal(t, true, isErrorRollbackWholeTxn(moerr.NewLockTableNotFoundNoCtx()))
 	assert.Equal(t, true, isErrorRollbackWholeTxn(moerr.NewDeadlockCheckBusyNoCtx()))
 	//assert.Equal(t, true, isErrorRollbackWholeTxn(moerr.NewLockConflictNoCtx()))
+}
+
+func TestUserInput_getSqlSourceType(t *testing.T) {
+	type fields struct {
+		sql           string
+		stmt          tree.Statement
+		sqlSourceType []string
+	}
+	type args struct {
+		i int
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   string
+	}{
+		{
+			name: "t1",
+			fields: fields{
+				sql:           "select * from t1",
+				sqlSourceType: nil,
+			},
+			args: args{
+				i: 0,
+			},
+			want: "external_sql",
+		},
+		{
+			name: "t2",
+			fields: fields{
+				sql:           "select * from t1",
+				sqlSourceType: nil,
+			},
+			args: args{
+				i: 1,
+			},
+			want: "external_sql",
+		},
+		{
+			name: "t3",
+			fields: fields{
+				sql: "select * from t1",
+				sqlSourceType: []string{
+					"a",
+					"b",
+					"c",
+				},
+			},
+			args: args{
+				i: 2,
+			},
+			want: "c",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ui := &UserInput{
+				sql:           tt.fields.sql,
+				stmt:          tt.fields.stmt,
+				sqlSourceType: tt.fields.sqlSourceType,
+			}
+			assert.Equalf(t, tt.want, ui.getSqlSourceType(tt.args.i), "getSqlSourceType(%v)", tt.args.i)
+		})
+	}
 }

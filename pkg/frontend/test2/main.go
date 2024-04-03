@@ -76,7 +76,7 @@ func main() {
 
 func newTestSession(proto frontend.Protocol, mp *mpool.MPool, pu *config.ParameterUnit) *frontend.Session {
 	//new session
-	ses := frontend.NewSession(proto, mp, pu, frontend.GSysVariables, true, nil, nil)
+	ses := frontend.NewSession(proto, mp, pu, frontend.GSysVariables, nil)
 	return ses
 }
 

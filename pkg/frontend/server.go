@@ -73,6 +73,8 @@ func nextConnectionID() uint32 {
 }
 
 var gRtMgr *RoutineManager
+var gPu *config.ParameterUnit
+var gAicm *defines.AutoIncrCacheManager
 
 func NewMOServer(
 	ctx context.Context,
@@ -81,8 +83,10 @@ func NewMOServer(
 	aicm *defines.AutoIncrCacheManager,
 	baseService BaseService,
 ) *MOServer {
+	gPu = pu
+	gAicm = aicm
 	codec := NewSqlCodec()
-	rm, err := NewRoutineManager(ctx, pu, aicm)
+	rm, err := NewRoutineManager(ctx)
 	if err != nil {
 		logutil.Panicf("start server failed with %+v", err)
 	}

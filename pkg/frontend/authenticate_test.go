@@ -227,9 +227,7 @@ func Test_checkSysExistsOrNot(t *testing.T) {
 		convey.So(err, convey.ShouldBeNil)
 
 		// A mock autoIncrCaches.
-		aicm := &defines.AutoIncrCacheManager{}
-
-		err = InitSysTenant(ctx, aicm)
+		err = InitSysTenant(ctx)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
@@ -5834,7 +5832,7 @@ func Test_doInterpretCall(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -5875,7 +5873,7 @@ func Test_doInterpretCall(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -5928,7 +5926,7 @@ func Test_doInterpretCall(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6401,7 +6399,7 @@ func Test_doAlterUser(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6456,7 +6454,7 @@ func Test_doAlterUser(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6507,7 +6505,7 @@ func Test_doAlterUser(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6566,7 +6564,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6620,7 +6618,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6674,7 +6672,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6724,7 +6722,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6775,7 +6773,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6822,7 +6820,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6876,7 +6874,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6920,7 +6918,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -6968,7 +6966,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -7016,7 +7014,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -7074,7 +7072,7 @@ func Test_doDropAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -7124,7 +7122,7 @@ func Test_doDropAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -7168,7 +7166,7 @@ func Test_doDropAccount(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		//no result set
@@ -7373,7 +7371,7 @@ func newSes(priv *privilege, ctrl *gomock.Controller) *Session {
 	ioses.EXPECT().Ref().AnyTimes()
 	proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 
-	ses := NewSession(proto, nil, pu, GSysVariables, true, nil, nil)
+	ses := NewSession(proto, nil, pu, GSysVariables, nil)
 	tenant := &TenantInfo{
 		Tenant:        sysAccountName,
 		User:          rootName,
@@ -8619,7 +8617,7 @@ func TestCheckRoleWhetherTableOwner(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8659,7 +8657,7 @@ func TestCheckRoleWhetherTableOwner(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8707,7 +8705,7 @@ func TestCheckRoleWhetherTableOwner(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8750,7 +8748,7 @@ func TestCheckRoleWhetherDatabaseOwner(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8791,7 +8789,7 @@ func TestCheckRoleWhetherDatabaseOwner(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8839,7 +8837,7 @@ func TestCheckRoleWhetherDatabaseOwner(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8903,7 +8901,7 @@ func TestDoAlterDatabaseConfig(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -8959,7 +8957,7 @@ func TestDoAlterDatabaseConfig(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9017,7 +9015,7 @@ func TestDoAlterAccountConfig(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9074,7 +9072,7 @@ func TestInsertRecordToMoMysqlCompatibilityMode(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9125,7 +9123,7 @@ func TestDeleteRecordToMoMysqlCompatbilityMode(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9176,7 +9174,7 @@ func TestGetVersionCompatibility(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9223,7 +9221,7 @@ func TestCheckStageExistOrNot(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9269,7 +9267,7 @@ func TestCheckStageExistOrNot(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9346,7 +9344,7 @@ func TestDoDropStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9400,7 +9398,7 @@ func TestDoDropStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9454,7 +9452,7 @@ func TestDoDropStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9506,7 +9504,7 @@ func TestDoDropStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9562,7 +9560,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9620,7 +9618,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9680,7 +9678,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9738,7 +9736,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9798,7 +9796,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9858,7 +9856,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9921,7 +9919,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -9984,7 +9982,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10045,7 +10043,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10106,7 +10104,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10168,7 +10166,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10234,7 +10232,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10276,7 +10274,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10326,7 +10324,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10378,7 +10376,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10428,7 +10426,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{
@@ -10480,7 +10478,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
+		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
 		tenant := &TenantInfo{

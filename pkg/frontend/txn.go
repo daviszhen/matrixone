@@ -43,7 +43,6 @@ var (
 
 type TxnHandler struct {
 	storage     engine.Engine
-	txnClient   TxnClient
 	ses         TempInter
 	txnOperator TxnOperator
 
@@ -64,10 +63,9 @@ type TxnHandler struct {
 	prevIncrTxnId      []byte
 }
 
-func InitTxnHandler(storage engine.Engine, txnClient TxnClient, txnCtx context.Context, txnOp TxnOperator) *TxnHandler {
+func InitTxnHandler(storage engine.Engine, txnCtx context.Context, txnOp TxnOperator) *TxnHandler {
 	h := &TxnHandler{
 		storage:     &engine.EntireEngine{Engine: storage},
-		txnClient:   txnClient,
 		txnCtx:      txnCtx,
 		txnOperator: txnOp,
 		shareTxn:    txnCtx != nil && txnOp != nil,
@@ -78,7 +76,7 @@ func InitTxnHandler(storage engine.Engine, txnClient TxnClient, txnCtx context.C
 func (th *TxnHandler) createTxnCtx() (context.Context, error) {
 	if th.txnCtx == nil {
 		th.txnCtx, th.txnCtxCancel = context.WithTimeout(th.ses.GetConnectContext(),
-			th.ses.GetParameterUnit().SV.SessionTimeout.Duration)
+			gPu.SV.SessionTimeout.Duration)
 	}
 
 	reqCtx := th.ses.GetRequestContext()
@@ -128,18 +126,12 @@ func (th *TxnHandler) SetTempEngine(te engine.Engine) {
 	ee.TempEngine = te
 }
 
-func (th *TxnHandler) GetTxnClient() TxnClient {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	return th.txnClient
-}
-
 // NewTxnOperator creates a new txn operator using TxnClient
 func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 	var err error
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	if th.txnClient == nil {
+	if gPu.TxnClient == nil {
 		panic("must set txn client")
 	}
 
@@ -170,7 +162,7 @@ func (th *TxnHandler) NewTxnOperator() (context.Context, TxnOperator, error) {
 		opts = append(opts,
 			client.WithUserTxn())
 	}
-	th.txnOperator, err = th.txnClient.New(
+	th.txnOperator, err = gPu.TxnClient.New(
 		txnCtx,
 		th.ses.getLastCommitTS(),
 		opts...)
@@ -805,4 +797,89 @@ func (ses *Session) SetAutocommit(old, on bool) error {
 func (ses *Session) setAutocommitOn() {
 	ses.ClearOptionBits(OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT)
 	ses.SetServerStatus(SERVER_STATUS_AUTOCOMMIT)
+}
+
+// get errors during the transaction. rollback the transaction
+func rollbackTxnFunc(reqCtx context.Context, ses TempInter, execErr error, execCtx *ExecCtx) error {
+	incStatementCounter(execCtx.tenant, execCtx.stmt)
+	incStatementErrorsCounter(execCtx.tenant, execCtx.stmt)
+	/*
+		Cases    | set Autocommit = 1/0 | BEGIN statement |
+		---------------------------------------------------
+		Case1      1                       Yes
+		Case2      1                       No
+		Case3      0                       Yes
+		Case4      0                       No
+		---------------------------------------------------
+		update error message in Case1,Case3,Case4.
+	*/
+	if ses.InMultiStmtTransactionMode() && ses.InActiveTransaction() {
+		ses.cleanCache()
+	}
+	//logError(ses, ses.GetDebugString(), execErr.Error())
+	txnErr := ses.TxnRollbackSingleStatement(execCtx.stmt, execErr)
+	if txnErr != nil {
+		//logStatementStatus(reqCtx, ses, execCtx.stmt, fail, txnErr)
+		return txnErr
+	}
+	//logStatementStatus(reqCtx, ses, execCtx.stmt, fail, execErr)
+	return execErr
+}
+
+// execution succeeds during the transaction. commit the transaction
+func commitTxnFunc(requestCtx context.Context,
+	ses TempInter,
+	execCtx *ExecCtx) (retErr error) {
+	// Call a defer function -- if TxnCommitSingleStatement paniced, we
+	// want to catch it and convert it to an error.
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		retErr = moerr.ConvertPanicError(requestCtx, r)
+	//	}
+	//}()
+
+	//load data handle txn failure internally
+	incStatementCounter(execCtx.tenant, execCtx.stmt)
+	retErr = ses.TxnCommitSingleStatement(execCtx.stmt)
+	if retErr != nil {
+		//logStatementStatus(requestCtx, ses, execCtx.stmt, fail, retErr)
+	}
+	return
+}
+
+// finish the transaction
+func finishTxnFunc(reqCtx context.Context, ses *Session, execErr error, execCtx *ExecCtx) (err error) {
+	// First recover all panics.   If paniced, we will abort.
+	//if r := recover(); r != nil {
+	//	err = moerr.ConvertPanicError(requestCtx, r)
+	//}
+
+	if execErr == nil {
+		err = commitTxnFunc(reqCtx, ses, execCtx)
+		if err == nil {
+			return respClientFunc(reqCtx, ses, execCtx)
+		}
+		// if commitTxnFunc failed, we will rollback the transaction.
+		execErr = err
+	}
+
+	return rollbackTxnFunc(reqCtx, ses, execErr, execCtx)
+}
+
+func finishTxnFuncInBack(reqCtx context.Context, ses TempInter, execErr error, execCtx *ExecCtx) (err error) {
+	// First recover all panics.   If paniced, we will abort.
+	//if r := recover(); r != nil {
+	//	err = moerr.ConvertPanicError(requestCtx, r)
+	//}
+
+	if execErr == nil {
+		err = commitTxnFunc(reqCtx, ses, execCtx)
+		if err == nil {
+			return err
+		}
+		// if commitTxnFunc failed, we will rollback the transaction.
+		execErr = err
+	}
+
+	return rollbackTxnFunc(reqCtx, ses, execErr, execCtx)
 }

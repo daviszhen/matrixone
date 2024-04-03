@@ -231,7 +231,7 @@ func Test_mce(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, pu, &gSys, true, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		proto.SetSession(ses)
 		ses.txnHandler = &TxnHandler{
 			storage:   &engine.EntireEngine{Engine: pu.StorageEngine},
@@ -327,7 +327,7 @@ func Test_mce_selfhandle(t *testing.T) {
 
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, true, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 
@@ -366,7 +366,7 @@ func Test_mce_selfhandle(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, pu, &gSys, true, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
@@ -467,7 +467,7 @@ func Test_getDataFromPipeline(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
@@ -540,7 +540,7 @@ func Test_getDataFromPipeline(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
@@ -706,7 +706,7 @@ func Test_handleSelectVariables(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
@@ -757,7 +757,7 @@ func Test_handleShowVariables(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		tenant := &TenantInfo{
@@ -838,7 +838,7 @@ func runTestHandle(funName string, t *testing.T, handleFun func(ses *Session) er
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, true, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
@@ -934,7 +934,7 @@ func Test_CMD_FIELD_LIST(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		proto.SetSession(ses)
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
@@ -1197,7 +1197,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 	proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 	var gSys GlobalSystemVariables
 	InitGlobalSystemVariables(&gSys)
-	ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+	ses := NewSession(proto, nil, pu, &gSys, nil)
 	ses.SetRequestContext(ctx)
 	ses.SetConnectContext(ctx)
 	ses.GetMysqlProtocol()
@@ -1420,7 +1420,7 @@ func Test_ExecRequest(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, pu, &gSys, true, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		proto.SetSession(ses)
 		ses.txnHandler = &TxnHandler{
 			storage:   &engine.EntireEngine{Engine: pu.StorageEngine},

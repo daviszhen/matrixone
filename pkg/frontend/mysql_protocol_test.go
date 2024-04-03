@@ -107,7 +107,7 @@ func TestMysqlClientProtocol_Handshake(t *testing.T) {
 
 	// A mock autoincrcache manager.
 	aicm := &defines.AutoIncrCacheManager{}
-	rm, _ := NewRoutineManager(ctx, pu, aicm)
+	rm, _ := NewRoutineManager(ctx)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -246,7 +246,7 @@ func TestKIll(t *testing.T) {
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 	// A mock autoincrcache manager.
 	aicm := &defines.AutoIncrCacheManager{}
-	gRtMgr, _ = NewRoutineManager(ctx, pu, aicm)
+	gRtMgr, _ = NewRoutineManager(ctx)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -1274,7 +1274,7 @@ func (tRM *TestRoutineManager) resultsetHandler(rs goetty.IOSession, msg interfa
 		return moerr.NewInternalError(ctx, "message is not Packet")
 	}
 
-	ses := NewSession(pro, nil, pu, nil, false, nil, nil)
+	ses := NewSession(pro, nil, pu, nil, nil)
 	ses.SetRequestContext(ctx)
 	pro.SetSession(ses)
 
@@ -1898,7 +1898,7 @@ func Test_openpacket(t *testing.T) {
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
-		ses := NewSession(proto, nil, pu, nil, false, nil, nil)
+		ses := NewSession(proto, nil, pu, nil, nil)
 		ses.SetRequestContext(context.TODO())
 		proto.ses = ses
 
@@ -1926,7 +1926,7 @@ func Test_openpacket(t *testing.T) {
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
-		ses := NewSession(proto, nil, pu, nil, false, nil, nil)
+		ses := NewSession(proto, nil, pu, nil, nil)
 		ses.SetRequestContext(context.TODO())
 		proto.ses = ses
 
@@ -2273,7 +2273,7 @@ func Test_resultset(t *testing.T) {
 		}
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		proto.ses = ses
 
@@ -2306,7 +2306,7 @@ func Test_resultset(t *testing.T) {
 		}
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		proto.ses = ses
 
@@ -2339,7 +2339,7 @@ func Test_resultset(t *testing.T) {
 		}
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		proto.ses = ses
 
@@ -2375,7 +2375,7 @@ func Test_resultset(t *testing.T) {
 		}
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, false, nil, nil)
+		ses := NewSession(proto, nil, pu, &gSys, nil)
 		ses.SetRequestContext(ctx)
 		ses.cmd = COM_STMT_EXECUTE
 		proto.ses = ses

@@ -185,7 +185,7 @@ func Test_ConnectionCount(t *testing.T) {
 
 	// A mock autoincrcache manager.
 	aicm := &defines.AutoIncrCacheManager{}
-	rm, _ := NewRoutineManager(ctx, pu, aicm)
+	rm, _ := NewRoutineManager(ctx)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)

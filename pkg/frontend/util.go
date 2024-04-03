@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/frontend/constant"
 	"math/rand"
 	"os"
 	"runtime"
@@ -503,7 +504,7 @@ func logStatementStatus(ctx context.Context, ses *Session, stmt tree.Statement, 
 }
 
 func logStatementStringStatus(ctx context.Context, ses *Session, stmtStr string, status statementStatus, err error) {
-	str := SubStringFromBegin(stmtStr, int(ses.GetParameterUnit().SV.LengthOfQueryPrinted))
+	str := SubStringFromBegin(stmtStr, int(gPu.SV.LengthOfQueryPrinted))
 	outBytes, outPacket := ses.GetMysqlProtocol().CalculateOutTrafficBytes(true)
 	if status == success {
 		logDebug(ses, ses.GetDebugString(), "query trace status", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.StatementField(str), logutil.StatusField(status.String()), trace.ContextField(ctx))
@@ -899,4 +900,80 @@ func getRandomErrorRollbackWholeTxn() error {
 
 func skipClientQuit(info string) bool {
 	return strings.Contains(info, quitStr)
+}
+
+// UserInput
+// normally, just use the sql.
+// for some special statement, like 'set_var', we need to use the stmt.
+// if the stmt is not nil, we neglect the sql.
+type UserInput struct {
+	sql           string
+	stmt          tree.Statement
+	sqlSourceType []string
+}
+
+func (ui *UserInput) getSql() string {
+	return ui.sql
+}
+
+// getStmt if the stmt is not nil, we neglect the sql.
+func (ui *UserInput) getStmt() tree.Statement {
+	return ui.stmt
+}
+
+func (ui *UserInput) getSqlSourceTypes() []string {
+	return ui.sqlSourceType
+}
+
+// isInternal return true if the stmt is not nil.
+// it means the statement is not from any client.
+// currently, we use it to handle the 'set_var' statement.
+func (ui *UserInput) isInternal() bool {
+	return ui.getStmt() != nil
+}
+
+func (ui *UserInput) genSqlSourceType(ses TempInter) {
+	sql := ui.getSql()
+	ui.sqlSourceType = nil
+	if ui.getStmt() != nil {
+		ui.sqlSourceType = append(ui.sqlSourceType, constant.InternalSql)
+		return
+	}
+	tenant := ses.GetTenantInfo()
+	if tenant == nil || strings.HasPrefix(sql, cmdFieldListSql) {
+		ui.sqlSourceType = append(ui.sqlSourceType, constant.InternalSql)
+		return
+	}
+	flag, _, _ := isSpecialUser(tenant.User)
+	if flag {
+		ui.sqlSourceType = append(ui.sqlSourceType, constant.InternalSql)
+		return
+	}
+	for len(sql) > 0 {
+		p1 := strings.Index(sql, "/*")
+		p2 := strings.Index(sql, "*/")
+		if p1 < 0 || p2 < 0 || p2 <= p1+1 {
+			ui.sqlSourceType = append(ui.sqlSourceType, constant.ExternSql)
+			return
+		}
+		source := strings.TrimSpace(sql[p1+2 : p2])
+		if source == cloudUserTag {
+			ui.sqlSourceType = append(ui.sqlSourceType, constant.CloudUserSql)
+		} else if source == cloudNoUserTag {
+			ui.sqlSourceType = append(ui.sqlSourceType, constant.CloudNoUserSql)
+		} else if source == saveResultTag {
+			ui.sqlSourceType = append(ui.sqlSourceType, constant.CloudUserSql)
+		} else {
+			ui.sqlSourceType = append(ui.sqlSourceType, constant.ExternSql)
+		}
+		sql = sql[p2+2:]
+	}
+}
+
+func (ui *UserInput) getSqlSourceType(i int) string {
+	sqlType := constant.ExternSql
+	if i < len(ui.sqlSourceType) {
+		sqlType = ui.sqlSourceType[i]
+	}
+	return sqlType
 }

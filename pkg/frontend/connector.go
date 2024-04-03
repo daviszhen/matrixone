@@ -35,7 +35,7 @@ const (
 )
 
 func handleCreateConnector(ctx context.Context, ses *Session, st *tree.CreateConnector) error {
-	ts := ses.pu.TaskService
+	ts := gPu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ctx, "no task service is found")
 	}
@@ -253,7 +253,7 @@ var connectorCols = []Column{
 }
 
 func showConnectors(ses TempInter) error {
-	ts := ses.GetParameterUnit().TaskService
+	ts := gPu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.GetRequestContext(),
 			"task service not ready yet, please try again later.")
