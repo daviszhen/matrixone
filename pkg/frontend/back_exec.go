@@ -249,7 +249,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.ShowErrors, *tree.ShowWarnings:
 		selfHandle = true
-		err = mce.handleShowErrors(i, len(cws))
+		err = mce.handleShowErrors(execCtx.isLastStmt)
 		if err != nil {
 			return
 		}
@@ -280,7 +280,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.ShowSubscriptions:
 		selfHandle = true
-		if err = mce.handleShowSubscriptions(requestCtx, st, i, len(cws)); err != nil {
+		if err = mce.handleShowSubscriptions(requestCtx, st, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.CreateStage:
@@ -397,19 +397,19 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		}
 	case *tree.ShowAccounts:
 		selfHandle = true
-		if err = mce.handleShowAccounts(requestCtx, st, i, len(cws)); err != nil {
+		if err = mce.handleShowAccounts(requestCtx, st, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.ShowCollation:
 		selfHandle = true
-		if err = mce.handleShowCollation(st, proc, i, len(cws)); err != nil {
+		if err = mce.handleShowCollation(st, proc, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.Load:
 		return moerr.NewInternalError(requestCtx, "does not support Loacd in background exec")
 	case *tree.ShowBackendServers:
 		selfHandle = true
-		if err = mce.handleShowBackendServers(requestCtx, i, len(cws)); err != nil {
+		if err = mce.handleShowBackendServers(requestCtx, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.SetTransaction:
@@ -465,7 +465,7 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 			return
 		}
 	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = mce.handleShowErrors(i, len(cws))
+		err = mce.handleShowErrors(execCtx.isLastStmt)
 		if err != nil {
 			return
 		} else {

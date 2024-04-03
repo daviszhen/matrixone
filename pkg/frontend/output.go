@@ -114,7 +114,7 @@ func (oq *outputQueue) flush() error {
 				zap.Error(err))
 			return err
 		}
-		resp := oq.ses.SetNewResponse(OkResponse, rsLen, int(COM_QUERY), "", false)
+		resp := oq.ses.SetNewResponse(OkResponse, rsLen, int(COM_QUERY), "", true)
 		if err2 := oq.ses.GetMysqlProtocol().SendResponse(oq.ses.GetRequestContext(), resp); err2 != nil {
 			err := moerr.NewInternalError(oq.ses.GetRequestContext(), "routine send response failed. error:%v ", err2)
 			return err

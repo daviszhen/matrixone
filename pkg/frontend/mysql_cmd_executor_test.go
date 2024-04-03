@@ -388,28 +388,28 @@ func Test_mce_selfhandle(t *testing.T) {
 		st1, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@max_allowed_packet", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv1 := st1.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv1, 0, 1)
+		err = mce.handleSelectVariables(sv1, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		st2, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@version_comment", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv2 := st2.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv2, 0, 1)
+		err = mce.handleSelectVariables(sv2, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		st3, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@global.version_comment", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv3 := st3.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv3, 0, 1)
+		err = mce.handleSelectVariables(sv3, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		st4, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @version_comment", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv4 := st4.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv4, 0, 1)
+		err = mce.handleSelectVariables(sv4, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
@@ -733,12 +733,12 @@ func Test_handleSelectVariables(t *testing.T) {
 		st2, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@tx_isolation", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv2 := st2.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		convey.So(mce.handleSelectVariables(sv2, 0, 1), convey.ShouldBeNil)
+		convey.So(mce.handleSelectVariables(sv2, true), convey.ShouldBeNil)
 
 		st3, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@XXX", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv3 := st3.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		convey.So(mce.handleSelectVariables(sv3, 0, 1), convey.ShouldNotBeNil)
+		convey.So(mce.handleSelectVariables(sv3, true), convey.ShouldNotBeNil)
 
 	})
 }
@@ -1261,7 +1261,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
 
-		err = mce.handleShowBackendServers(ctx, 0, 1)
+		err = mce.handleShowBackendServers(ctx, true)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
 		require.Equal(t, uint64(4), rs.GetColumnCount())
@@ -1305,7 +1305,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
 
-		err = mce.handleShowBackendServers(ctx, 0, 1)
+		err = mce.handleShowBackendServers(ctx, true)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
 		require.Equal(t, uint64(4), rs.GetColumnCount())
