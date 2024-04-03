@@ -5824,14 +5824,13 @@ func Test_doInterpretCall(t *testing.T) {
 		priv := determinePrivilegeSetOfStatement(call)
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
-		proc.FileService = ses.pu.FileService
+		proc.FileService = gPu.FileService
 		ses.GetTxnCompileCtx().SetProcess(proc)
 		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -5865,14 +5864,14 @@ func Test_doInterpretCall(t *testing.T) {
 		priv := determinePrivilegeSetOfStatement(call)
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
-		proc.FileService = ses.pu.FileService
+		proc.FileService = gPu.FileService
 		ses.GetTxnCompileCtx().SetProcess(proc)
 		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -5918,14 +5917,14 @@ func Test_doInterpretCall(t *testing.T) {
 		priv := determinePrivilegeSetOfStatement(call)
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
-		proc.FileService = ses.pu.FileService
+		proc.FileService = gPu.FileService
 		ses.GetTxnCompileCtx().SetProcess(proc)
 		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6398,7 +6397,7 @@ func Test_doAlterUser(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6453,7 +6452,7 @@ func Test_doAlterUser(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6504,7 +6503,7 @@ func Test_doAlterUser(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6563,7 +6562,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6617,7 +6616,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6671,7 +6670,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6721,7 +6720,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6772,7 +6771,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6819,7 +6818,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6873,7 +6872,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6917,7 +6916,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6965,7 +6964,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -7013,7 +7012,7 @@ func Test_doAlterAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -7071,7 +7070,7 @@ func Test_doDropAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -7121,7 +7120,7 @@ func Test_doDropAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -7165,7 +7164,7 @@ func Test_doDropAccount(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8616,7 +8615,7 @@ func TestCheckRoleWhetherTableOwner(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8656,7 +8655,7 @@ func TestCheckRoleWhetherTableOwner(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8704,7 +8703,7 @@ func TestCheckRoleWhetherTableOwner(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8747,7 +8746,7 @@ func TestCheckRoleWhetherDatabaseOwner(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8788,7 +8787,7 @@ func TestCheckRoleWhetherDatabaseOwner(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8836,7 +8835,7 @@ func TestCheckRoleWhetherDatabaseOwner(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8900,7 +8899,7 @@ func TestDoAlterDatabaseConfig(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -8956,7 +8955,7 @@ func TestDoAlterDatabaseConfig(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9014,7 +9013,7 @@ func TestDoAlterAccountConfig(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9071,7 +9070,7 @@ func TestInsertRecordToMoMysqlCompatibilityMode(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9122,7 +9121,7 @@ func TestDeleteRecordToMoMysqlCompatbilityMode(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9173,7 +9172,7 @@ func TestGetVersionCompatibility(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9220,7 +9219,7 @@ func TestCheckStageExistOrNot(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9266,7 +9265,7 @@ func TestCheckStageExistOrNot(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9343,7 +9342,7 @@ func TestDoDropStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9397,7 +9396,7 @@ func TestDoDropStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9451,7 +9450,7 @@ func TestDoDropStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9503,7 +9502,7 @@ func TestDoDropStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9559,7 +9558,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9617,7 +9616,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9677,7 +9676,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9735,7 +9734,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9795,7 +9794,7 @@ func TestDoCreateStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9855,7 +9854,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9918,7 +9917,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -9981,7 +9980,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10042,7 +10041,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10103,7 +10102,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10165,7 +10164,7 @@ func TestDoAlterStage(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10231,7 +10230,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10273,7 +10272,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10323,7 +10322,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10375,7 +10374,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10425,7 +10424,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10477,7 +10476,7 @@ func TestDoCheckFilePath(t *testing.T) {
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		aicm := &defines.AutoIncrCacheManager{}
+
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -10625,7 +10624,6 @@ func TestUpload(t *testing.T) {
 		ses := &Session{
 			protocol: proto,
 			proc:     proc,
-			pu:       pu,
 		}
 		fp, err := Upload(proc.Ctx, ses, "test.py", "test")
 		convey.So(err, convey.ShouldBeNil)
