@@ -175,6 +175,11 @@ type TempInter interface {
 	SetTempEngine(ctx context.Context, te engine.Engine) error
 	EnableInitTempEngine()
 	GetUpstream() TempInter
+	TxnCommitSingleStatement(stmt tree.Statement) error
+	InMultiStmtTransactionMode() bool
+	InActiveTransaction() bool
+	TxnRollbackSingleStatement(stmt tree.Statement, err error) error
+	cleanCache()
 }
 
 type Session struct {

@@ -40,14 +40,14 @@ func mockResultSet() *MysqlResultSet {
 }
 
 type miniExec struct {
-	sess *Session
+	sess TempInter
 }
 
 func (e *miniExec) doComQuery(context.Context, *UserInput) error {
 	_ = e.sess.GetMysqlProtocol()
 	return nil
 }
-func (e *miniExec) SetSession(sess *Session) {
+func (e *miniExec) SetSession(sess TempInter) {
 	e.sess = sess
 }
 
