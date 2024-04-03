@@ -8462,7 +8462,7 @@ func InitRole(ctx context.Context, ses *Session, tenant *TenantInfo, cr *tree.Cr
 	return err
 }
 
-func (mce *MysqlCmdExecutor) Upload(ctx context.Context, localPath string, storageDir string) (string, error) {
+func Upload(ctx context.Context, ses *Session, localPath string, storageDir string) (string, error) {
 	loadLocalReader, loadLocalWriter := io.Pipe()
 
 	// watch and cancel
@@ -8483,7 +8483,7 @@ func (mce *MysqlCmdExecutor) Upload(ctx context.Context, localPath string, stora
 				Filepath: localPath,
 			},
 		}
-		return mce.processLoadLocal(ctx, param, loadLocalWriter)
+		return processLoadLocal(ctx, ses, param, loadLocalWriter)
 	})
 
 	// read from pipe and upload
@@ -8497,7 +8497,7 @@ func (mce *MysqlCmdExecutor) Upload(ctx context.Context, localPath string, stora
 		},
 	}
 
-	fileService := mce.ses.GetParameterUnit().FileService
+	fileService := ses.GetParameterUnit().FileService
 	_ = fileService.Delete(ctx, ioVector.FilePath)
 	err := fileService.Write(ctx, ioVector)
 	err = errors.Join(err, loadLocalErrGroup.Wait())
@@ -8508,7 +8508,7 @@ func (mce *MysqlCmdExecutor) Upload(ctx context.Context, localPath string, stora
 	return ioVector.FilePath, nil
 }
 
-func (mce *MysqlCmdExecutor) InitFunction(ctx context.Context, ses *Session, tenant *TenantInfo, cf *tree.CreateFunction) (err error) {
+func InitFunction(ctx context.Context, ses *Session, tenant *TenantInfo, cf *tree.CreateFunction) (err error) {
 	var initMoUdf string
 	var retTypeStr string
 	var dbName string
@@ -8613,7 +8613,7 @@ func (mce *MysqlCmdExecutor) InitFunction(ctx context.Context, ses *Session, ten
 			}
 			// upload
 			storageDir := string(cf.Name.Name.ObjectName) + "_" + strings.Join(typeList, "-") + "_"
-			cf.Body, err = mce.Upload(ctx, cf.Body, storageDir)
+			cf.Body, err = Upload(ctx, ses, cf.Body, storageDir)
 			if err != nil {
 				return err
 			}

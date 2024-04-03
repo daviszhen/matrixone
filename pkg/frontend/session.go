@@ -180,6 +180,9 @@ type TempInter interface {
 	InActiveTransaction() bool
 	TxnRollbackSingleStatement(stmt tree.Statement, err error) error
 	cleanCache()
+	getNextProcessId() string
+	GetSqlCount() uint64
+	addSqlCount(a uint64)
 }
 
 type Session struct {
@@ -376,6 +379,25 @@ type Session struct {
 	fromProxy bool
 
 	disableTrace bool
+
+	sqlCount uint64
+}
+
+func (ses *Session) getNextProcessId() string {
+	/*
+		temporary method:
+		routineId + sqlCount
+	*/
+	routineId := ses.GetMysqlProtocol().ConnectionID()
+	return fmt.Sprintf("%d%d", routineId, ses.GetSqlCount())
+}
+
+func (ses *Session) GetSqlCount() uint64 {
+	return ses.sqlCount
+}
+
+func (ses *Session) addSqlCount(a uint64) {
+	ses.sqlCount += a
 }
 
 func (ses *Session) GetUpstream() TempInter {
@@ -1071,10 +1093,8 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		//	DefaultRoleID: defines.GetRoleId(ctx),
 		//}
 		bh := &backExec{
-			mce:     NewMysqlCmdExecutor(),
 			backCtx: backCtx,
 		}
-		bh.mce.ses = bh.backCtx
 		//the derived statement execute in a shared transaction in background session
 		bh.backCtx.ReplaceDerivedStmt(true)
 		return bh
@@ -1136,10 +1156,8 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 	//	DefaultRoleID: defines.GetRoleId(ctx),
 	//}
 	bh := &backExec{
-		mce:     NewMysqlCmdExecutor(),
 		backCtx: backCtx,
 	}
-	bh.mce.ses = bh.backCtx
 	return bh
 	//bh := &BackgroundHandler{
 	//	mce: NewMysqlCmdExecutor(),
@@ -2246,7 +2264,7 @@ func executeSQLInBackgroundSession(
 // executeStmtInSameSession executes the statement in the same session.
 // To be clear, only for the select statement derived from the set_var statement
 // in an independent transaction
-func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *Session, stmt tree.Statement) error {
+func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.Statement) error {
 	switch stmt.(type) {
 	case *tree.Select, *tree.ParenSelect:
 	default:
@@ -2283,7 +2301,7 @@ func executeStmtInSameSession(ctx context.Context, mce *MysqlCmdExecutor, ses *S
 	logDebug(ses, ses.GetDebugString(), "query trace(ExecStmtInSameSession)",
 		logutil.ConnectionIdField(ses.GetConnectionID()))
 	//3. execute the statement
-	return mce.GetDoQueryFunc()(ctx, &UserInput{stmt: stmt})
+	return doComQuery(ctx, ses, &UserInput{stmt: stmt})
 }
 
 var NewBackgroundExec = func(
@@ -2332,26 +2350,21 @@ var NewBackgroundExec = func(
 	//}
 
 	bh := &backExec{
-		mce:     NewMysqlCmdExecutor(),
 		backCtx: backCtx,
 	}
-	bh.mce.ses = bh.backCtx
 
 	return bh
 }
 
 type backExec struct {
-	mce     *MysqlCmdExecutor
 	backCtx *backExecCtx
 }
 
 func (back *backExec) Close() {
-	back.mce.Close()
 	back.Clear()
 }
 
 func (back *backExec) Exec(ctx context.Context, sql string) error {
-	back.mce.SetSession(back.backCtx)
 	if ctx == nil {
 		ctx = back.backCtx.GetRequestContext()
 	} else {
@@ -2364,8 +2377,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 
 	// For determine this is a background sql.
 	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	back.mce.GetSession().SetRequestContext(ctx)
-
+	back.backCtx.requestCtx = ctx
 	//logutil.Debugf("-->bh:%s", sql)
 	v, err := back.backCtx.GetGlobalVar("lower_case_table_names")
 	if err != nil {
@@ -2387,7 +2399,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 			}
 		}
 	}
-	return back.mce.doComQueryInBack(ctx, back.backCtx, &UserInput{sql: sql})
+	return doComQueryInBack(ctx, back.backCtx, &UserInput{sql: sql})
 }
 
 func (back *backExec) ExecStmt(ctx context.Context, statement tree.Statement) error {

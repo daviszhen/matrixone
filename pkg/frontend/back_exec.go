@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -39,7 +40,7 @@ import (
 	"time"
 )
 
-func (mce *MysqlCmdExecutor) executeStmtInBackWithTxn(requestCtx context.Context,
+func executeStmtInBackWithTxn(requestCtx context.Context,
 	backCtx *backExecCtx,
 	stmt tree.Statement,
 	proc *process.Process,
@@ -93,10 +94,10 @@ func (mce *MysqlCmdExecutor) executeStmtInBackWithTxn(requestCtx context.Context
 		}
 		backCtx.GetTxnHandler().disableStartStmt()
 	}()
-	return mce.executeStmtInBack(requestCtx, backCtx, proc, cw, i, cws, pu, tenant, userName, sql, execCtx)
+	return executeStmtInBack(requestCtx, backCtx, proc, cw, i, cws, pu, tenant, userName, sql, execCtx)
 }
 
-func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
+func executeStmtInBack(requestCtx context.Context,
 	backCtx *backExecCtx,
 	proc *process.Process,
 	cw ComputationWrapper,
@@ -144,21 +145,21 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 	case *tree.SetRole:
 		selfHandle = true
 		//switch role
-		err = mce.handleSwitchRole(requestCtx, st)
+		err = handleSwitchRole(requestCtx, backCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.Use:
 		selfHandle = true
 		//use database
-		err = mce.handleChangeDB(requestCtx, st.Name.Compare())
+		err = handleChangeDB(requestCtx, backCtx, st.Name.Compare())
 		if err != nil {
 			return
 		}
 	case *tree.MoDump:
 		selfHandle = true
 		//dump
-		err = mce.handleDump(requestCtx, st)
+		err = handleDump(requestCtx, backCtx, st)
 		if err != nil {
 			return
 		}
@@ -188,154 +189,114 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		*tree.AlterDataBaseConfig, *tree.ShowTableStatus:
 		selfHandle = true
 		return moerr.NewInternalError(requestCtx, "does not support in background exec")
-	case *tree.CreateConnector:
-		selfHandle = true
-		err = mce.handleCreateConnector(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.PauseDaemonTask:
-		selfHandle = true
-		err = mce.handlePauseDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.CancelDaemonTask:
-		selfHandle = true
-		err = mce.handleCancelDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.ResumeDaemonTask:
-		selfHandle = true
-		err = mce.handleResumeDaemonTask(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.DropConnector:
-		selfHandle = true
-		err = mce.handleDropConnector(requestCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.ShowConnectors:
-		selfHandle = true
-		if err = mce.handleShowConnectors(requestCtx, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.Deallocate:
-		selfHandle = true
-		err = mce.handleDeallocate(requestCtx, st)
-		if err != nil {
-			return
-		}
+
 	case *tree.Reset:
 		selfHandle = true
-		err = mce.handleReset(requestCtx, st)
+		err = handleReset(requestCtx, backCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.SetVar:
 		selfHandle = true
-		err = mce.handleSetVar(requestCtx, st, sql)
+		err = handleSetVar(requestCtx, backCtx, st, sql)
 		if err != nil {
 			return
 		}
 	case *tree.ShowVariables:
 		selfHandle = true
-		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
+		err = handleShowVariables(backCtx, st, proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		}
 	case *tree.ShowErrors, *tree.ShowWarnings:
 		selfHandle = true
-		err = mce.handleShowErrors(execCtx.isLastStmt)
+		err = handleShowErrors(backCtx, execCtx.isLastStmt)
 		if err != nil {
 			return
 		}
 	case *tree.ExplainStmt:
 		selfHandle = true
-		if err = mce.handleExplainStmt(requestCtx, st); err != nil {
+		if err = handleExplainStmt(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *InternalCmdFieldList:
 		selfHandle = true
-		if err = mce.handleCmdFieldList(requestCtx, st); err != nil {
+		if err = handleCmdFieldList(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CreatePublication:
 		selfHandle = true
-		if err = mce.handleCreatePublication(requestCtx, st); err != nil {
+		if err = handleCreatePublication(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterPublication:
 		selfHandle = true
-		if err = mce.handleAlterPublication(requestCtx, st); err != nil {
+		if err = handleAlterPublication(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropPublication:
 		selfHandle = true
-		if err = mce.handleDropPublication(requestCtx, st); err != nil {
+		if err = handleDropPublication(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.ShowSubscriptions:
 		selfHandle = true
-		if err = mce.handleShowSubscriptions(requestCtx, st, execCtx.isLastStmt); err != nil {
+		if err = handleShowSubscriptions(requestCtx, backCtx, st, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.CreateStage:
 		selfHandle = true
-		if err = mce.handleCreateStage(requestCtx, st); err != nil {
+		if err = handleCreateStage(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropStage:
 		selfHandle = true
-		if err = mce.handleDropStage(requestCtx, st); err != nil {
+		if err = handleDropStage(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterStage:
 		selfHandle = true
-		if err = mce.handleAlterStage(requestCtx, st); err != nil {
+		if err = handleAlterStage(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateAccount:
 		selfHandle = true
-		if err = mce.handleCreateAccount(requestCtx, st); err != nil {
+		if err = handleCreateAccount(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropAccount:
 		selfHandle = true
-		if err = mce.handleDropAccount(requestCtx, st); err != nil {
+		if err = handleDropAccount(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterAccount:
 		selfHandle = true
-		if err = mce.handleAlterAccount(requestCtx, st); err != nil {
+		if err = handleAlterAccount(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateUser:
 		selfHandle = true
-		if err = mce.handleCreateUser(requestCtx, st); err != nil {
+		if err = handleCreateUser(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropUser:
 		selfHandle = true
-		if err = mce.handleDropUser(requestCtx, st); err != nil {
+		if err = handleDropUser(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterUser: //TODO
 		selfHandle = true
-		if err = mce.handleAlterUser(requestCtx, st); err != nil {
+		if err = handleAlterUser(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateRole:
 		selfHandle = true
-		if err = mce.handleCreateRole(requestCtx, st); err != nil {
+		if err = handleCreateRole(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropRole:
 		selfHandle = true
-		if err = mce.handleDropRole(requestCtx, st); err != nil {
+		if err = handleDropRole(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateFunction:
@@ -343,38 +304,38 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		if err = st.Valid(); err != nil {
 			return err
 		}
-		if err = mce.handleCreateFunction(requestCtx, st); err != nil {
+		if err = handleCreateFunction(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropFunction:
 		selfHandle = true
-		if err = mce.handleDropFunction(requestCtx, st, proc); err != nil {
+		if err = handleDropFunction(requestCtx, backCtx, st, proc); err != nil {
 			return
 		}
 	case *tree.CreateProcedure:
 		selfHandle = true
-		if err = mce.handleCreateProcedure(requestCtx, st); err != nil {
+		if err = handleCreateProcedure(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.DropProcedure:
 		selfHandle = true
-		if err = mce.handleDropProcedure(requestCtx, st); err != nil {
+		if err = handleDropProcedure(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	case *tree.CallStmt:
 		selfHandle = true
-		if err = mce.handleCallProcedure(requestCtx, st, proc); err != nil {
+		if err = handleCallProcedure(requestCtx, backCtx, st, proc); err != nil {
 			return
 		}
 	case *tree.Grant:
 		selfHandle = true
 		switch st.Typ {
 		case tree.GrantTypeRole:
-			if err = mce.handleGrantRole(requestCtx, &st.GrantRole); err != nil {
+			if err = handleGrantRole(requestCtx, backCtx, &st.GrantRole); err != nil {
 				return
 			}
 		case tree.GrantTypePrivilege:
-			if err = mce.handleGrantPrivilege(requestCtx, &st.GrantPrivilege); err != nil {
+			if err = handleGrantPrivilege(requestCtx, backCtx, &st.GrantPrivilege); err != nil {
 				return
 			}
 		}
@@ -382,34 +343,30 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		selfHandle = true
 		switch st.Typ {
 		case tree.RevokeTypeRole:
-			if err = mce.handleRevokeRole(requestCtx, &st.RevokeRole); err != nil {
+			if err = handleRevokeRole(requestCtx, backCtx, &st.RevokeRole); err != nil {
 				return
 			}
 		case tree.RevokeTypePrivilege:
-			if err = mce.handleRevokePrivilege(requestCtx, &st.RevokePrivilege); err != nil {
+			if err = handleRevokePrivilege(requestCtx, backCtx, &st.RevokePrivilege); err != nil {
 				return
 			}
 		}
-	case *tree.Kill:
-		selfHandle = true
-		if err = mce.handleKill(requestCtx, st); err != nil {
-			return
-		}
+
 	case *tree.ShowAccounts:
 		selfHandle = true
-		if err = mce.handleShowAccounts(requestCtx, st, execCtx.isLastStmt); err != nil {
+		if err = handleShowAccounts(requestCtx, backCtx, st, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.ShowCollation:
 		selfHandle = true
-		if err = mce.handleShowCollation(st, proc, execCtx.isLastStmt); err != nil {
+		if err = handleShowCollation(backCtx, st, proc, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.Load:
 		return moerr.NewInternalError(requestCtx, "does not support Loacd in background exec")
 	case *tree.ShowBackendServers:
 		selfHandle = true
-		if err = mce.handleShowBackendServers(requestCtx, execCtx.isLastStmt); err != nil {
+		if err = handleShowBackendServers(requestCtx, backCtx, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.SetTransaction:
@@ -426,14 +383,9 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 		if len(st.Hostname) == 0 || st.Hostname == "%" {
 			st.Hostname = rootHost
 		}
-	case *tree.BackupStart:
-		selfHandle = true
-		if err = mce.handleStartBackup(requestCtx, st); err != nil {
-			return
-		}
 	case *tree.EmptyStmt:
 		selfHandle = true
-		if err = mce.handleEmptyStmt(requestCtx, st); err != nil {
+		if err = handleEmptyStmt(requestCtx, backCtx, st); err != nil {
 			return
 		}
 	}
@@ -451,21 +403,21 @@ func (mce *MysqlCmdExecutor) executeStmtInBack(requestCtx context.Context,
 	// reset some special stmt for execute statement
 	switch st := execCtx.stmt.(type) {
 	case *tree.SetVar:
-		err = mce.handleSetVar(requestCtx, st, sql)
+		err = handleSetVar(requestCtx, backCtx, st, sql)
 		if err != nil {
 			return
 		} else {
 			return
 		}
 	case *tree.ShowVariables:
-		err = mce.handleShowVariables(st, proc, execCtx.isLastStmt)
+		err = handleShowVariables(backCtx, st, proc, execCtx.isLastStmt)
 		if err != nil {
 			return
 		} else {
 			return
 		}
 	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = mce.handleShowErrors(execCtx.isLastStmt)
+		err = handleShowErrors(backCtx, execCtx.isLastStmt)
 		if err != nil {
 			return
 		} else {
@@ -619,6 +571,25 @@ type backExecCtx struct {
 	accountId    uint32
 	label        map[string]string
 	timeZone     *time.Location
+
+	sqlCount uint64
+}
+
+func (backCtx *backExecCtx) getNextProcessId() string {
+	/*
+		temporary method:
+		routineId + sqlCount
+	*/
+	routineId := backCtx.GetMysqlProtocol().ConnectionID()
+	return fmt.Sprintf("%d%d", routineId, backCtx.GetSqlCount())
+}
+
+func (backCtx *backExecCtx) GetSqlCount() uint64 {
+	return backCtx.sqlCount
+}
+
+func (backCtx *backExecCtx) addSqlCount(a uint64) {
+	backCtx.sqlCount += a
 }
 
 func (backCtx *backExecCtx) cleanCache() {
@@ -1125,7 +1096,7 @@ func (backCtx *backExecCtx) ReplaceDerivedStmt(b bool) bool {
 }
 
 // execute query
-func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
+func doComQueryInBack(requestCtx context.Context,
 	backCtx *backExecCtx,
 	input *UserInput) (retErr error) {
 	backCtx.SetSql(input.getSql())
@@ -1146,7 +1117,7 @@ func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
 		backCtx.autoIncrCacheManager)
 	//proc.CopyVectorPool(ses.proc)
 	//proc.CopyValueScanBatch(ses.proc)
-	proc.Id = mce.getNextProcessId()
+	proc.Id = backCtx.getNextProcessId()
 	proc.Lim.Size = pu.SV.ProcessLimitationSize
 	proc.Lim.BatchRows = pu.SV.ProcessLimitationBatchRows
 	proc.Lim.MaxMsgSize = pu.SV.MaxMessageSize
@@ -1231,7 +1202,7 @@ func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
 			                     <- has active transaction
 		*/
 		if backCtx.InActiveTransaction() {
-			err = mce.canExecuteStatementInUncommittedTransaction(requestCtx, stmt)
+			err = canExecuteStatementInUncommittedTransaction(requestCtx, backCtx, stmt)
 			if err != nil {
 				return err
 			}
@@ -1248,7 +1219,7 @@ func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
 			cws:        cws,
 			proc:       proc,
 		}
-		err = mce.executeStmtInBackWithTxn(requestCtx, backCtx, stmt, proc, cw, i, cws, pu, tenant, userNameOnly, sqlRecord[i], execCtx)
+		err = executeStmtInBackWithTxn(requestCtx, backCtx, stmt, proc, cw, i, cws, pu, tenant, userNameOnly, sqlRecord[i], execCtx)
 		if err != nil {
 			return err
 		}

@@ -392,8 +392,7 @@ func Test_initFunction(t *testing.T) {
 		}
 
 		ses := &Session{tenant: tenant}
-		mce := &MysqlCmdExecutor{}
-		err := mce.InitFunction(ctx, ses, tenant, cu)
+		err := InitFunction(ctx, ses, tenant, cu)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
@@ -10610,7 +10609,6 @@ func TestUpload(t *testing.T) {
 		proto := &FakeProtocol{
 			ioses: ioses,
 		}
-		mce := NewMysqlCmdExecutor()
 		fs, err := fileservice.NewLocalFS(proc.Ctx, defines.SharedFileServiceName, t.TempDir(), fileservice.DisabledCacheConfig, nil)
 		convey.So(err, convey.ShouldBeNil)
 		proc.FileService = fs
@@ -10631,8 +10629,7 @@ func TestUpload(t *testing.T) {
 			proc:     proc,
 			pu:       pu,
 		}
-		mce.ses = ses
-		fp, err := mce.Upload(proc.Ctx, "test.py", "test")
+		fp, err := Upload(proc.Ctx, ses, "test.py", "test")
 		convey.So(err, convey.ShouldBeNil)
 		iovec := &fileservice.IOVector{
 			FilePath: fp,

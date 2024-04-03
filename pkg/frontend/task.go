@@ -23,8 +23,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/taskservice"
 )
 
-func (mce *MysqlCmdExecutor) handlePauseDaemonTask(ctx context.Context, st *tree.PauseDaemonTask) error {
-	ses := mce.ses.(*Session)
+func handlePauseDaemonTask(ctx context.Context, ses *Session, st *tree.PauseDaemonTask) error {
 	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.requestCtx,
@@ -60,8 +59,7 @@ func (mce *MysqlCmdExecutor) handlePauseDaemonTask(ctx context.Context, st *tree
 	return nil
 }
 
-func (mce *MysqlCmdExecutor) handleCancelDaemonTask(ctx context.Context, st *tree.CancelDaemonTask) error {
-	ses := mce.ses.(*Session)
+func handleCancelDaemonTask(ctx context.Context, ses *Session, st *tree.CancelDaemonTask) error {
 	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.requestCtx,
@@ -95,8 +93,7 @@ func (mce *MysqlCmdExecutor) handleCancelDaemonTask(ctx context.Context, st *tre
 	return nil
 }
 
-func (mce *MysqlCmdExecutor) handleResumeDaemonTask(ctx context.Context, st *tree.ResumeDaemonTask) error {
-	ses := mce.ses.(*Session)
+func handleResumeDaemonTask(ctx context.Context, ses *Session, st *tree.ResumeDaemonTask) error {
 	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.requestCtx,

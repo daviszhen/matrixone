@@ -22,8 +22,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
-func (mce *MysqlCmdExecutor) handleStartBackup(ctx context.Context, sb *tree.BackupStart) error {
-	return doBackup(ctx, mce.GetSession(), sb)
+func handleStartBackup(ctx context.Context, ses *Session, sb *tree.BackupStart) error {
+	return doBackup(ctx, ses, sb)
 }
 
 func doBackup(ctx context.Context, ses TempInter, bs *tree.BackupStart) error {

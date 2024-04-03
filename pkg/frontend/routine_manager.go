@@ -262,11 +262,7 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 		return
 	}
 	pro := NewMysqlClientProtocol(connID, rs, int(pu.SV.MaxBytesInOutbufToFlush), pu.SV)
-	exe := NewMysqlCmdExecutor()
-	exe.SetRoutineManager(rm)
-	exe.ChooseDoQueryFunc(pu.SV.EnableDoComQueryInProgress)
-
-	routine := NewRoutine(rm.getCtx(), pro, exe, pu.SV, rs)
+	routine := NewRoutine(rm.getCtx(), pro, pu.SV, rs)
 
 	// XXX MPOOL pass in a nil mpool.
 	// XXX MPOOL can choose to use a Mid sized mpool, if, we know

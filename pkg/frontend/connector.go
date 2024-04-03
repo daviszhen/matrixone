@@ -34,14 +34,14 @@ const (
 	defaultConnectorTaskRetryInterval = int64(time.Second * 10)
 )
 
-func (mce *MysqlCmdExecutor) handleCreateConnector(ctx context.Context, st *tree.CreateConnector) error {
-	ts := mce.routineMgr.getParameterUnit().TaskService
+func handleCreateConnector(ctx context.Context, ses *Session, st *tree.CreateConnector) error {
+	ts := ses.pu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ctx, "no task service is found")
 	}
 	dbName := string(st.TableName.Schema())
 	tableName := string(st.TableName.Name())
-	_, tableDef := mce.ses.GetTxnCompileCtx().Resolve(dbName, tableName)
+	_, tableDef := ses.GetTxnCompileCtx().Resolve(dbName, tableName)
 	if tableDef == nil {
 		return moerr.NewNoSuchTable(ctx, dbName, tableName)
 	}
@@ -51,9 +51,9 @@ func (mce *MysqlCmdExecutor) handleCreateConnector(ctx context.Context, st *tree
 	}
 	if err := createConnector(
 		ctx,
-		mce.ses.GetTenantInfo().TenantID,
-		mce.ses.GetTenantName(),
-		mce.ses.GetUserName(),
+		ses.GetTenantInfo().TenantID,
+		ses.GetTenantName(),
+		ses.GetUserName(),
 		ts,
 		dbName+"."+tableName,
 		options,
@@ -157,21 +157,20 @@ func createConnector(
 	return nil
 }
 
-func (mce *MysqlCmdExecutor) handleDropConnector(ctx context.Context, st *tree.DropConnector) error {
+func handleDropConnector(ctx context.Context, ses *Session, st *tree.DropConnector) error {
 	//todo: handle Create connector
 	return nil
 }
 
-func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, isLastStmt bool) error {
+func handleShowConnectors(ctx context.Context, ses *Session, isLastStmt bool) error {
 	var err error
-	ses := mce.GetSession()
 	proto := ses.GetMysqlProtocol()
 	if err := showConnectors(ses); err != nil {
 		return err
 	}
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
+	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
 	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
 		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
 	}

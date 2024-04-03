@@ -72,6 +72,8 @@ func nextConnectionID() uint32 {
 	return atomic.AddUint32(&initConnectionID, 1)
 }
 
+var gRtMgr *RoutineManager
+
 func NewMOServer(
 	ctx context.Context,
 	addr string,
@@ -84,6 +86,7 @@ func NewMOServer(
 	if err != nil {
 		logutil.Panicf("start server failed with %+v", err)
 	}
+	gRtMgr = rm
 	rm.setBaseService(baseService)
 	if baseService != nil {
 		rm.setSessionMgr(baseService.SessionMgr())

@@ -63,8 +63,7 @@ type TestRoutineManager struct {
 
 func (tRM *TestRoutineManager) Created(rs goetty.IOSession) {
 	pro := NewMysqlClientProtocol(nextConnectionID(), rs, 1024, tRM.pu.SV)
-	exe := NewMysqlCmdExecutor()
-	routine := NewRoutine(context.TODO(), pro, exe, tRM.pu.SV, rs)
+	routine := NewRoutine(context.TODO(), pro, tRM.pu.SV, rs)
 
 	hsV10pkt := pro.makeHandshakeV10Payload()
 	err := pro.writePackets(hsV10pkt)
@@ -247,7 +246,7 @@ func TestKIll(t *testing.T) {
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 	// A mock autoincrcache manager.
 	aicm := &defines.AutoIncrCacheManager{}
-	rm, _ := NewRoutineManager(ctx, pu, aicm)
+	gRtMgr, _ = NewRoutineManager(ctx, pu, aicm)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -255,7 +254,7 @@ func TestKIll(t *testing.T) {
 	//running server
 	go func() {
 		defer wg.Done()
-		echoServer(rm.Handler, rm, NewSqlCodec())
+		echoServer(gRtMgr.Handler, gRtMgr, NewSqlCodec())
 	}()
 
 	time.Sleep(time.Second * 2)

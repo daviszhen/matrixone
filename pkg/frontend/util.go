@@ -278,7 +278,7 @@ func WildcardMatch(pattern, target string) bool {
 }
 
 // getExprValue executes the expression and returns the value.
-func getExprValue(e tree.Expr, mce *MysqlCmdExecutor, ses *Session) (interface{}, error) {
+func getExprValue(e tree.Expr, ses *Session) (interface{}, error) {
 	/*
 		CORNER CASE:
 			SET character_set_results = utf8; // e = tree.UnresolvedName{'utf8'}.
@@ -322,7 +322,7 @@ func getExprValue(e tree.Expr, mce *MysqlCmdExecutor, ses *Session) (interface{}
 
 	//run the statement in the same session
 	ses.ClearResultBatches()
-	err = executeStmtInSameSession(ctx, mce, ses, compositedSelect)
+	err = executeStmtInSameSession(ctx, ses, compositedSelect)
 	if err != nil {
 		return nil, err
 	}

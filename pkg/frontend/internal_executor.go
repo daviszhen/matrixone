@@ -63,29 +63,22 @@ func applyOverride(sess *Session, opts ie.SessionOverrideOptions) {
 
 }
 
-type internalMiniExec interface {
-	doComQuery(requestCtx context.Context, input *UserInput) error
-	SetSession(inter TempInter)
-}
-
 type internalExecutor struct {
 	sync.Mutex
 	proto        *internalProtocol
-	executor     internalMiniExec // MySqlCmdExecutor struct impls miniExec
 	pu           *config.ParameterUnit
 	baseSessOpts ie.SessionOverrideOptions
 	aicm         *defines.AutoIncrCacheManager
 }
 
 func NewInternalExecutor(pu *config.ParameterUnit, aicm *defines.AutoIncrCacheManager) *internalExecutor {
-	return newIe(pu, NewMysqlCmdExecutor(), aicm)
+	return newIe(pu, aicm)
 }
 
-func newIe(pu *config.ParameterUnit, inner internalMiniExec, aicm *defines.AutoIncrCacheManager) *internalExecutor {
+func newIe(pu *config.ParameterUnit, aicm *defines.AutoIncrCacheManager) *internalExecutor {
 	proto := &internalProtocol{result: &internalExecResult{}}
 	ret := &internalExecutor{
 		proto:        proto,
-		executor:     inner,
 		pu:           pu,
 		baseSessOpts: ie.NewOptsBuilder().Finish(),
 		aicm:         aicm,
@@ -155,9 +148,8 @@ func (ie *internalExecutor) Exec(ctx context.Context, sql string, opts ie.Sessio
 	defer ie.Unlock()
 	sess := ie.newCmdSession(ctx, opts)
 	defer sess.Close()
-	ie.executor.SetSession(sess)
 	ie.proto.stashResult = false
-	return ie.executor.doComQuery(ctx, &UserInput{sql: sql})
+	return doComQuery(ctx, sess, &UserInput{sql: sql})
 }
 
 func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.SessionOverrideOptions) ie.InternalExecResult {
@@ -165,10 +157,9 @@ func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.Sessi
 	defer ie.Unlock()
 	sess := ie.newCmdSession(ctx, opts)
 	defer sess.Close()
-	ie.executor.SetSession(sess)
 	ie.proto.stashResult = true
 	logutil.Info("internalExecutor new session", trace.ContextField(ctx), zap.String("session uuid", sess.uuid.String()))
-	err := ie.executor.doComQuery(ctx, &UserInput{sql: sql})
+	err := doComQuery(ctx, sess, &UserInput{sql: sql})
 	res := ie.proto.swapOutResult()
 	res.err = err
 	return res

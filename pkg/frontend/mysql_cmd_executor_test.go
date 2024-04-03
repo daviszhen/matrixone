@@ -244,19 +244,12 @@ func Test_mce(t *testing.T) {
 		ctx = context.WithValue(ctx, config.ParameterUnitKey, pu)
 
 		// A mock autoincrcache manager.
-		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
-
-		mce := NewMysqlCmdExecutor()
-		mce.SetRoutineManager(rm)
-		mce.SetSession(ses)
-
 		req := &Request{
 			cmd:  COM_QUERY,
 			data: []byte("test anywhere"),
 		}
 
-		resp, err := mce.ExecRequest(ctx, ses, req)
+		resp, err := ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp, convey.ShouldBeNil)
 
@@ -265,7 +258,7 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		_, err = mce.ExecRequest(ctx, ses, req)
+		_, err = ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 
 		req = &Request{
@@ -273,7 +266,7 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		resp, err = mce.ExecRequest(ctx, ses, req)
+		resp, err = ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp.category, convey.ShouldEqual, OkResponse)
 
@@ -282,7 +275,7 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		resp, err = mce.ExecRequest(ctx, ses, req)
+		resp, err = ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeError)
 		convey.So(resp, convey.ShouldBeNil)
 
@@ -338,13 +331,11 @@ func Test_mce_selfhandle(t *testing.T) {
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 
-		mce := NewMysqlCmdExecutor()
-		mce.SetSession(ses)
-		err = mce.handleChangeDB(ctx, "T")
+		err = handleChangeDB(ctx, ses, "T")
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(ses.GetDatabaseName(), convey.ShouldEqual, "T")
 
-		err = mce.handleChangeDB(ctx, "T")
+		err = handleChangeDB(ctx, ses, "T")
 		convey.So(err, convey.ShouldBeError)
 	})
 
@@ -381,35 +372,32 @@ func Test_mce_selfhandle(t *testing.T) {
 		ses.mrs = &MysqlResultSet{}
 		proto.SetSession(ses)
 
-		mce := NewMysqlCmdExecutor()
-		mce.SetSession(ses)
-
 		ses.mrs = &MysqlResultSet{}
 		st1, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@max_allowed_packet", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv1 := st1.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv1, true)
+		err = handleSelectVariables(ses, sv1, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		st2, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@version_comment", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv2 := st2.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv2, true)
+		err = handleSelectVariables(ses, sv2, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		st3, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@global.version_comment", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv3 := st3.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv3, true)
+		err = handleSelectVariables(ses, sv3, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		st4, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @version_comment", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv4 := st4.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = mce.handleSelectVariables(sv4, true)
+		err = handleSelectVariables(ses, sv4, true)
 		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
@@ -418,29 +406,28 @@ func Test_mce_selfhandle(t *testing.T) {
 		query := string(queryData)
 		cflStmt, err := parseCmdFieldList(ctx, makeCmdFieldListSql(query))
 		convey.So(err, convey.ShouldBeNil)
-		err = mce.handleCmdFieldList(ctx, cflStmt)
+		err = handleCmdFieldList(ctx, ses, cflStmt)
 		convey.So(err, convey.ShouldBeError)
 
 		ses.SetMysqlResultSet(&MysqlResultSet{})
 		ses.SetDatabaseName("T")
-		mce.tableInfos = make(map[string][]ColumnInfo)
-		mce.tableInfos["A"] = []ColumnInfo{&engineColumnInfo{
-			name: "a",
-			typ:  types.T_varchar.ToType(),
-		}}
+		//mce.tableInfos = make(map[string][]ColumnInfo)
+		//mce.tableInfos["A"] = []ColumnInfo{&engineColumnInfo{
+		//	name: "a",
+		//	typ:  types.T_varchar.ToType(),
+		//}}
 
-		err = mce.handleCmdFieldList(ctx, cflStmt)
+		err = handleCmdFieldList(ctx, ses, cflStmt)
 		convey.So(err, convey.ShouldBeNil)
 
-		mce.db = ses.GetDatabaseName()
-		err = mce.handleCmdFieldList(ctx, cflStmt)
+		err = handleCmdFieldList(ctx, ses, cflStmt)
 		convey.So(err, convey.ShouldBeNil)
 
 		set := "set @@tx_isolation=`READ-COMMITTED`"
 		setVar, err := parsers.ParseOne(ctx, dialect.MYSQL, set, 1)
 		convey.So(err, convey.ShouldBeNil)
 
-		err = mce.handleSetVar(ctx, setVar.(*tree.SetVar), "")
+		err = handleSetVar(ctx, ses, setVar.(*tree.SetVar), "")
 		convey.So(err, convey.ShouldBeNil)
 
 		req := &Request{
@@ -448,7 +435,7 @@ func Test_mce_selfhandle(t *testing.T) {
 			data: []byte{'A', 0},
 		}
 
-		resp, err := mce.ExecRequest(ctx, ses, req)
+		resp, err := ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp, convey.ShouldBeNil)
 	})
@@ -485,9 +472,6 @@ func Test_getDataFromPipeline(t *testing.T) {
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
 		proto.ses = ses
-
-		// mce := NewMysqlCmdExecutor()
-		// mce.PrepareSessionBeforeExecRequest(ses)
 
 		genBatch := func() *batch.Batch {
 			return allocTestBatch(
@@ -726,19 +710,17 @@ func Test_handleSelectVariables(t *testing.T) {
 		ses.SetRequestContext(ctx)
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
-		mce := &MysqlCmdExecutor{}
 
-		mce.SetSession(ses)
 		proto.SetSession(ses)
 		st2, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@tx_isolation", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv2 := st2.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		convey.So(mce.handleSelectVariables(sv2, true), convey.ShouldBeNil)
+		convey.So(handleSelectVariables(ses, sv2, true), convey.ShouldBeNil)
 
 		st3, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@XXX", 1)
 		convey.So(err, convey.ShouldBeNil)
 		sv3 := st3.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		convey.So(mce.handleSelectVariables(sv3, true), convey.ShouldNotBeNil)
+		convey.So(handleSelectVariables(ses, sv3, true), convey.ShouldNotBeNil)
 
 	})
 }
@@ -786,12 +768,10 @@ func Test_handleShowVariables(t *testing.T) {
 		ses.SetTenantInfo(tenant)
 		ses.mrs = &MysqlResultSet{}
 		ses.SetDatabaseName("t")
-		mce := &MysqlCmdExecutor{}
-		mce.SetSession(ses)
 		proto.SetSession(ses)
 
 		sv := &tree.ShowVariables{Global: false}
-		convey.So(mce.handleShowVariables(sv, nil, true), convey.ShouldBeNil)
+		convey.So(handleShowVariables(ses, sv, nil, true), convey.ShouldBeNil)
 
 		bh := &backgroundExecTest{}
 		bh.init()
@@ -808,7 +788,7 @@ func Test_handleShowVariables(t *testing.T) {
 
 		bh.sql2result[sql] = newMrsForSystemVariablesOfAccount(rows)
 		sv = &tree.ShowVariables{Global: true}
-		convey.So(mce.handleShowVariables(sv, nil, true), convey.ShouldBeNil)
+		convey.So(handleShowVariables(ses, sv, nil, true), convey.ShouldBeNil)
 	})
 }
 
@@ -834,7 +814,7 @@ func Test_GetComputationWrapper(t *testing.T) {
 	})
 }
 
-func runTestHandle(funName string, t *testing.T, handleFun func(*MysqlCmdExecutor) error) {
+func runTestHandle(funName string, t *testing.T, handleFun func(ses *Session) error) {
 	ctx := context.TODO()
 	convey.Convey(fmt.Sprintf("%s succ", funName), t, func() {
 		ctrl := gomock.NewController(t)
@@ -863,10 +843,8 @@ func runTestHandle(funName string, t *testing.T, handleFun func(*MysqlCmdExecuto
 		ses.SetConnectContext(ctx)
 		ses.mrs = &MysqlResultSet{}
 		ses.txnCompileCtx.proc = testutil.NewProc()
-		mce := &MysqlCmdExecutor{}
-		mce.SetSession(ses)
 
-		convey.So(handleFun(mce), convey.ShouldBeNil)
+		convey.So(handleFun(ses), convey.ShouldBeNil)
 	})
 }
 
@@ -876,9 +854,9 @@ func Test_HandlePrepareStmt(t *testing.T) {
 	if err != nil {
 		t.Errorf("parser sql error %v", err)
 	}
-	runTestHandle("handlePrepareStmt", t, func(mce *MysqlCmdExecutor) error {
+	runTestHandle("handlePrepareStmt", t, func(ses *Session) error {
 		stmt := stmt.(*tree.PrepareStmt)
-		_, err := mce.handlePrepareStmt(ctx, stmt, "")
+		_, err := handlePrepareStmt(ctx, ses, stmt, "")
 		return err
 	})
 }
@@ -889,9 +867,9 @@ func Test_HandleDeallocate(t *testing.T) {
 	if err != nil {
 		t.Errorf("parser sql error %v", err)
 	}
-	runTestHandle("handleDeallocate", t, func(mce *MysqlCmdExecutor) error {
+	runTestHandle("handleDeallocate", t, func(ses *Session) error {
 		stmt := stmt.(*tree.Deallocate)
-		return mce.handleDeallocate(ctx, stmt)
+		return handleDeallocate(ctx, ses, stmt)
 	})
 }
 
@@ -963,10 +941,8 @@ func Test_CMD_FIELD_LIST(t *testing.T) {
 		ses.mrs = &MysqlResultSet{}
 		ses.SetDatabaseName("t")
 		ses.seqLastValue = new(string)
-		mce := &MysqlCmdExecutor{}
-		mce.SetSession(ses)
 
-		err = mce.doComQuery(ctx, &UserInput{sql: cmdFieldListQuery})
+		err = doComQuery(ctx, ses, &UserInput{sql: cmdFieldListQuery})
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
@@ -1134,11 +1110,9 @@ func TestProcessLoadLocal(t *testing.T) {
 			ioses: ioses,
 		}
 
-		mce := NewMysqlCmdExecutor()
 		ses := &Session{
 			protocol: proto,
 		}
-		mce.ses = ses
 		buffer := make([]byte, 4096)
 		go func(buf []byte) {
 			tmp := buf
@@ -1150,7 +1124,7 @@ func TestProcessLoadLocal(t *testing.T) {
 				tmp = tmp[n:]
 			}
 		}(buffer)
-		err := mce.processLoadLocal(proc.Ctx, param, writer)
+		err := processLoadLocal(proc.Ctx, ses, param, writer)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(buffer[:10], convey.ShouldResemble, []byte("helloworld"))
 		convey.So(buffer[10:], convey.ShouldResemble, make([]byte, 4096-10))
@@ -1227,11 +1201,6 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 	ses.SetRequestContext(ctx)
 	ses.SetConnectContext(ctx)
 	ses.GetMysqlProtocol()
-	mce := NewMysqlCmdExecutor()
-	aicm := &defines.AutoIncrCacheManager{}
-	rm, _ := NewRoutineManager(ctx, pu, aicm)
-	mce.SetRoutineManager(rm)
-	mce.SetSession(ses)
 	proto.SetSession(ses)
 	ses.protocol = proto
 
@@ -1261,7 +1230,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
 
-		err = mce.handleShowBackendServers(ctx, true)
+		err = handleShowBackendServers(ctx, ses, true)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
 		require.Equal(t, uint64(4), rs.GetColumnCount())
@@ -1305,7 +1274,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
 
-		err = mce.handleShowBackendServers(ctx, true)
+		err = handleShowBackendServers(ctx, ses, true)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
 		require.Equal(t, uint64(4), rs.GetColumnCount())
@@ -1464,25 +1433,18 @@ func Test_ExecRequest(t *testing.T) {
 		ctx = context.WithValue(ctx, config.ParameterUnitKey, pu)
 
 		// A mock autoincrcache manager.
-		aicm := &defines.AutoIncrCacheManager{}
-		rm, _ := NewRoutineManager(ctx, pu, aicm)
-
-		mce := NewMysqlCmdExecutor()
-		mce.SetRoutineManager(rm)
-		mce.SetSession(ses)
-
 		req := &Request{
 			cmd:  COM_SET_OPTION,
 			data: []byte("123"),
 		}
-		_, err = mce.ExecRequest(ctx, ses, req)
+		_, err = ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 
 		req = &Request{
 			cmd:  COM_SET_OPTION,
 			data: []byte("1"),
 		}
-		_, err = mce.ExecRequest(ctx, ses, req)
+		_, err = ExecRequest(ctx, ses, req)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
