@@ -23,10 +23,10 @@ import (
 )
 
 func (mce *MysqlCmdExecutor) handleStartBackup(ctx context.Context, sb *tree.BackupStart) error {
-	return doBackup(ctx, mce.GetSession().(*Session), sb)
+	return doBackup(ctx, mce.GetSession(), sb)
 }
 
-func doBackup(ctx context.Context, ses *Session, bs *tree.BackupStart) error {
+func doBackup(ctx context.Context, ses TempInter, bs *tree.BackupStart) error {
 	var (
 		err error
 	)

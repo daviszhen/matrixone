@@ -703,7 +703,7 @@ func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.Subscri
 }
 
 func (tcc *TxnCompilerContext) CheckSubscriptionValid(subName, accName, pubName string) error {
-	_, err := checkSubscriptionValidCommon(tcc.GetContext(), tcc.GetSession().(*Session), subName, accName, pubName)
+	_, err := checkSubscriptionValidCommon(tcc.GetContext(), tcc.GetSession(), subName, accName, pubName)
 	return err
 }
 

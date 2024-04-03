@@ -562,7 +562,7 @@ func doUse(ctx context.Context, ses TempInter, db string) error {
 		return moerr.NewBadDB(ctx, db)
 	}
 	if dbMeta.IsSubscription(ctx) {
-		_, err = checkSubscriptionValid(ctx, ses.(*Session), dbMeta.GetCreateSql(ctx))
+		_, err = checkSubscriptionValid(ctx, ses, dbMeta.GetCreateSql(ctx))
 		if err != nil {
 			return err
 		}
@@ -1476,12 +1476,12 @@ func (mce *MysqlCmdExecutor) handleRevokeRole(ctx context.Context, rr *tree.Revo
 
 // handleGrantRole grants the privilege to the role
 func (mce *MysqlCmdExecutor) handleGrantPrivilege(ctx context.Context, gp *tree.GrantPrivilege) error {
-	return doGrantPrivilege(ctx, mce.GetSession().(*Session), gp)
+	return doGrantPrivilege(ctx, mce.GetSession(), gp)
 }
 
 // handleRevokePrivilege revokes the privilege from the user or role
 func (mce *MysqlCmdExecutor) handleRevokePrivilege(ctx context.Context, rp *tree.RevokePrivilege) error {
-	return doRevokePrivilege(ctx, mce.GetSession().(*Session), rp)
+	return doRevokePrivilege(ctx, mce.GetSession(), rp)
 }
 
 // handleSwitchRole switches the role to another role
@@ -4858,6 +4858,7 @@ func (backCtx *backExecCtx) ReplaceDerivedStmt(b bool) bool {
 func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
 	backCtx *backExecCtx,
 	input *UserInput) (retErr error) {
+	backCtx.SetSql(input.getSql())
 	//the ses.GetUserName returns the user_name with the account_name.
 	//here,we only need the user_name.
 	pu := backCtx.pu
@@ -4890,6 +4891,7 @@ func (mce *MysqlCmdExecutor) doComQueryInBack(requestCtx context.Context,
 		Buf:           backCtx.buf,
 	}
 	proc.SetStmtProfile(&backCtx.stmtProfile)
+	proc.SetResolveVariableFunc(backCtx.txnCompileCtx.ResolveVariable)
 	//!!!does not init sequence in the background exec
 	if backCtx.tenant != nil {
 		proc.SessionInfo.Account = backCtx.tenant.GetTenant()

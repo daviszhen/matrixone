@@ -1023,9 +1023,9 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		txnHandler := InitTxnHandler(ses.pu.StorageEngine, ses.pu.TxnClient, txnCtx, txnOp)
 		var callback func(interface{}, *batch.Batch) error
 		if newRawBatch {
-			callback = batchFetcher
+			callback = batchFetcher2
 		} else {
-			callback = fakeDataSetFetcher
+			callback = fakeDataSetFetcher2
 		}
 		backCtx := &backExecCtx{
 			requestCtx:           ctx,
@@ -2359,6 +2359,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 
 	// For determine this is a background sql.
 	ctx = context.WithValue(ctx, defines.BgKey{}, true)
+	back.mce.GetSession().SetRequestContext(ctx)
 
 	//logutil.Debugf("-->bh:%s", sql)
 	v, err := back.backCtx.GetGlobalVar("lower_case_table_names")

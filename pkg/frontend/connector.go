@@ -164,7 +164,7 @@ func (mce *MysqlCmdExecutor) handleDropConnector(ctx context.Context, st *tree.D
 
 func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, cwIndex, cwsLen int) error {
 	var err error
-	ses := mce.GetSession().(*Session)
+	ses := mce.GetSession()
 	proto := ses.GetMysqlProtocol()
 	if err := showConnectors(ses); err != nil {
 		return err
@@ -172,8 +172,8 @@ func (mce *MysqlCmdExecutor) handleShowConnectors(ctx context.Context, cwIndex, 
 
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := mce.ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, cwIndex, cwsLen)
-	if err := proto.SendResponse(ses.requestCtx, resp); err != nil {
-		return moerr.NewInternalError(ses.requestCtx, "routine send response failed, error: %v ", err)
+	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
 	}
 	return err
 }
@@ -253,17 +253,17 @@ var connectorCols = []Column{
 	},
 }
 
-func showConnectors(ses *Session) error {
-	ts := ses.pu.TaskService
+func showConnectors(ses TempInter) error {
+	ts := ses.GetParameterUnit().TaskService
 	if ts == nil {
-		return moerr.NewInternalError(ses.requestCtx,
+		return moerr.NewInternalError(ses.GetRequestContext(),
 			"task service not ready yet, please try again later.")
 	}
-	tasks, err := ts.QueryDaemonTask(ses.requestCtx,
+	tasks, err := ts.QueryDaemonTask(ses.GetRequestContext(),
 		taskservice.WithTaskType(taskservice.EQ,
 			pb.TaskType_TypeKafkaSinkConnector.String()),
 		taskservice.WithAccountID(taskservice.EQ,
-			ses.accountId),
+			ses.GetAccountId()),
 	)
 	if err != nil {
 		return err
