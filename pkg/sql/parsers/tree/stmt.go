@@ -65,7 +65,7 @@ const (
 
 	//response result rows to the client.
 	//like SELECT...,SHOW...,
-	RowSet
+	ResultRow
 
 	//response status(success or fail) to the client.
 	//like CREATE...,DROP...,
@@ -102,7 +102,7 @@ func (node *Select) ResultType() ResultType {
 	if node.Ep != nil {
 		return Status
 	}
-	return RowSet
+	return ResultRow
 }
 
 func (node *Use) HandleType() HandleType {
@@ -166,7 +166,7 @@ func (node *ShowSubscriptions) HandleType() HandleType {
 }
 
 func (node *ShowSubscriptions) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *CreateStage) HandleType() HandleType {
@@ -334,7 +334,7 @@ func (node *ShowAccounts) HandleType() HandleType {
 }
 
 func (node *ShowAccounts) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowBackendServers) HandleType() HandleType {
@@ -342,7 +342,7 @@ func (node *ShowBackendServers) HandleType() HandleType {
 }
 
 func (node *ShowBackendServers) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *SetTransaction) HandleType() HandleType {
@@ -447,7 +447,7 @@ func (node *ShowDatabases) HandleType() HandleType {
 }
 
 func (node *ShowDatabases) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowTables) HandleType() HandleType {
@@ -455,7 +455,7 @@ func (node *ShowTables) HandleType() HandleType {
 }
 
 func (node *ShowTables) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowCreateTable) HandleType() HandleType {
@@ -463,7 +463,7 @@ func (node *ShowCreateTable) HandleType() HandleType {
 }
 
 func (node *ShowCreateTable) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *Insert) HandleType() HandleType {
@@ -479,7 +479,7 @@ func (node *ShowVariables) HandleType() HandleType {
 }
 
 func (node *ShowVariables) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowIndex) HandleType() HandleType {
@@ -487,7 +487,7 @@ func (node *ShowIndex) HandleType() HandleType {
 }
 
 func (node *ShowIndex) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowTarget) HandleType() HandleType {
@@ -495,7 +495,7 @@ func (node *ShowTarget) HandleType() HandleType {
 }
 
 func (node *ShowTarget) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowCollation) HandleType() HandleType {
@@ -503,7 +503,7 @@ func (node *ShowCollation) HandleType() HandleType {
 }
 
 func (node *ShowCollation) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowFunctionOrProcedureStatus) HandleType() HandleType {
@@ -511,7 +511,7 @@ func (node *ShowFunctionOrProcedureStatus) HandleType() HandleType {
 }
 
 func (node *ShowFunctionOrProcedureStatus) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowGrants) HandleType() HandleType {
@@ -519,7 +519,7 @@ func (node *ShowGrants) HandleType() HandleType {
 }
 
 func (node *ShowGrants) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowTableStatus) HandleType() HandleType {
@@ -527,7 +527,7 @@ func (node *ShowTableStatus) HandleType() HandleType {
 }
 
 func (node *ShowTableStatus) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ExplainStmt) HandleType() HandleType {
@@ -535,7 +535,7 @@ func (node *ExplainStmt) HandleType() HandleType {
 }
 
 func (node *ExplainStmt) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ExplainAnalyze) HandleType() HandleType {
@@ -543,7 +543,7 @@ func (node *ExplainAnalyze) HandleType() HandleType {
 }
 
 func (node *ExplainAnalyze) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ExplainFor) HandleType() HandleType {
@@ -551,7 +551,7 @@ func (node *ExplainFor) HandleType() HandleType {
 }
 
 func (node *ExplainFor) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowColumns) HandleType() HandleType {
@@ -559,7 +559,7 @@ func (node *ShowColumns) HandleType() HandleType {
 }
 
 func (node *ShowColumns) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowStatus) HandleType() HandleType {
@@ -567,7 +567,7 @@ func (node *ShowStatus) HandleType() HandleType {
 }
 
 func (node *ShowStatus) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowWarnings) HandleType() HandleType {
@@ -575,7 +575,7 @@ func (node *ShowWarnings) HandleType() HandleType {
 }
 
 func (node *ShowWarnings) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowErrors) HandleType() HandleType {
@@ -583,7 +583,7 @@ func (node *ShowErrors) HandleType() HandleType {
 }
 
 func (node *ShowErrors) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowProcessList) HandleType() HandleType {
@@ -591,7 +591,7 @@ func (node *ShowProcessList) HandleType() HandleType {
 }
 
 func (node *ShowProcessList) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowCreateDatabase) HandleType() HandleType {
@@ -599,7 +599,7 @@ func (node *ShowCreateDatabase) HandleType() HandleType {
 }
 
 func (node *ShowCreateDatabase) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowStages) HandleType() HandleType {
@@ -607,7 +607,7 @@ func (node *ShowStages) HandleType() HandleType {
 }
 
 func (node *ShowStages) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowCreatePublications) HandleType() HandleType {
@@ -615,7 +615,7 @@ func (node *ShowCreatePublications) HandleType() HandleType {
 }
 
 func (node *ShowCreatePublications) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowPublications) HandleType() HandleType {
@@ -623,7 +623,7 @@ func (node *ShowPublications) HandleType() HandleType {
 }
 
 func (node *ShowPublications) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowTableSize) HandleType() HandleType {
@@ -631,7 +631,7 @@ func (node *ShowTableSize) HandleType() HandleType {
 }
 
 func (node *ShowTableSize) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowRolesStmt) HandleType() HandleType {
@@ -639,7 +639,7 @@ func (node *ShowRolesStmt) HandleType() HandleType {
 }
 
 func (node *ShowRolesStmt) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowConnectors) HandleType() HandleType {
@@ -647,7 +647,7 @@ func (node *ShowConnectors) HandleType() HandleType {
 }
 
 func (node *ShowConnectors) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *AlterTable) HandleType() HandleType {
@@ -775,7 +775,7 @@ func (node *AnalyzeStmt) HandleType() HandleType {
 }
 
 func (node *AnalyzeStmt) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *SetRole) HandleType() HandleType {
@@ -823,7 +823,7 @@ func (node *ValuesStatement) HandleType() HandleType {
 }
 
 func (node *ValuesStatement) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *MoDump) HandleType() HandleType {
@@ -919,7 +919,7 @@ func (node *ShowCreateView) HandleType() HandleType {
 }
 
 func (node *ShowCreateView) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *DropSequence) HandleType() HandleType {
@@ -935,7 +935,7 @@ func (node *ShowTableNumber) HandleType() HandleType {
 }
 
 func (node *ShowTableNumber) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowColumnNumber) HandleType() HandleType {
@@ -943,7 +943,7 @@ func (node *ShowColumnNumber) HandleType() HandleType {
 }
 
 func (node *ShowColumnNumber) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowTableValues) HandleType() HandleType {
@@ -951,7 +951,7 @@ func (node *ShowTableValues) HandleType() HandleType {
 }
 
 func (node *ShowTableValues) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowNodeList) HandleType() HandleType {
@@ -959,7 +959,7 @@ func (node *ShowNodeList) HandleType() HandleType {
 }
 
 func (node *ShowNodeList) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowLocks) HandleType() HandleType {
@@ -967,7 +967,7 @@ func (node *ShowLocks) HandleType() HandleType {
 }
 
 func (node *ShowLocks) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }
 
 func (node *ShowSequences) HandleType() HandleType {
@@ -975,5 +975,5 @@ func (node *ShowSequences) HandleType() HandleType {
 }
 
 func (node *ShowSequences) ResultType() ResultType {
-	return RowSet
+	return ResultRow
 }

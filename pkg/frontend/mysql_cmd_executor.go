@@ -651,7 +651,7 @@ func executeStmt(requestCtx context.Context,
 
 	resultType := execCtx.stmt.ResultType()
 	switch resultType {
-	case tree.RowSet:
+	case tree.ResultRow:
 		err = executeResultRowStmt(requestCtx, ses, execCtx)
 		if err != nil {
 			return err
@@ -1168,8 +1168,6 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 func setResponse(ses *Session, isLastStmt bool, rspLen uint64) *Response {
 	return ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", isLastStmt)
 }
-
-
 
 // authenticateUserCanExecuteStatement checks the user can execute the statement
 func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Session, stmt tree.Statement) error {
