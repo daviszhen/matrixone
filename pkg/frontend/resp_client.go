@@ -21,6 +21,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
+func setResponse(ses *Session, isLastStmt bool, rspLen uint64) *Response {
+	return ses.SetNewResponse(OkResponse, rspLen, int(COM_QUERY), "", isLastStmt)
+}
+
 // response the client
 func respClientFunc(requestCtx context.Context,
 	ses *Session,

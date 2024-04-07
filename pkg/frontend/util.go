@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/frontend/constant"
 	"math/rand"
 	"os"
 	"runtime"
@@ -27,6 +26,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/matrixorigin/matrixone/pkg/frontend/constant"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
@@ -53,31 +54,24 @@ import (
 	"go.uber.org/zap"
 )
 
-type CloseFlag struct {
-	//closed flag
-	closed uint32
+func createDropDatabaseErrorInfo() string {
+	return "CREATE/DROP of database is not supported in transactions"
 }
 
-// 1 for closed
-// 0 for others
-func (cf *CloseFlag) setClosed(value uint32) {
-	atomic.StoreUint32(&cf.closed, value)
+func onlyCreateStatementErrorInfo() string {
+	return "Only CREATE of DDL is supported in transactions"
 }
 
-func (cf *CloseFlag) Open() {
-	cf.setClosed(0)
+func administrativeCommandIsUnsupportedInTxnErrorInfo() string {
+	return "administrative command is unsupported in transactions"
 }
 
-func (cf *CloseFlag) Close() {
-	cf.setClosed(1)
+func unclassifiedStatementInUncommittedTxnErrorInfo() string {
+	return "unclassified statement appears in uncommitted transaction"
 }
 
-func (cf *CloseFlag) IsClosed() bool {
-	return atomic.LoadUint32(&cf.closed) != 0
-}
-
-func (cf *CloseFlag) IsOpened() bool {
-	return atomic.LoadUint32(&cf.closed) == 0
+func writeWriteConflictsErrorInfo() string {
+	return "Write conflicts detected. Previous transaction need to be aborted."
 }
 
 func Min(a int, b int) int {

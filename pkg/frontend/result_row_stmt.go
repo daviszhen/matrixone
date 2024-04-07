@@ -34,81 +34,63 @@ func executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *Exe
 
 	switch statement := execCtx.stmt.(type) {
 	case *tree.Select:
-		{
-			columns, err = execCtx.cw.GetColumns()
-			if err != nil {
-				logError(ses, ses.GetDebugString(),
-					"Failed to get columns from computation handler",
-					zap.Error(err))
-				return
-			}
-			if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-				ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
-			}
-			/*
-				Step 1 : send column count and column definition.
-			*/
-			//send column count
-			colCnt := uint64(len(columns))
-			err = execCtx.proto.SendColumnCountPacket(colCnt)
-			if err != nil {
-				return
-			}
-			//send columns
-			//column_count * Protocol::ColumnDefinition packets
-			cmd := ses.GetCmd()
-			for _, c := range columns {
-				mysqlc := c.(Column)
-				mrs.AddColumn(mysqlc)
-				/*
-					mysql COM_QUERY response: send the column definition per column
-				*/
-				err = execCtx.proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
-				if err != nil {
-					return
-				}
-			}
 
+		columns, err = execCtx.cw.GetColumns()
+		if err != nil {
+			logError(ses, ses.GetDebugString(),
+				"Failed to get columns from computation handler",
+				zap.Error(err))
+			return
+		}
+		if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
+			ses.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+		}
+		/*
+			Step 1 : send column count and column definition.
+		*/
+		//send column count
+		colCnt := uint64(len(columns))
+		err = execCtx.proto.SendColumnCountPacket(colCnt)
+		if err != nil {
+			return
+		}
+		//send columns
+		//column_count * Protocol::ColumnDefinition packets
+		cmd := ses.GetCmd()
+		for _, c := range columns {
+			mysqlc := c.(Column)
+			mrs.AddColumn(mysqlc)
 			/*
-				mysql COM_QUERY response: End after the column has been sent.
-				send EOF packet
+				mysql COM_QUERY response: send the column definition per column
 			*/
-			err = execCtx.proto.SendEOFPacketIf(0, ses.GetServerStatus())
+			err = execCtx.proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
 			if err != nil {
 				return
 			}
+		}
 
-			runBegin := time.Now()
-			/*
-				Step 2: Start pipeline
-				Producing the data row and sending the data row
-			*/
-			// todo: add trace
-			if _, err = execCtx.runner.Run(0); err != nil {
-				return
-			}
+		/*
+			mysql COM_QUERY response: End after the column has been sent.
+			send EOF packet
+		*/
+		err = execCtx.proto.SendEOFPacketIf(0, ses.GetServerStatus())
+		if err != nil {
+			return
+		}
 
-			// only log if run time is longer than 1s
-			if time.Since(runBegin) > time.Second {
-				logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-			}
+		runBegin := time.Now()
+		/*
+			Step 2: Start pipeline
+			Producing the data row and sending the data row
+		*/
+		// todo: add trace
+		if _, err = execCtx.runner.Run(0); err != nil {
+			return
+		}
 
-			// /*
-			// 	Step 3: Say goodbye
-			// 	mysql COM_QUERY response: End after the data row has been sent.
-			// 	After all row data has been sent, it sends the EOF or OK packet.
-			// */
-			// err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
-			// if err != nil {
-			// 	return
-			// }
-
-			// /*
-			// 	Step 4: Serialize the execution plan by json
-			// */
-			// if cwft, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-			// 	_ = cwft.RecordExecPlan(requestCtx)
-			// }
+		// only log if run time is longer than 1s
+		if time.Since(runBegin) > time.Second {
+			logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
 		}
 
 	case *tree.ExplainAnalyze:

@@ -16,20 +16,25 @@ package frontend
 
 import (
 	"context"
+	"io"
 
 	"github.com/fagongzi/goetty/v2/buf"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/config"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	"github.com/matrixorigin/matrixone/pkg/util"
+	util2 "github.com/matrixorigin/matrixone/pkg/util"
 )
 
 const (
@@ -64,6 +69,63 @@ type ComputationWrapper interface {
 	GetLoadTag() bool
 
 	GetServerStatus() uint16
+}
+
+/*
+GetComputationWrapper gets the execs from the computation engine
+*/
+var GetComputationWrapper = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
+	var cw []ComputationWrapper = nil
+	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
+		modify := false
+		for i, stmt := range cached.stmts {
+			tcw := InitTxnComputationWrapper(ses, stmt, proc)
+			tcw.plan = cached.plans[i]
+			if tcw.plan == nil {
+				modify = true
+				break
+			}
+			if checkModify(tcw.plan, proc, ses) {
+				modify = true
+				break
+			}
+			cw = append(cw, tcw)
+		}
+		if modify {
+			cw = nil
+		} else {
+			return cw, nil
+		}
+	}
+
+	var stmts []tree.Statement = nil
+	var cmdFieldStmt *InternalCmdFieldList
+	var err error
+	// if the input is an option ast, we should use it directly
+	if input.getStmt() != nil {
+		stmts = append(stmts, input.getStmt())
+	} else if isCmdFieldListSql(input.getSql()) {
+		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, input.getSql())
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, cmdFieldStmt)
+	} else {
+		var v interface{}
+		v, err = ses.GetGlobalVar("lower_case_table_names")
+		if err != nil {
+			v = int64(1)
+		}
+		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, input.getSql(), v.(int64))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, stmt := range stmts {
+		cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
+	}
+	return cw, nil
 }
 
 type ColumnInfo interface {
@@ -250,4 +312,22 @@ func (s *SessionAllocator) Alloc(capacity int) []byte {
 
 func (s SessionAllocator) Free(bs []byte) {
 	s.mp.Free(bs)
+}
+
+type ExecCtx struct {
+	prepareStmt *PrepareStmt
+	runResult   *util2.RunResult
+	//stmt will be replaced by the Execute
+	stmt tree.Statement
+	//isLastStmt : true denotes the last statement in the query
+	isLastStmt bool
+	// tenant name
+	tenant          string
+	userName        string
+	sqlOfStmt       string
+	cw              ComputationWrapper
+	runner          ComputationRunner
+	loadLocalWriter *io.PipeWriter
+	proc            *process.Process
+	proto           MysqlProtocol
 }

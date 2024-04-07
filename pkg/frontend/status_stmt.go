@@ -81,12 +81,6 @@ func executeStatusStmt(requestCtx context.Context, ses *Session, execCtx *ExecCt
 				return
 			}
 
-			/*
-			   Serialize the execution plan by json
-			*/
-			if cwft, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-				_ = cwft.RecordExecPlan(requestCtx)
-			}
 		}
 	default:
 		//change privilege
@@ -215,30 +209,25 @@ func respStatus(requestCtx context.Context,
 
 	default:
 		resp := setResponse(ses, execCtx.isLastStmt, rspLen)
-		if _, ok := execCtx.stmt.(*tree.Insert); ok {
-			resp.lastInsertId = execCtx.proc.GetLastInsertID()
-			if execCtx.proc.GetLastInsertID() != 0 {
-				ses.SetLastInsertID(execCtx.proc.GetLastInsertID())
-			}
-		}
+
 		if len(execCtx.proc.SessionInfo.SeqDeleteKeys) != 0 {
 			ses.DeleteSeqValues(execCtx.proc)
 		}
 
-		if st, ok := execCtx.stmt.(*tree.CreateTable); ok {
+		switch st := execCtx.stmt.(type) {
+		case *tree.Insert:
+			resp.lastInsertId = execCtx.proc.GetLastInsertID()
+			if execCtx.proc.GetLastInsertID() != 0 {
+				ses.SetLastInsertID(execCtx.proc.GetLastInsertID())
+			}
+		case *tree.CreateTable:
 			_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.DropTable); ok {
+		case *tree.DropTable:
 			_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.CreateDatabase); ok {
+		case *tree.CreateDatabase:
 			_ = insertRecordToMoMysqlCompatibilityMode(requestCtx, ses, execCtx.stmt)
 			_ = doGrantPrivilegeImplicitly(requestCtx, ses, st)
-		}
-
-		if st, ok := execCtx.stmt.(*tree.DropDatabase); ok {
+		case *tree.DropDatabase:
 			_ = deleteRecordToMoMysqlCompatbilityMode(requestCtx, ses, execCtx.stmt)
 			_ = doRevokePrivilegeImplicitly(requestCtx, ses, st)
 		}
@@ -251,3 +240,4 @@ func respStatus(requestCtx context.Context,
 	}
 	return
 }
+

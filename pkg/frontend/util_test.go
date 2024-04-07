@@ -18,12 +18,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"math"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 
 	"github.com/matrixorigin/matrixone/pkg/defines"
 
@@ -75,20 +76,6 @@ func Test_PathExists(t *testing.T) {
 		require.True(t, exist == c.exist)
 		require.True(t, isfile == c.isfile)
 	}
-}
-
-func Test_closeFlag(t *testing.T) {
-	cvey.Convey("closeFlag", t, func() {
-		cf := &CloseFlag{}
-		cf.setClosed(0)
-		cvey.So(cf.IsOpened(), cvey.ShouldBeTrue)
-
-		cf.Open()
-		cvey.So(cf.IsOpened(), cvey.ShouldBeTrue)
-
-		cf.Close()
-		cvey.So(cf.IsClosed(), cvey.ShouldBeTrue)
-	})
 }
 
 func Test_MinMax(t *testing.T) {
