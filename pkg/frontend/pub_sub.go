@@ -16,11 +16,14 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
+	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
+	"github.com/matrixorigin/matrixone/pkg/util/trace"
 )
 
 func handleCreatePublication(ctx context.Context, ses TempInter, cp *tree.CreatePublication) error {
@@ -302,5 +305,43 @@ func doDropPublication(ctx context.Context, ses *Session, dp *tree.DropPublicati
 		return err
 	}
 
+	return err
+}
+
+// create subscription database
+func createSubscriptionDatabase(ctx context.Context, bh BackgroundExec, newTenant *TenantInfo, ses *Session) error {
+	ctx, span := trace.Debug(ctx, "createSubscriptionDatabase")
+	defer span.End()
+
+	var err error
+	subscriptions := make([]string, 0)
+	//process the syspublications
+	_, syspublications_value, _ := ses.GetGlobalSysVars().GetGlobalSysVar("syspublications")
+	if syspublications, ok := syspublications_value.(string); ok {
+		if len(syspublications) == 0 {
+			return err
+		}
+		subscriptions = strings.Split(syspublications, ",")
+	}
+	// if no subscriptions, return
+	if len(subscriptions) == 0 {
+		return err
+	}
+
+	//with new tenant
+	ctx = defines.AttachAccount(ctx, uint32(newTenant.GetTenantID()), uint32(newTenant.GetUserID()), uint32(newTenant.GetDefaultRoleID()))
+
+	createSubscriptionFormat := `create database %s from sys publication %s;`
+	sqls := make([]string, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		sqls = append(sqls, fmt.Sprintf(createSubscriptionFormat, subscription, subscription))
+	}
+	for _, sql := range sqls {
+		bh.ClearExecResultSet()
+		err = bh.Exec(ctx, sql)
+		if err != nil {
+			return err
+		}
+	}
 	return err
 }
