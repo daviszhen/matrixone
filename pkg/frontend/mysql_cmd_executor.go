@@ -555,7 +555,6 @@ func executeStmt(requestCtx context.Context,
 	var cmpBegin time.Time
 	var ret interface{}
 	var runner ComputationRunner
-	var selfHandle bool
 	var columns []interface{}
 	var mrs *MysqlResultSet
 	var loadLocalErrGroup *errgroup.Group
@@ -565,24 +564,13 @@ func executeStmt(requestCtx context.Context,
 	// After separating the functions, the system cannot boot, due to mo_account
 	// not exists.  No clue why, the closure/capture must do some magic.
 
-	//check transaction states
-	switch execCtx.stmt.(type) {
-	case *tree.BeginTransaction:
-		err = ses.TxnBegin()
-		if err != nil {
-			return
-		}
-		RecordStatementTxnID(requestCtx, ses)
-	case *tree.CommitTransaction:
-		err = ses.TxnCommit()
-		if err != nil {
-			return
-		}
-	case *tree.RollbackTransaction:
-		err = ses.TxnRollback()
-		if err != nil {
-			return
-		}
+	switch execCtx.stmt.HandleType() {
+	case tree.InFrontend:
+		return handleInFrontend(requestCtx, ses, execCtx)
+	case tree.InBackend:
+		//in the computation engine
+	case tree.Unknown:
+		return moerr.NewInternalError(requestCtx, "need set handle type for %s", execCtx.sqlOfStmt)
 	}
 
 	switch st := execCtx.stmt.(type) {
@@ -603,43 +591,7 @@ func executeStmt(requestCtx context.Context,
 		}
 	}
 
-	selfHandle = false
-
 	switch st := execCtx.stmt.(type) {
-	case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-		selfHandle = true
-	case *tree.SetRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		//switch role
-		err = handleSwitchRole(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.Use:
-		selfHandle = true
-		var v interface{}
-		v, err = ses.GetGlobalVar("lower_case_table_names")
-		if err != nil {
-			return
-		}
-		st.Name.SetConfig(v.(int64))
-		//use database
-		err = handleChangeDB(requestCtx, ses, st.Name.Compare())
-		if err != nil {
-			return
-		}
-		err = changeVersion(requestCtx, ses, st.Name.Compare())
-		if err != nil {
-			return
-		}
-	case *tree.MoDump:
-		selfHandle = true
-		//dump
-		err = handleDump(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
 	case *tree.CreateDatabase:
 		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
 		if err != nil {
@@ -660,294 +612,16 @@ func executeStmt(requestCtx context.Context,
 		if string(st.Name) == ses.GetDatabaseName() {
 			ses.SetDatabaseName("")
 		}
-	case *tree.PrepareStmt:
-		selfHandle = true
-		execCtx.prepareStmt, err = handlePrepareStmt(requestCtx, ses, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, execCtx.prepareStmt.PrepareStmt, execCtx.prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
-		if err != nil {
-			ses.RemovePrepareStmt(execCtx.prepareStmt.Name)
-			return
-		}
-	case *tree.PrepareString:
-		selfHandle = true
-		execCtx.prepareStmt, err = handlePrepareString(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-		err = authenticateUserCanExecutePrepareOrExecute(requestCtx, ses, execCtx.prepareStmt.PrepareStmt, execCtx.prepareStmt.PreparePlan.GetDcl().GetPrepare().GetPlan())
-		if err != nil {
-			ses.RemovePrepareStmt(execCtx.prepareStmt.Name)
-			return
-		}
-	case *tree.CreateConnector:
-		selfHandle = true
-		err = handleCreateConnector(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.PauseDaemonTask:
-		selfHandle = true
-		err = handlePauseDaemonTask(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.CancelDaemonTask:
-		selfHandle = true
-		err = handleCancelDaemonTask(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.ResumeDaemonTask:
-		selfHandle = true
-		err = handleResumeDaemonTask(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.DropConnector:
-		selfHandle = true
-		err = handleDropConnector(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.ShowConnectors:
-		selfHandle = true
-		if err = handleShowConnectors(requestCtx, ses, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.Deallocate:
-		selfHandle = true
-		err = handleDeallocate(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.Reset:
-		selfHandle = true
-		err = handleReset(requestCtx, ses, st)
-		if err != nil {
-			return
-		}
-	case *tree.SetVar:
-		selfHandle = true
-		err = handleSetVar(requestCtx, ses, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		}
-	case *tree.ShowVariables:
-		selfHandle = true
-		err = handleShowVariables(ses, st, execCtx.proc, execCtx.isLastStmt)
-		if err != nil {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		selfHandle = true
-		err = handleShowErrors(ses, execCtx.isLastStmt)
-		if err != nil {
-			return
-		}
-	case *tree.AnalyzeStmt:
-		selfHandle = true
-		if err = handleAnalyzeStmt(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.ExplainStmt:
-		selfHandle = true
-		if err = handleExplainStmt(requestCtx, ses, st); err != nil {
-			return
-		}
+
 	case *tree.ExplainAnalyze:
 		ses.SetData(nil)
 	case *tree.ShowTableStatus:
 		ses.SetShowStmtType(ShowTableStatus)
 		ses.SetData(nil)
-	case *InternalCmdFieldList:
-		selfHandle = true
-		if err = handleCmdFieldList(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.CreatePublication:
-		selfHandle = true
-		if err = handleCreatePublication(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.AlterPublication:
-		selfHandle = true
-		if err = handleAlterPublication(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropPublication:
-		selfHandle = true
-		if err = handleDropPublication(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.ShowSubscriptions:
-		selfHandle = true
-		if err = handleShowSubscriptions(requestCtx, ses, st, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.CreateStage:
-		selfHandle = true
-		if err = handleCreateStage(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropStage:
-		selfHandle = true
-		if err = handleDropStage(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.AlterStage:
-		selfHandle = true
-		if err = handleAlterStage(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.CreateAccount:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleCreateAccount(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropAccount:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleDropAccount(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.AlterAccount:
-		ses.InvalidatePrivilegeCache()
-		selfHandle = true
-		if err = handleAlterAccount(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.AlterDataBaseConfig:
-		ses.InvalidatePrivilegeCache()
-		selfHandle = true
-		if st.IsAccountLevel {
-			if err = handleAlterAccountConfig(requestCtx, ses, st); err != nil {
-				return
-			}
-		} else {
-			if err = handleAlterDataBaseConfig(requestCtx, ses, st); err != nil {
-				return
-			}
-		}
-	case *tree.CreateUser:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleCreateUser(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropUser:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleDropUser(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.AlterUser: //TODO
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleAlterUser(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.CreateRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleCreateRole(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropRole:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleDropRole(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.CreateFunction:
-		selfHandle = true
-		if err = st.Valid(); err != nil {
-			return err
-		}
-		if err = handleCreateFunction(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropFunction:
-		selfHandle = true
-		if err = handleDropFunction(requestCtx, ses, st, execCtx.proc); err != nil {
-			return
-		}
-	case *tree.CreateProcedure:
-		selfHandle = true
-		if err = handleCreateProcedure(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.DropProcedure:
-		selfHandle = true
-		if err = handleDropProcedure(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.CallStmt:
-		selfHandle = true
-		if err = handleCallProcedure(requestCtx, ses, st, execCtx.proc); err != nil {
-			return
-		}
-	case *tree.Grant:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		switch st.Typ {
-		case tree.GrantTypeRole:
-			if err = handleGrantRole(requestCtx, ses, &st.GrantRole); err != nil {
-				return
-			}
-		case tree.GrantTypePrivilege:
-			if err = handleGrantPrivilege(requestCtx, ses, &st.GrantPrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Revoke:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		switch st.Typ {
-		case tree.RevokeTypeRole:
-			if err = handleRevokeRole(requestCtx, ses, &st.RevokeRole); err != nil {
-				return
-			}
-		case tree.RevokeTypePrivilege:
-			if err = handleRevokePrivilege(requestCtx, ses, &st.RevokePrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Kill:
-		selfHandle = true
-		ses.InvalidatePrivilegeCache()
-		if err = handleKill(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.ShowAccounts:
-		selfHandle = true
-		if err = handleShowAccounts(requestCtx, ses, st, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.ShowCollation:
-		selfHandle = true
-		if err = handleShowCollation(ses, st, execCtx.proc, execCtx.isLastStmt); err != nil {
-			return
-		}
 	case *tree.Load:
 		if st.Local {
 			execCtx.proc.LoadLocalReader, execCtx.loadLocalWriter = io.Pipe()
 		}
-	case *tree.ShowBackendServers:
-		selfHandle = true
-		if err = handleShowBackendServers(requestCtx, ses, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.SetTransaction:
-		selfHandle = true
-		//TODO: handle set transaction
-	case *tree.LockTableStmt:
-		selfHandle = true
-	case *tree.UnLockTableStmt:
-		selfHandle = true
 	case *tree.ShowGrants:
 		if len(st.Username) == 0 {
 			st.Username = execCtx.userName
@@ -955,20 +629,6 @@ func executeStmt(requestCtx context.Context,
 		if len(st.Hostname) == 0 || st.Hostname == "%" {
 			st.Hostname = rootHost
 		}
-	case *tree.BackupStart:
-		selfHandle = true
-		if err = handleStartBackup(requestCtx, ses, st); err != nil {
-			return
-		}
-	case *tree.EmptyStmt:
-		selfHandle = true
-		if err = handleEmptyStmt(requestCtx, ses, st); err != nil {
-			return
-		}
-	}
-
-	if selfHandle {
-		return
 	}
 
 	cmpBegin = time.Now()
@@ -977,29 +637,15 @@ func executeStmt(requestCtx context.Context,
 		return
 	}
 	execCtx.stmt = execCtx.cw.GetAst()
-	// reset some special stmt for execute statement
-	switch st := execCtx.stmt.(type) {
-	case *tree.SetVar:
-		err = handleSetVar(requestCtx, ses, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowVariables:
-		err = handleShowVariables(ses, st, execCtx.proc, execCtx.isLastStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = handleShowErrors(ses, execCtx.isLastStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
+
+	//EXECUTE replaces the stmt by the real statement.
+	//need to check again.
+	switch execCtx.stmt.HandleType() {
+	case tree.InFrontend:
+		return handleInFrontend(requestCtx, ses, execCtx)
+	case tree.InBackend:
+	case tree.Unknown:
+		return moerr.NewInternalError(requestCtx, "need set handle type for %s", execCtx.sqlOfStmt)
 	}
 
 	runner = ret.(ComputationRunner)

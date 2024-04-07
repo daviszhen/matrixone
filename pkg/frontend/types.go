@@ -133,6 +133,14 @@ func (icfl *InternalCmdFieldList) Format(ctx *tree.FmtCtx) {
 	ctx.WriteString(makeCmdFieldListSql(icfl.tableName))
 }
 
+func (icfl *InternalCmdFieldList) ResultType() tree.ResultType {
+	return tree.Status
+}
+
+func (si *InternalCmdFieldList) HandleType() tree.HandleType {
+	return tree.InFrontend
+}
+
 func (icfl *InternalCmdFieldList) GetStatementType() string { return "InternalCmd" }
 func (icfl *InternalCmdFieldList) GetQueryType() string     { return tree.QueryTypeDQL }
 
