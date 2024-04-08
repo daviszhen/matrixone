@@ -20,8 +20,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/defines"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/pb/plan"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect/mysql"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
 )
@@ -36,18 +40,6 @@ func handleAlterPublication(ctx context.Context, ses TempInter, ap *tree.AlterPu
 
 func handleDropPublication(ctx context.Context, ses TempInter, dp *tree.DropPublication) error {
 	return doDropPublication(ctx, ses.(*Session), dp)
-}
-
-func handleCreateStage(ctx context.Context, ses TempInter, cs *tree.CreateStage) error {
-	return doCreateStage(ctx, ses.(*Session), cs)
-}
-
-func handleAlterStage(ctx context.Context, ses TempInter, as *tree.AlterStage) error {
-	return doAlterStage(ctx, ses.(*Session), as)
-}
-
-func handleDropStage(ctx context.Context, ses TempInter, ds *tree.DropStage) error {
-	return doDropStage(ctx, ses.(*Session), ds)
 }
 
 func doCreatePublication(ctx context.Context, ses *Session, cp *tree.CreatePublication) (err error) {
@@ -344,4 +336,237 @@ func createSubscriptionDatabase(ctx context.Context, bh BackgroundExec, newTenan
 		}
 	}
 	return err
+}
+
+func getSubscriptionMeta(ctx context.Context, dbName string, ses TempInter, txn TxnOperator) (*plan.SubscriptionMeta, error) {
+	dbMeta, err := gPu.StorageEngine.Database(ctx, dbName, txn)
+	if err != nil {
+		logutil.Errorf("Get Subscription database %s meta error: %s", dbName, err.Error())
+		return nil, moerr.NewNoDB(ctx)
+	}
+
+	if dbMeta.IsSubscription(ctx) {
+		if sub, err := checkSubscriptionValid(ctx, ses, dbMeta.GetCreateSql(ctx)); err != nil {
+			return nil, err
+		} else {
+			return sub, nil
+		}
+	}
+	return nil, nil
+}
+
+func isSubscriptionValid(accountList string, accName string) bool {
+	if accountList == "all" {
+		return true
+	}
+	return strings.Contains(accountList, accName)
+}
+
+func checkSubscriptionValidCommon(ctx context.Context, ses TempInter, subName, accName, pubName string) (subs *plan.SubscriptionMeta, err error) {
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
+	var (
+		sql, accStatus, accountList, databaseName string
+		erArray                                   []ExecResult
+		tenantInfo                                *TenantInfo
+		accId                                     int64
+		newCtx                                    context.Context
+		tenantName                                string
+	)
+
+	tenantInfo = ses.GetTenantInfo()
+	if tenantInfo != nil && accName == tenantInfo.GetTenant() {
+		return nil, moerr.NewInternalError(ctx, "can not subscribe to self")
+	}
+
+	newCtx = defines.AttachAccountId(ctx, catalog.System_Account)
+
+	//get pubAccountId from publication info
+	sql, err = getSqlForAccountIdAndStatus(newCtx, accName, true)
+	if err != nil {
+		return nil, err
+	}
+	err = bh.Exec(ctx, "begin;")
+	defer func() {
+		err = finishTxn(ctx, bh, err)
+	}()
+	if err != nil {
+		return nil, err
+	}
+	bh.ClearExecResultSet()
+	err = bh.Exec(newCtx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	erArray, err = getResultSet(newCtx, bh)
+	if err != nil {
+		return nil, err
+	}
+
+	if !execResultArrayHasData(erArray) {
+		return nil, moerr.NewInternalError(newCtx, "there is no publication account %s", accName)
+	}
+	accId, err = erArray[0].GetInt64(newCtx, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	accStatus, err = erArray[0].GetString(newCtx, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	if accStatus == tree.AccountStatusSuspend.String() {
+		return nil, moerr.NewInternalError(newCtx, "the account %s is suspended", accName)
+	}
+
+	//check the publication is already exist or not
+
+	newCtx = defines.AttachAccountId(ctx, uint32(accId))
+	sql, err = getSqlForPubInfoForSub(newCtx, pubName, true)
+	if err != nil {
+		return nil, err
+	}
+	bh.ClearExecResultSet()
+	err = bh.Exec(newCtx, sql)
+	if err != nil {
+		return nil, err
+	}
+	if erArray, err = getResultSet(newCtx, bh); err != nil {
+		return nil, err
+	}
+	if !execResultArrayHasData(erArray) {
+		return nil, moerr.NewInternalError(newCtx, "there is no publication %s", pubName)
+	}
+
+	databaseName, err = erArray[0].GetString(newCtx, 0, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	accountList, err = erArray[0].GetString(newCtx, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	if tenantInfo == nil {
+		var tenantId uint32
+		tenantId, err = defines.GetAccountId(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		sql = getSqlForGetAccountName(tenantId)
+		bh.ClearExecResultSet()
+		newCtx = defines.AttachAccountId(ctx, catalog.System_Account)
+		err = bh.Exec(newCtx, sql)
+		if err != nil {
+			return nil, err
+		}
+		if erArray, err = getResultSet(newCtx, bh); err != nil {
+			return nil, err
+		}
+		if !execResultArrayHasData(erArray) {
+			return nil, moerr.NewInternalError(newCtx, "there is no account, account id %d ", tenantId)
+		}
+
+		tenantName, err = erArray[0].GetString(newCtx, 0, 0)
+		if err != nil {
+			return nil, err
+		}
+		if !isSubscriptionValid(accountList, tenantName) {
+			return nil, moerr.NewInternalError(newCtx, "the account %s is not allowed to subscribe the publication %s", tenantName, pubName)
+		}
+	} else if !isSubscriptionValid(accountList, tenantInfo.GetTenant()) {
+		//logError(ses, ses.GetDebugString(),
+		//	"checkSubscriptionValidCommon",
+		//	zap.String("subName", subName),
+		//	zap.String("accName", accName),
+		//	zap.String("pubName", pubName),
+		//	zap.String("databaseName", databaseName),
+		//	zap.String("accountList", accountList),
+		//	zap.String("tenant", tenantInfo.GetTenant()))
+		return nil, moerr.NewInternalError(newCtx, "the account %s is not allowed to subscribe the publication %s", tenantInfo.GetTenant(), pubName)
+	}
+
+	subs = &plan.SubscriptionMeta{
+		Name:        pubName,
+		AccountId:   int32(accId),
+		DbName:      databaseName,
+		AccountName: accName,
+		SubName:     subName,
+	}
+
+	return subs, err
+}
+
+func checkSubscriptionValid(ctx context.Context, ses TempInter, createSql string) (*plan.SubscriptionMeta, error) {
+	var (
+		err                       error
+		lowerAny                  any
+		lowerInt64                int64
+		accName, pubName, subName string
+		ast                       []tree.Statement
+	)
+	lowerAny, err = ses.GetGlobalVar("lower_case_table_names")
+	if err != nil {
+		return nil, err
+	}
+	lowerInt64 = lowerAny.(int64)
+	ast, err = mysql.Parse(ctx, createSql, lowerInt64)
+	if err != nil {
+		return nil, err
+	}
+
+	accName = string(ast[0].(*tree.CreateDatabase).SubscriptionOption.From)
+	pubName = string(ast[0].(*tree.CreateDatabase).SubscriptionOption.Publication)
+	subName = string(ast[0].(*tree.CreateDatabase).Name)
+
+	return checkSubscriptionValidCommon(ctx, ses, subName, accName, pubName)
+}
+
+func isDbPublishing(ctx context.Context, dbName string, ses TempInter) (ok bool, err error) {
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
+	var (
+		sql     string
+		erArray []ExecResult
+		count   int64
+	)
+
+	if _, isSysDb := sysDatabases[dbName]; isSysDb {
+		return false, err
+	}
+
+	sql, err = getSqlForDbPubCount(ctx, dbName)
+	if err != nil {
+		return false, err
+	}
+	err = bh.Exec(ctx, "begin;")
+	defer func() {
+		err = finishTxn(ctx, bh, err)
+	}()
+	if err != nil {
+		return false, err
+	}
+	bh.ClearExecResultSet()
+	err = bh.Exec(ctx, sql)
+	if err != nil {
+		return false, err
+	}
+	erArray, err = getResultSet(ctx, bh)
+	if err != nil {
+		return false, err
+	}
+	if !execResultArrayHasData(erArray) {
+		return false, moerr.NewInternalError(ctx, "there is no publication for database %s", dbName)
+	}
+	count, err = erArray[0].GetInt64(ctx, 0, 0)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, err
 }

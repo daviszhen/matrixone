@@ -466,3 +466,176 @@ func doInterpretCall(ctx context.Context, ses *Session, call *tree.CallStmt) ([]
 	}
 	return interpreter.GetResult(), nil
 }
+
+type rmPkg func(path string) error
+
+func doDropFunction(ctx context.Context, ses *Session, df *tree.DropFunction, rm rmPkg) (err error) {
+	var sql string
+	var argstr string
+	var bodyStr string
+	var checkDatabase string
+	var dbName string
+	var funcId int64
+	var erArray []ExecResult
+
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
+
+	// a database must be selected or specified as qualifier when create a function
+	if df.Name.HasNoNameQualifier() {
+		if ses.DatabaseNameIsEmpty() {
+			return moerr.NewNoDBNoCtx()
+		}
+		dbName = ses.GetDatabaseName()
+	} else {
+		dbName = string(df.Name.Name.SchemaName)
+	}
+
+	// validate database name and signature (name + args)
+	bh.ClearExecResultSet()
+	checkDatabase = fmt.Sprintf(checkUdfArgs, string(df.Name.Name.ObjectName), dbName)
+	err = bh.Exec(ctx, checkDatabase)
+	if err != nil {
+		return err
+	}
+
+	erArray, err = getResultSet(ctx, bh)
+	if err != nil {
+		return err
+	}
+
+	if execResultArrayHasData(erArray) {
+		receivedArgsType := make([]string, len(df.Args))
+		for i, arg := range df.Args {
+			typ, err := plan2.GetFunctionArgTypeStrFromAst(arg)
+			if err != nil {
+				return err
+			}
+			receivedArgsType[i] = typ
+		}
+
+		// function with provided name and db exists, now check arguments
+		for i := uint64(0); i < erArray[0].GetRowCount(); i++ {
+			argstr, err = erArray[0].GetString(ctx, i, 0)
+			if err != nil {
+				return err
+			}
+			funcId, err = erArray[0].GetInt64(ctx, i, 1)
+			if err != nil {
+				return err
+			}
+			bodyStr, err = erArray[0].GetString(ctx, i, 2)
+			if err != nil {
+				return err
+			}
+			argList := make([]*function.Arg, 0)
+			json.Unmarshal([]byte(argstr), &argList)
+			if len(argList) == len(df.Args) {
+				match := true
+				for j, arg := range argList {
+					typ := receivedArgsType[j]
+					if arg.Type != typ {
+						match = false
+						break
+					}
+				}
+				if !match {
+					continue
+				}
+				handleArgMatch := func() (rtnErr error) {
+					//put it into the single transaction
+					rtnErr = bh.Exec(ctx, "begin;")
+					defer func() {
+						rtnErr = finishTxn(ctx, bh, rtnErr)
+						if rtnErr == nil {
+							u := &function.NonSqlUdfBody{}
+							if json.Unmarshal([]byte(bodyStr), u) == nil && u.Import {
+								rm(u.Body)
+							}
+						}
+					}()
+					if rtnErr != nil {
+						return rtnErr
+					}
+
+					sql = fmt.Sprintf(deleteUserDefinedFunctionFormat, funcId)
+
+					rtnErr = bh.Exec(ctx, sql)
+					if rtnErr != nil {
+						return rtnErr
+					}
+					return rtnErr
+				}
+				return handleArgMatch()
+			}
+		}
+	}
+	// no such function
+	return moerr.NewNoUDFNoCtx(string(df.Name.Name.ObjectName))
+}
+
+func doDropProcedure(ctx context.Context, ses *Session, dp *tree.DropProcedure) (err error) {
+	var sql string
+	var checkDatabase string
+	var dbName string
+	var procId int64
+	var erArray []ExecResult
+
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
+
+	if dp.Name.HasNoNameQualifier() {
+		if ses.DatabaseNameIsEmpty() {
+			return moerr.NewNoDBNoCtx()
+		}
+		dbName = ses.GetDatabaseName()
+	} else {
+		dbName = string(dp.Name.Name.SchemaName)
+	}
+
+	// validate database name and signature (name + args)
+	bh.ClearExecResultSet()
+	checkDatabase = fmt.Sprintf(checkStoredProcedureArgs, string(dp.Name.Name.ObjectName), dbName)
+	err = bh.Exec(ctx, checkDatabase)
+	if err != nil {
+		return err
+	}
+
+	erArray, err = getResultSet(ctx, bh)
+	if err != nil {
+		return err
+	}
+
+	if execResultArrayHasData(erArray) {
+		// function with provided name and db exists, for now we don't support overloading for stored procedure, so go to handle deletion.
+		procId, err = erArray[0].GetInt64(ctx, 0, 0)
+		if err != nil {
+			return err
+		}
+		handleArgMatch := func() (rtnErr error) {
+			//put it into the single transaction
+			rtnErr = bh.Exec(ctx, "begin;")
+			defer func() {
+				rtnErr = finishTxn(ctx, bh, rtnErr)
+			}()
+			if rtnErr != nil {
+				return rtnErr
+			}
+
+			sql = fmt.Sprintf(deleteStoredProcedureFormat, procId)
+
+			rtnErr = bh.Exec(ctx, sql)
+			if rtnErr != nil {
+				return rtnErr
+			}
+			return rtnErr
+		}
+		return handleArgMatch()
+	} else {
+		// no such procedure
+		if dp.IfExists {
+			return nil
+		}
+		return moerr.NewNoUDFNoCtx(string(dp.Name.Name.ObjectName))
+	}
+}
