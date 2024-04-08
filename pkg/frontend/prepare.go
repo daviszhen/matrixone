@@ -107,7 +107,7 @@ func parseStmtSendLongData(requestCtx context.Context, ses *Session, data []byte
 }
 
 // Note: for pass the compile quickly. We will remove the comments in the future.
-func handleExplainStmt(requestCtx context.Context, ses TempInter, stmt *tree.ExplainStmt) error {
+func handleExplainStmt(requestCtx context.Context, ses FeSession, stmt *tree.ExplainStmt) error {
 	es, err := getExplainOption(requestCtx, stmt.Options)
 	if err != nil {
 		return err
@@ -199,7 +199,7 @@ func doPrepareStmt(ctx context.Context, ses *Session, st *tree.PrepareStmt, sql 
 }
 
 // handlePrepareStmt
-func handlePrepareStmt(ctx context.Context, ses TempInter, st *tree.PrepareStmt, sql string) (*PrepareStmt, error) {
+func handlePrepareStmt(ctx context.Context, ses FeSession, st *tree.PrepareStmt, sql string) (*PrepareStmt, error) {
 	return doPrepareStmt(ctx, ses.(*Session), st, sql)
 }
 
@@ -229,6 +229,6 @@ func doPrepareString(ctx context.Context, ses *Session, st *tree.PrepareString) 
 }
 
 // handlePrepareString
-func handlePrepareString(ctx context.Context, ses TempInter, st *tree.PrepareString) (*PrepareStmt, error) {
+func handlePrepareString(ctx context.Context, ses FeSession, st *tree.PrepareString) (*PrepareStmt, error) {
 	return doPrepareString(ctx, ses.(*Session), st)
 }

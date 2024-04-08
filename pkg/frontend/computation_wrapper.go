@@ -88,14 +88,14 @@ type TxnComputationWrapper struct {
 	stmt      tree.Statement
 	plan      *plan2.Plan
 	proc      *process.Process
-	ses       TempInter
+	ses       FeSession
 	compile   *compile.Compile
 	runResult *util2.RunResult
 
 	uuid uuid.UUID
 }
 
-func InitTxnComputationWrapper(ses TempInter, stmt tree.Statement, proc *process.Process) *TxnComputationWrapper {
+func InitTxnComputationWrapper(ses FeSession, stmt tree.Statement, proc *process.Process) *TxnComputationWrapper {
 	uuid, _ := uuid.NewV7()
 	return &TxnComputationWrapper{
 		stmt: stmt,

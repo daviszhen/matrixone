@@ -22,28 +22,27 @@ import (
 )
 
 func handleInFrontendInBack(requestCtx context.Context,
-	backCtx *backExecCtx,
+	backSes *backSession,
 	execCtx *ExecCtx) (err error) {
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
 	case *tree.BeginTransaction:
-		err = backCtx.TxnBegin()
+		err = backSes.TxnBegin()
 		if err != nil {
 			return
 		}
 	case *tree.CommitTransaction:
-		err = backCtx.TxnCommit()
+		err = backSes.TxnCommit()
 		if err != nil {
 			return
 		}
 	case *tree.RollbackTransaction:
-		err = backCtx.TxnRollback()
+		err = backSes.TxnRollback()
 		if err != nil {
 			return
 		}
 	case *tree.Use:
-		//use database
-		err = handleChangeDB(requestCtx, backCtx, st.Name.Compare())
+		err = handleChangeDB(requestCtx, backSes, st.Name.Compare())
 		if err != nil {
 			return
 		}
@@ -52,7 +51,7 @@ func handleInFrontendInBack(requestCtx context.Context,
 		if err != nil {
 			return
 		}
-		if st.SubscriptionOption != nil && backCtx.tenant != nil && !backCtx.tenant.IsAdminRole() {
+		if st.SubscriptionOption != nil && backSes.tenant != nil && !backSes.tenant.IsAdminRole() {
 			err = moerr.NewInternalError(execCtx.proc.Ctx, "only admin can create subscription")
 			return
 		}
@@ -63,33 +62,33 @@ func handleInFrontendInBack(requestCtx context.Context,
 			return
 		}
 		// if the droped database is the same as the one in use, database must be reseted to empty.
-		if string(st.Name) == backCtx.GetDatabaseName() {
-			backCtx.SetDatabaseName("")
+		if string(st.Name) == backSes.GetDatabaseName() {
+			backSes.SetDatabaseName("")
 		}
 	case *tree.Grant:
 		switch st.Typ {
 		case tree.GrantTypeRole:
-			if err = handleGrantRole(requestCtx, backCtx, &st.GrantRole); err != nil {
+			if err = handleGrantRole(requestCtx, backSes, &st.GrantRole); err != nil {
 				return
 			}
 		case tree.GrantTypePrivilege:
-			if err = handleGrantPrivilege(requestCtx, backCtx, &st.GrantPrivilege); err != nil {
+			if err = handleGrantPrivilege(requestCtx, backSes, &st.GrantPrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.Revoke:
 		switch st.Typ {
 		case tree.RevokeTypeRole:
-			if err = handleRevokeRole(requestCtx, backCtx, &st.RevokeRole); err != nil {
+			if err = handleRevokeRole(requestCtx, backSes, &st.RevokeRole); err != nil {
 				return
 			}
 		case tree.RevokeTypePrivilege:
-			if err = handleRevokePrivilege(requestCtx, backCtx, &st.RevokePrivilege); err != nil {
+			if err = handleRevokePrivilege(requestCtx, backSes, &st.RevokePrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.EmptyStmt:
-		if err = handleEmptyStmt(requestCtx, backCtx, st); err != nil {
+		if err = handleEmptyStmt(requestCtx, backSes, st); err != nil {
 			return
 		}
 	default:

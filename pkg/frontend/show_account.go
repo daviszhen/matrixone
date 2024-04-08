@@ -444,9 +444,9 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 		}
 	}
 
-	backCtx := bh.(*backExec)
-	rsOfMoAccount = backCtx.backCtx.allResultSet[0]
-	MoAccountColumns = backCtx.backCtx.rs
+	backSes := bh.(*backExec)
+	rsOfMoAccount = backSes.backSes.allResultSet[0]
+	MoAccountColumns = backSes.backSes.rs
 	bh.ClearExecResultSet()
 
 	// step 2
@@ -490,8 +490,8 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 		eachAccountInfo = nil
 	}
 
-	rsOfEachAccount := backCtx.backCtx.allResultSet[0]
-	EachAccountColumns = backCtx.backCtx.rs
+	rsOfEachAccount := backSes.backSes.allResultSet[0]
+	EachAccountColumns = backSes.backSes.rs
 	bh.ClearExecResultSet()
 
 	//step4: generate mysql result set

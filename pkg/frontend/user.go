@@ -26,7 +26,7 @@ import (
 )
 
 // handleCreateUser creates the user for the tenant
-func handleCreateUser(ctx context.Context, ses TempInter, cu *tree.CreateUser) error {
+func handleCreateUser(ctx context.Context, ses FeSession, cu *tree.CreateUser) error {
 	tenant := ses.GetTenantInfo()
 
 	//step1 : create the user
@@ -34,11 +34,11 @@ func handleCreateUser(ctx context.Context, ses TempInter, cu *tree.CreateUser) e
 }
 
 // handleDropUser drops the user for the tenant
-func handleDropUser(ctx context.Context, ses TempInter, du *tree.DropUser) error {
+func handleDropUser(ctx context.Context, ses FeSession, du *tree.DropUser) error {
 	return doDropUser(ctx, ses.(*Session), du)
 }
 
-func handleAlterUser(ctx context.Context, ses TempInter, au *tree.AlterUser) error {
+func handleAlterUser(ctx context.Context, ses FeSession, au *tree.AlterUser) error {
 	return doAlterUser(ctx, ses.(*Session), au)
 }
 

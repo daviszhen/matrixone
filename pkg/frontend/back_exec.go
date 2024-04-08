@@ -39,12 +39,13 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
+	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
 type backExec struct {
-	backCtx *backExecCtx
+	backSes *backSession
 }
 
 func (back *backExec) Close() {
@@ -53,9 +54,9 @@ func (back *backExec) Close() {
 
 func (back *backExec) Exec(ctx context.Context, sql string) error {
 	if ctx == nil {
-		ctx = back.backCtx.GetRequestContext()
+		ctx = back.backSes.GetRequestContext()
 	} else {
-		back.backCtx.SetRequestContext(ctx)
+		back.backSes.SetRequestContext(ctx)
 	}
 	_, err := defines.GetAccountId(ctx)
 	if err != nil {
@@ -64,9 +65,9 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 
 	// For determine this is a background sql.
 	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	back.backCtx.requestCtx = ctx
+	back.backSes.requestCtx = ctx
 	//logutil.Debugf("-->bh:%s", sql)
-	v, err := back.backCtx.GetGlobalVar("lower_case_table_names")
+	v, err := back.backSes.GetGlobalVar("lower_case_table_names")
 	if err != nil {
 		return err
 	}
@@ -78,7 +79,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 		return moerr.NewInternalError(ctx, "Exec() can run one statement at one time. but get '%d' statements now, sql = %s", len(statements), sql)
 	}
 	//share txn can not run transaction statement
-	if back.backCtx.isShareTxn() {
+	if back.backSes.isShareTxn() {
 		for _, stmt := range statements {
 			switch stmt.(type) {
 			case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
@@ -86,7 +87,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 			}
 		}
 	}
-	return doComQueryInBack(ctx, back.backCtx, &UserInput{sql: sql})
+	return doComQueryInBack(ctx, back.backSes, &UserInput{sql: sql})
 }
 
 func (back *backExec) ExecStmt(ctx context.Context, statement tree.Statement) error {
@@ -94,7 +95,7 @@ func (back *backExec) ExecStmt(ctx context.Context, statement tree.Statement) er
 }
 
 func (back *backExec) GetExecResultSet() []interface{} {
-	mrs := back.backCtx.allResultSet
+	mrs := back.backSes.allResultSet
 	ret := make([]interface{}, len(mrs))
 	for i, mr := range mrs {
 		ret[i] = mr
@@ -103,32 +104,32 @@ func (back *backExec) GetExecResultSet() []interface{} {
 }
 
 func (back *backExec) ClearExecResultSet() {
-	back.backCtx.allResultSet = nil
+	back.backSes.allResultSet = nil
 }
 
 func (back *backExec) GetExecResultBatches() []*batch.Batch {
-	return back.backCtx.resultBatches
+	return back.backSes.resultBatches
 }
 
 func (back *backExec) ClearExecResultBatches() {
-	back.backCtx.resultBatches = nil
+	back.backSes.resultBatches = nil
 }
 
 func (back *backExec) Clear() {
-	back.backCtx.clear()
+	back.backSes.clear()
 }
 
 // execute query
 func doComQueryInBack(requestCtx context.Context,
-	backCtx *backExecCtx,
+	backSes *backSession,
 	input *UserInput) (retErr error) {
-	backCtx.SetSql(input.getSql())
+	backSes.SetSql(input.getSql())
 	//the ses.GetUserName returns the user_name with the account_name.
 	//here,we only need the user_name.
 	userNameOnly := rootName
 	proc := process.New(
 		requestCtx,
-		backCtx.pool,
+		backSes.pool,
 		gPu.TxnClient,
 		nil,
 		gPu.FileService,
@@ -137,36 +138,34 @@ func doComQueryInBack(requestCtx context.Context,
 		gPu.HAKeeperClient,
 		gPu.UdfService,
 		gAicm)
-	//proc.CopyVectorPool(ses.proc)
-	//proc.CopyValueScanBatch(ses.proc)
-	proc.Id = backCtx.getNextProcessId()
+	proc.Id = backSes.getNextProcessId()
 	proc.Lim.Size = gPu.SV.ProcessLimitationSize
 	proc.Lim.BatchRows = gPu.SV.ProcessLimitationBatchRows
 	proc.Lim.MaxMsgSize = gPu.SV.MaxMessageSize
 	proc.Lim.PartitionRows = gPu.SV.ProcessLimitationPartitionRows
 	proc.SessionInfo = process.SessionInfo{
-		User:          backCtx.proto.GetUserName(),
+		User:          backSes.proto.GetUserName(),
 		Host:          gPu.SV.Host,
-		Database:      backCtx.proto.GetDatabaseName(),
+		Database:      backSes.proto.GetDatabaseName(),
 		Version:       makeServerVersion(gPu, serverVersion.Load().(string)),
-		TimeZone:      backCtx.GetTimeZone(),
+		TimeZone:      backSes.GetTimeZone(),
 		StorageEngine: gPu.StorageEngine,
-		Buf:           backCtx.buf,
+		Buf:           backSes.buf,
 	}
-	proc.SetStmtProfile(&backCtx.stmtProfile)
-	proc.SetResolveVariableFunc(backCtx.txnCompileCtx.ResolveVariable)
+	proc.SetStmtProfile(&backSes.stmtProfile)
+	proc.SetResolveVariableFunc(backSes.txnCompileCtx.ResolveVariable)
 	//!!!does not init sequence in the background exec
-	if backCtx.tenant != nil {
-		proc.SessionInfo.Account = backCtx.tenant.GetTenant()
-		proc.SessionInfo.AccountId = backCtx.tenant.GetTenantID()
-		proc.SessionInfo.Role = backCtx.tenant.GetDefaultRole()
-		proc.SessionInfo.RoleId = backCtx.tenant.GetDefaultRoleID()
-		proc.SessionInfo.UserId = backCtx.tenant.GetUserID()
+	if backSes.tenant != nil {
+		proc.SessionInfo.Account = backSes.tenant.GetTenant()
+		proc.SessionInfo.AccountId = backSes.tenant.GetTenantID()
+		proc.SessionInfo.Role = backSes.tenant.GetDefaultRole()
+		proc.SessionInfo.RoleId = backSes.tenant.GetDefaultRoleID()
+		proc.SessionInfo.UserId = backSes.tenant.GetUserID()
 
-		if len(backCtx.tenant.GetVersion()) != 0 {
-			proc.SessionInfo.Version = backCtx.tenant.GetVersion()
+		if len(backSes.tenant.GetVersion()) != 0 {
+			proc.SessionInfo.Version = backSes.tenant.GetVersion()
 		}
-		userNameOnly = backCtx.tenant.GetUser()
+		userNameOnly = backSes.tenant.GetUser()
 	} else {
 		var accountId uint32
 		accountId, retErr = defines.GetAccountId(requestCtx)
@@ -183,13 +182,13 @@ func doComQueryInBack(requestCtx context.Context,
 	defer span.End()
 
 	proc.SessionInfo.User = userNameOnly
-	backCtx.txnCompileCtx.SetProcess(proc)
+	backSes.txnCompileCtx.SetProcess(proc)
 
-	cws, err := GetComputationWrapperInBack(backCtx.proto.GetDatabaseName(),
+	cws, err := GetComputationWrapperInBack(backSes.proto.GetDatabaseName(),
 		input,
-		backCtx.proto.GetUserName(),
+		backSes.proto.GetUserName(),
 		gPu.StorageEngine,
-		proc, backCtx)
+		proc, backSes)
 
 	if err != nil {
 		retErr = err
@@ -200,15 +199,15 @@ func doComQueryInBack(requestCtx context.Context,
 	}
 
 	defer func() {
-		backCtx.mrs = nil
+		backSes.mrs = nil
 	}()
 
 	sqlRecord := parsers.HandleSqlForRecord(input.getSql())
 
 	for i, cw := range cws {
-		backCtx.mrs = &MysqlResultSet{}
+		backSes.mrs = &MysqlResultSet{}
 		stmt := cw.GetAst()
-		tenant := backCtx.GetTenantNameWithStmt(stmt)
+		tenant := backSes.GetTenantNameWithStmt(stmt)
 
 		/*
 				if it is in an active or multi-statement transaction, we check the type of the statement.
@@ -223,8 +222,8 @@ func doComQueryInBack(requestCtx context.Context,
 			drop table test1;    <- has active transaction, error
 			                     <- has active transaction
 		*/
-		if backCtx.InActiveTransaction() {
-			err = canExecuteStatementInUncommittedTransaction(requestCtx, backCtx, stmt)
+		if backSes.InActiveTransaction() {
+			err = canExecuteStatementInUncommittedTransaction(requestCtx, backSes, stmt)
 			if err != nil {
 				return err
 			}
@@ -239,7 +238,7 @@ func doComQueryInBack(requestCtx context.Context,
 			cw:         cw,
 			proc:       proc,
 		}
-		err = executeStmtInBackWithTxn(requestCtx, backCtx, execCtx)
+		err = executeStmtInBackWithTxn(requestCtx, backSes, execCtx)
 		if err != nil {
 			return err
 		}
@@ -249,27 +248,27 @@ func doComQueryInBack(requestCtx context.Context,
 }
 
 func executeStmtInBackWithTxn(requestCtx context.Context,
-	backCtx *backExecCtx,
+	backSes *backSession,
 	execCtx *ExecCtx,
 ) (err error) {
 	// defer transaction state management.
 	defer func() {
-		err = finishTxnFuncInBack(requestCtx, backCtx, err, execCtx)
+		err = finishTxnFuncInBack(requestCtx, backSes, err, execCtx)
 	}()
 
 	// statement management
-	_, txnOp, err := backCtx.GetTxnHandler().GetTxnOperator()
+	_, txnOp, err := backSes.GetTxnHandler().GetTxnOperator()
 	if err != nil {
 		return err
 	}
 
 	//non derived statement
-	if txnOp != nil && !backCtx.IsDerivedStmt() {
+	if txnOp != nil && !backSes.IsDerivedStmt() {
 		//startStatement has been called
-		ok, _ := backCtx.GetTxnHandler().calledStartStmt()
+		ok, _ := backSes.GetTxnHandler().calledStartStmt()
 		if !ok {
 			txnOp.GetWorkspace().StartStatement()
-			backCtx.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
+			backSes.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
 		}
 	}
 
@@ -278,26 +277,26 @@ func executeStmtInBackWithTxn(requestCtx context.Context,
 		// move finishTxnFunc() out to another defer so that if finishTxnFunc
 		// paniced, the following is still called.
 		var err3 error
-		_, txnOp, err3 = backCtx.GetTxnHandler().GetTxnOperator()
+		_, txnOp, err3 = backSes.GetTxnHandler().GetTxnOperator()
 		if err3 != nil {
 			//logError(ses, ses.GetDebugString(), err3.Error())
 			return
 		}
 		//non derived statement
-		if txnOp != nil && !backCtx.IsDerivedStmt() {
+		if txnOp != nil && !backSes.IsDerivedStmt() {
 			//startStatement has been called
-			ok, id := backCtx.GetTxnHandler().calledStartStmt()
+			ok, id := backSes.GetTxnHandler().calledStartStmt()
 			if ok && bytes.Equal(txnOp.Txn().ID, id) {
 				txnOp.GetWorkspace().EndStatement()
 			}
 		}
-		backCtx.GetTxnHandler().disableStartStmt()
+		backSes.GetTxnHandler().disableStartStmt()
 	}()
-	return executeStmtInBack(requestCtx, backCtx, execCtx)
+	return executeStmtInBack(requestCtx, backSes, execCtx)
 }
 
 func executeStmtInBack(requestCtx context.Context,
-	backCtx *backExecCtx,
+	backSes *backSession,
 	execCtx *ExecCtx,
 ) (err error) {
 	var cmpBegin time.Time
@@ -305,7 +304,7 @@ func executeStmtInBack(requestCtx context.Context,
 
 	switch execCtx.stmt.HandleType() {
 	case tree.InFrontend:
-		return handleInFrontendInBack(requestCtx, backCtx, execCtx)
+		return handleInFrontendInBack(requestCtx, backSes, execCtx)
 	case tree.InBackend:
 	case tree.Unknown:
 		return moerr.NewInternalError(requestCtx, "backExec needs set handle type for %s", execCtx.sqlOfStmt)
@@ -317,7 +316,7 @@ func executeStmtInBack(requestCtx context.Context,
 		if err != nil {
 			return
 		}
-		if st.SubscriptionOption != nil && backCtx.tenant != nil && !backCtx.tenant.IsAdminRole() {
+		if st.SubscriptionOption != nil && backSes.tenant != nil && !backSes.tenant.IsAdminRole() {
 			err = moerr.NewInternalError(execCtx.proc.Ctx, "only admin can create subscription")
 			return
 		}
@@ -328,14 +327,14 @@ func executeStmtInBack(requestCtx context.Context,
 			return
 		}
 		// if the droped database is the same as the one in use, database must be reseted to empty.
-		if string(st.Name) == backCtx.GetDatabaseName() {
-			backCtx.SetDatabaseName("")
+		if string(st.Name) == backSes.GetDatabaseName() {
+			backSes.SetDatabaseName("")
 		}
 	}
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(requestCtx, backCtx, backCtx.outputCallback); err != nil {
+	if ret, err = execCtx.cw.Compile(requestCtx, backSes, backSes.outputCallback); err != nil {
 		return
 	}
 
@@ -344,7 +343,7 @@ func executeStmtInBack(requestCtx context.Context,
 	execCtx.stmt = execCtx.cw.GetAst()
 	switch execCtx.stmt.HandleType() {
 	case tree.InFrontend:
-		return handleInFrontendInBack(requestCtx, backCtx, execCtx)
+		return handleInFrontendInBack(requestCtx, backSes, execCtx)
 	case tree.InBackend:
 	case tree.Unknown:
 		return moerr.NewInternalError(requestCtx, "backExec needs set handle type for %s", execCtx.sqlOfStmt)
@@ -354,18 +353,18 @@ func executeStmtInBack(requestCtx context.Context,
 
 	// only log if build time is longer than 1s
 	if time.Since(cmpBegin) > time.Second {
-		//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
+		logInfo(backSes, backSes.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
 	resultType := execCtx.stmt.ResultType()
 	switch resultType {
 	case tree.ResultRow:
-		err = executeResultRowStmtInBack(requestCtx, backCtx, execCtx)
+		err = executeResultRowStmtInBack(requestCtx, backSes, execCtx)
 		if err != nil {
 			return err
 		}
 	case tree.Status:
-		err = executeStatusStmtInBack(requestCtx, backCtx, execCtx)
+		err = executeStatusStmtInBack(requestCtx, backSes, execCtx)
 		if err != nil {
 			return err
 		}
@@ -385,7 +384,7 @@ func executeStmtInBack(requestCtx context.Context,
 	return
 }
 
-var GetComputationWrapperInBack = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses TempInter) ([]ComputationWrapper, error) {
+var GetComputationWrapperInBack = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses FeSession) ([]ComputationWrapper, error) {
 	var cw []ComputationWrapper = nil
 
 	var stmts []tree.Statement = nil
@@ -420,10 +419,10 @@ var GetComputationWrapperInBack = func(db string, input *UserInput, user string,
 
 var NewBackgroundExec = func(
 	reqCtx context.Context,
-	upstream TempInter,
+	upstream FeSession,
 	mp *mpool.MPool) BackgroundExec {
 	txnHandler := InitTxnHandler(gPu.StorageEngine, nil, nil)
-	backCtx := &backExecCtx{
+	backSes := &backSession{
 		requestCtx:     reqCtx,
 		connectCtx:     upstream.GetConnectContext(),
 		pool:           mp,
@@ -445,22 +444,22 @@ var NewBackgroundExec = func(
 		label:          make(map[string]string),
 		timeZone:       time.Local,
 	}
-	backCtx.GetTxnCompileCtx().SetSession(backCtx)
-	backCtx.GetTxnHandler().SetSession(backCtx)
+	backSes.GetTxnCompileCtx().SetSession(backSes)
+	backSes.GetTxnHandler().SetSession(backSes)
 	//var accountId uint32
 	//var err error
 	//accountId, err = defines.GetAccountId(reqCtx)
 	//if err != nil {
 	//	panic(err)
 	//}
-	//backCtx.tenant = &TenantInfo{
+	//backSes.tenant = &TenantInfo{
 	//	TenantID:      accountId,
 	//	UserID:        defines.GetUserId(reqCtx),
 	//	DefaultRoleID: defines.GetRoleId(reqCtx),
 	//}
 
 	bh := &backExec{
-		backCtx: backCtx,
+		backSes: backSes,
 	}
 
 	return bh
@@ -530,7 +529,7 @@ func fakeDataSetFetcher2(handle interface{}, dataSet *batch.Batch) error {
 		return nil
 	}
 
-	back := handle.(*backExecCtx)
+	back := handle.(*backSession)
 	oq := newFakeOutputQueue(back.mrs)
 	err := fillResultSet(oq, dataSet, back)
 	if err != nil {
@@ -540,7 +539,7 @@ func fakeDataSetFetcher2(handle interface{}, dataSet *batch.Batch) error {
 	return nil
 }
 
-func fillResultSet(oq outputPool, dataSet *batch.Batch, ses TempInter) error {
+func fillResultSet(oq outputPool, dataSet *batch.Batch, ses FeSession) error {
 	n := dataSet.RowCount()
 	for j := 0; j < n; j++ { //row index
 		//needCopyBytes = true. we need to copy the bytes from the batch.Batch
@@ -560,7 +559,7 @@ func batchFetcher2(handle interface{}, dataSet *batch.Batch) error {
 	if handle == nil {
 		return nil
 	}
-	back := handle.(*backExecCtx)
+	back := handle.(*backSession)
 	back.SaveResultSet()
 	if dataSet == nil {
 		return nil
@@ -596,7 +595,7 @@ func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) 
 	return rsset, nil
 }
 
-type backExecCtx struct {
+type backSession struct {
 	requestCtx    context.Context
 	connectCtx    context.Context
 	pool          *mpool.MPool
@@ -637,216 +636,240 @@ type backExecCtx struct {
 	sqlCount uint64
 }
 
-func (backCtx *backExecCtx) getNextProcessId() string {
+func (backSes *backSession) GetUUID() []byte {
+	return []byte{}
+}
+
+func (backSes *backSession) GetTxnInfo() string {
+	txnH := backSes.GetTxnHandler()
+	if txnH == nil {
+		return ""
+	}
+	_, txnOp, err := txnH.GetTxnOperator()
+	if err != nil {
+		return ""
+	}
+	if txnOp == nil {
+		return ""
+	}
+	meta := txnOp.Txn()
+	return meta.DebugString()
+}
+
+func (backSes *backSession) GetStmtInfo() *motrace.StatementInfo {
+	return nil
+}
+
+func (backSes *backSession) getNextProcessId() string {
 	/*
 		temporary method:
 		routineId + sqlCount
 	*/
-	routineId := backCtx.GetMysqlProtocol().ConnectionID()
-	return fmt.Sprintf("%d%d", routineId, backCtx.GetSqlCount())
+	routineId := backSes.GetMysqlProtocol().ConnectionID()
+	return fmt.Sprintf("%d%d", routineId, backSes.GetSqlCount())
 }
 
-func (backCtx *backExecCtx) GetSqlCount() uint64 {
-	return backCtx.sqlCount
+func (backSes *backSession) GetSqlCount() uint64 {
+	return backSes.sqlCount
 }
 
-func (backCtx *backExecCtx) addSqlCount(a uint64) {
-	backCtx.sqlCount += a
+func (backSes *backSession) addSqlCount(a uint64) {
+	backSes.sqlCount += a
 }
 
-func (backCtx *backExecCtx) cleanCache() {
+func (backSes *backSession) cleanCache() {
 }
 
-func (backCtx *backExecCtx) GetUpstream() TempInter {
-	return backCtx.upstream
+func (backSes *backSession) GetUpstream() FeSession {
+	return backSes.upstream
 }
 
-func (backCtx *backExecCtx) EnableInitTempEngine() {
+func (backSes *backSession) EnableInitTempEngine() {
 
 }
 
-func (backCtx *backExecCtx) SetTempEngine(ctx context.Context, te engine.Engine) error {
+func (backSes *backSession) SetTempEngine(ctx context.Context, te engine.Engine) error {
 	return nil
 }
 
-func (backCtx *backExecCtx) SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error) {
+func (backSes *backSession) SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error) {
 	return nil, nil
 }
 
-func (backCtx *backExecCtx) getCNLabels() map[string]string {
-	return backCtx.label
+func (backSes *backSession) getCNLabels() map[string]string {
+	return backSes.label
 }
 
-func (backCtx *backExecCtx) SetData(i [][]interface{}) {
+func (backSes *backSession) SetData(i [][]interface{}) {
 
 }
 
-func (backCtx *backExecCtx) GetIsInternal() bool {
+func (backSes *backSession) GetIsInternal() bool {
 	return false
 }
 
-func (backCtx *backExecCtx) SetPlan(plan *plan.Plan) {
+func (backSes *backSession) SetPlan(plan *plan.Plan) {
 }
 
-func (backCtx *backExecCtx) SetAccountId(u uint32) {
-	backCtx.accountId = u
+func (backSes *backSession) SetAccountId(u uint32) {
+	backSes.accountId = u
 }
 
-func (backCtx *backExecCtx) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
+func (backSes *backSession) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (backCtx *backExecCtx) SetRequestContext(ctx context.Context) {
-	backCtx.requestCtx = ctx
+func (backSes *backSession) SetRequestContext(ctx context.Context) {
+	backSes.requestCtx = ctx
 }
 
-func (backCtx *backExecCtx) GetConnectionID() uint32 {
+func (backSes *backSession) GetConnectionID() uint32 {
 	return 0
 }
 
-func (backCtx *backExecCtx) SetMysqlResultSet(mrs *MysqlResultSet) {
-	backCtx.mrs = mrs
+func (backSes *backSession) SetMysqlResultSet(mrs *MysqlResultSet) {
+	backSes.mrs = mrs
 }
 
-func (backCtx *backExecCtx) getQueryId(internal bool) []string {
+func (backSes *backSession) getQueryId(internal bool) []string {
 	return nil
 }
 
-func (backCtx *backExecCtx) CopySeqToProc(proc *process.Process) {
+func (backSes *backSession) CopySeqToProc(proc *process.Process) {
 
 }
 
-func (backCtx *backExecCtx) GetStmtProfile() *process.StmtProfile {
-	return &backCtx.stmtProfile
+func (backSes *backSession) GetStmtProfile() *process.StmtProfile {
+	return &backSes.stmtProfile
 }
 
-func (backCtx *backExecCtx) GetBuffer() *buffer.Buffer {
-	return backCtx.buf
+func (backSes *backSession) GetBuffer() *buffer.Buffer {
+	return backSes.buf
 }
 
-func (backCtx *backExecCtx) GetSqlHelper() *SqlHelper {
+func (backSes *backSession) GetSqlHelper() *SqlHelper {
 	return nil
 }
 
-func (backCtx *backExecCtx) GetProc() *process.Process {
+func (backSes *backSession) GetProc() *process.Process {
 	return nil
 }
 
-func (backCtx *backExecCtx) GetLastInsertID() uint64 {
+func (backSes *backSession) GetLastInsertID() uint64 {
 	return 0
 }
 
-func (backCtx *backExecCtx) GetMemPool() *mpool.MPool {
-	return backCtx.pool
+func (backSes *backSession) GetMemPool() *mpool.MPool {
+	return backSes.pool
 }
 
-func (backCtx *backExecCtx) SetSql(sql string) {
-	backCtx.sql = sql
+func (backSes *backSession) SetSql(sql string) {
+	backSes.sql = sql
 }
 
-func (backCtx *backExecCtx) SetShowStmtType(statement ShowStatementType) {
+func (backSes *backSession) SetShowStmtType(statement ShowStatementType) {
 }
 
-func (backCtx *backExecCtx) RemovePrepareStmt(name string) {
-
-}
-
-func (backCtx *backExecCtx) CountPayload(i int) {
+func (backSes *backSession) RemovePrepareStmt(name string) {
 
 }
 
-func (backCtx *backExecCtx) GetPrepareStmt(name string) (*PrepareStmt, error) {
-	return nil, moerr.NewInternalError(backCtx.requestCtx, "do not support prepare in background exec")
+func (backSes *backSession) CountPayload(i int) {
+
 }
 
-func (backCtx *backExecCtx) IsBackgroundSession() bool {
+func (backSes *backSession) GetPrepareStmt(name string) (*PrepareStmt, error) {
+	return nil, moerr.NewInternalError(backSes.requestCtx, "do not support prepare in background exec")
+}
+
+func (backSes *backSession) IsBackgroundSession() bool {
 	return true
 }
 
-func (backCtx *backExecCtx) GetTxnCompileCtx() *TxnCompilerContext {
-	return backCtx.txnCompileCtx
+func (backSes *backSession) GetTxnCompileCtx() *TxnCompilerContext {
+	return backSes.txnCompileCtx
 }
 
-func (backCtx *backExecCtx) GetCmd() CommandType {
+func (backSes *backSession) GetCmd() CommandType {
 	return COM_QUERY
 }
 
-func (backCtx *backExecCtx) GetServerStatus() uint16 {
-	return backCtx.serverStatus
+func (backSes *backSession) GetServerStatus() uint16 {
+	return backSes.serverStatus
 }
 
-func (backCtx *backExecCtx) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response {
+func (backSes *backSession) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response {
 	return nil
 }
 
-func (backCtx *backExecCtx) GetMysqlResultSet() *MysqlResultSet {
-	return backCtx.mrs
+func (backSes *backSession) GetMysqlResultSet() *MysqlResultSet {
+	return backSes.mrs
 }
 
-func (backCtx *backExecCtx) GetTxnHandler() *TxnHandler {
-	return backCtx.txnHandler
+func (backSes *backSession) GetTxnHandler() *TxnHandler {
+	return backSes.txnHandler
 }
 
-func (backCtx *backExecCtx) GetMysqlProtocol() MysqlProtocol {
-	return backCtx.proto
+func (backSes *backSession) GetMysqlProtocol() MysqlProtocol {
+	return backSes.proto
 }
 
-func (backCtx *backExecCtx) TxnCreate() (context.Context, TxnOperator, error) {
+func (backSes *backSession) TxnCreate() (context.Context, TxnOperator, error) {
 	// SERVER_STATUS_IN_TRANS should be set to true regardless of whether autocommit is equal to 1.
-	backCtx.SetServerStatus(SERVER_STATUS_IN_TRANS)
+	backSes.SetServerStatus(SERVER_STATUS_IN_TRANS)
 
-	if !backCtx.txnHandler.IsValidTxnOperator() {
-		return backCtx.txnHandler.NewTxn()
+	if !backSes.txnHandler.IsValidTxnOperator() {
+		return backSes.txnHandler.NewTxn()
 	}
-	txnCtx, txnOp, err := backCtx.txnHandler.GetTxnOperator()
+	txnCtx, txnOp, err := backSes.txnHandler.GetTxnOperator()
 	return txnCtx, txnOp, err
 }
 
-func (backCtx *backExecCtx) updateLastCommitTS(lastCommitTS timestamp.Timestamp) {
-	if lastCommitTS.Greater(backCtx.lastCommitTS) {
-		backCtx.lastCommitTS = lastCommitTS
+func (backSes *backSession) updateLastCommitTS(lastCommitTS timestamp.Timestamp) {
+	if lastCommitTS.Greater(backSes.lastCommitTS) {
+		backSes.lastCommitTS = lastCommitTS
 	}
-	if backCtx.upstream != nil {
-		backCtx.upstream.updateLastCommitTS(lastCommitTS)
+	if backSes.upstream != nil {
+		backSes.upstream.updateLastCommitTS(lastCommitTS)
 	}
 }
 
-func (backCtx *backExecCtx) GetSqlOfStmt() string {
+func (backSes *backSession) GetSqlOfStmt() string {
 	return ""
 }
 
-func (backCtx *backExecCtx) GetStmtId() uuid.UUID {
+func (backSes *backSession) GetStmtId() uuid.UUID {
 	return [16]byte{}
 }
 
-func (backCtx *backExecCtx) GetTxnId() uuid.UUID {
-	return backCtx.stmtProfile.GetTxnId()
+func (backSes *backSession) GetTxnId() uuid.UUID {
+	return backSes.stmtProfile.GetTxnId()
 }
 
-func (backCtx *backExecCtx) SetTxnId(id []byte) {
-	backCtx.stmtProfile.SetTxnId(id)
+func (backSes *backSession) SetTxnId(id []byte) {
+	backSes.stmtProfile.SetTxnId(id)
 }
 
 // GetTenantName return tenant name according to GetTenantInfo and stmt.
 //
 // With stmt = nil, should be only called in TxnHandler.NewTxn, TxnHandler.CommitTxn, TxnHandler.RollbackTxn
-func (backCtx *backExecCtx) GetTenantNameWithStmt(stmt tree.Statement) string {
+func (backSes *backSession) GetTenantNameWithStmt(stmt tree.Statement) string {
 	tenant := sysAccountName
-	if backCtx.GetTenantInfo() != nil && (stmt == nil || !IsPrepareStatement(stmt)) {
-		tenant = backCtx.GetTenantInfo().GetTenant()
+	if backSes.GetTenantInfo() != nil && (stmt == nil || !IsPrepareStatement(stmt)) {
+		tenant = backSes.GetTenantInfo().GetTenant()
 	}
 	return tenant
 }
 
-func (backCtx *backExecCtx) GetTenantName() string {
-	return backCtx.GetTenantNameWithStmt(nil)
+func (backSes *backSession) GetTenantName() string {
+	return backSes.GetTenantNameWithStmt(nil)
 }
 
-func (backCtx *backExecCtx) getLastCommitTS() timestamp.Timestamp {
-	minTS := backCtx.lastCommitTS
-	if backCtx.upstream != nil {
-		v := backCtx.upstream.getLastCommitTS()
+func (backSes *backSession) getLastCommitTS() timestamp.Timestamp {
+	minTS := backSes.lastCommitTS
+	if backSes.upstream != nil {
+		v := backSes.upstream.getLastCommitTS()
 		if v.Greater(minTS) {
 			minTS = v
 		}
@@ -854,100 +877,100 @@ func (backCtx *backExecCtx) getLastCommitTS() timestamp.Timestamp {
 	return minTS
 }
 
-func (backCtx *backExecCtx) GetFromRealUser() bool {
+func (backSes *backSession) GetFromRealUser() bool {
 	return false
 }
 
-func (backCtx *backExecCtx) GetDebugString() string {
+func (backSes *backSession) GetDebugString() string {
 	return ""
 }
 
-func (backCtx *backExecCtx) GetTempTableStorage() *memorystorage.Storage {
+func (backSes *backSession) GetTempTableStorage() *memorystorage.Storage {
 	return nil
 }
 
-func (backCtx *backExecCtx) IfInitedTempEngine() bool {
+func (backSes *backSession) IfInitedTempEngine() bool {
 	return false
 }
 
-func (backCtx *backExecCtx) GetConnectContext() context.Context {
-	return backCtx.connectCtx
+func (backSes *backSession) GetConnectContext() context.Context {
+	return backSes.connectCtx
 }
 
-func (backCtx *backExecCtx) GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error) {
-	return nil, nil, moerr.NewInternalError(backCtx.requestCtx, "do not support user defined var in background exec")
+func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error) {
+	return nil, nil, moerr.NewInternalError(backSes.requestCtx, "do not support user defined var in background exec")
 }
 
-func (backCtx *backExecCtx) GetSessionVar(name string) (interface{}, error) {
+func (backSes *backSession) GetSessionVar(name string) (interface{}, error) {
 	return nil, nil
 }
 
-func (backCtx *backExecCtx) getGlobalSystemVariableValue(name string) (interface{}, error) {
-	return nil, moerr.NewInternalError(backCtx.requestCtx, "do not support system variable in background exec")
+func (backSes *backSession) getGlobalSystemVariableValue(name string) (interface{}, error) {
+	return nil, moerr.NewInternalError(backSes.requestCtx, "do not support system variable in background exec")
 }
 
-func (backCtx *backExecCtx) GetBackgroundExec(ctx context.Context) BackgroundExec {
+func (backSes *backSession) GetBackgroundExec(ctx context.Context) BackgroundExec {
 	return NewBackgroundExec(
 		ctx,
-		backCtx,
-		backCtx.GetMemPool())
+		backSes,
+		backSes.GetMemPool())
 }
 
-func (backCtx *backExecCtx) GetStorage() engine.Engine {
+func (backSes *backSession) GetStorage() engine.Engine {
 	return gPu.StorageEngine
 }
 
-func (backCtx *backExecCtx) GetTenantInfo() *TenantInfo {
-	return backCtx.tenant
+func (backSes *backSession) GetTenantInfo() *TenantInfo {
+	return backSes.tenant
 }
 
-func (backCtx *backExecCtx) GetAccountId() uint32 {
-	return backCtx.accountId
+func (backSes *backSession) GetAccountId() uint32 {
+	return backSes.accountId
 }
 
-func (backCtx *backExecCtx) GetSql() string {
-	return backCtx.sql
+func (backSes *backSession) GetSql() string {
+	return backSes.sql
 }
 
-func (backCtx *backExecCtx) GetUserName() string {
-	return backCtx.proto.GetUserName()
+func (backSes *backSession) GetUserName() string {
+	return backSes.proto.GetUserName()
 }
 
-func (backCtx *backExecCtx) GetStatsCache() *plan2.StatsCache {
+func (backSes *backSession) GetStatsCache() *plan2.StatsCache {
 	return nil
 }
 
-func (backCtx *backExecCtx) GetRequestContext() context.Context {
-	return backCtx.requestCtx
+func (backSes *backSession) GetRequestContext() context.Context {
+	return backSes.requestCtx
 }
 
-func (backCtx *backExecCtx) GetTimeZone() *time.Location {
-	return backCtx.timeZone
+func (backSes *backSession) GetTimeZone() *time.Location {
+	return backSes.timeZone
 }
 
-func (backCtx *backExecCtx) clear() {
-	backCtx.requestCtx = nil
-	backCtx.connectCtx = nil
-	backCtx.pool = nil
-	backCtx.proto = nil
-	if backCtx.buf != nil {
-		backCtx.buf.Free()
-		backCtx.buf = nil
+func (backSes *backSession) clear() {
+	backSes.requestCtx = nil
+	backSes.connectCtx = nil
+	backSes.pool = nil
+	backSes.proto = nil
+	if backSes.buf != nil {
+		backSes.buf.Free()
+		backSes.buf = nil
 	}
-	backCtx.tenant = nil
-	backCtx.txnHandler = nil
-	backCtx.txnCompileCtx = nil
-	backCtx.mrs = nil
-	backCtx.allResultSet = nil
-	backCtx.resultBatches = nil
-	backCtx.gSysVars = nil
+	backSes.tenant = nil
+	backSes.txnHandler = nil
+	backSes.txnCompileCtx = nil
+	backSes.mrs = nil
+	backSes.allResultSet = nil
+	backSes.resultBatches = nil
+	backSes.gSysVars = nil
 }
 
-func (backCtx *backExecCtx) InActiveTransaction() bool {
-	return backCtx.ServerStatusIsSet(SERVER_STATUS_IN_TRANS)
+func (backSes *backSession) InActiveTransaction() bool {
+	return backSes.ServerStatusIsSet(SERVER_STATUS_IN_TRANS)
 }
 
-func (backCtx *backExecCtx) TxnRollbackSingleStatement(stmt tree.Statement, inputErr error) error {
+func (backSes *backSession) TxnRollbackSingleStatement(stmt tree.Statement, inputErr error) error {
 	var err error
 	var rollbackWholeTxn bool
 	if inputErr != nil {
@@ -961,32 +984,32 @@ func (backCtx *backExecCtx) TxnRollbackSingleStatement(stmt tree.Statement, inpu
 		        the transaction need to be rollback at the end of the statement.
 				(every error will abort the transaction.)
 	*/
-	if !backCtx.InMultiStmtTransactionMode() ||
-		backCtx.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) ||
+	if !backSes.InMultiStmtTransactionMode() ||
+		backSes.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) ||
 		rollbackWholeTxn {
 		//Case1.1: autocommit && not_begin
 		//Case1.2: (not_autocommit || begin) && activeTxn && needToBeCommitted
 		//Case1.3: the error that should rollback the whole txn
-		err = backCtx.rollbackWholeTxn()
+		err = backSes.rollbackWholeTxn()
 	} else {
 		//Case2: not ( autocommit && !begin ) && not ( activeTxn && needToBeCommitted )
 		//<==>  ( not_autocommit || begin ) && not ( activeTxn && needToBeCommitted )
 		//just rollback statement
 		var err3 error
-		txnCtx, txnOp, err3 := backCtx.txnHandler.GetTxnOperator()
+		txnCtx, txnOp, err3 := backSes.txnHandler.GetTxnOperator()
 		if err3 != nil {
 			return err3
 		}
 
 		//non derived statement
-		if txnOp != nil && !backCtx.IsDerivedStmt() {
+		if txnOp != nil && !backSes.IsDerivedStmt() {
 			//incrStatement has been called
-			ok, id := backCtx.txnHandler.calledIncrStmt()
+			ok, id := backSes.txnHandler.calledIncrStmt()
 			if ok && bytes.Equal(txnOp.Txn().ID, id) {
 				err = txnOp.GetWorkspace().RollbackLastStatement(txnCtx)
-				backCtx.txnHandler.disableIncrStmt()
+				backSes.txnHandler.disableIncrStmt()
 				if err != nil {
-					err4 := backCtx.rollbackWholeTxn()
+					err4 := backSes.rollbackWholeTxn()
 					return errors.Join(err, err4)
 				}
 			}
@@ -995,7 +1018,7 @@ func (backCtx *backExecCtx) TxnRollbackSingleStatement(stmt tree.Statement, inpu
 	return err
 }
 
-func (backCtx *backExecCtx) TxnCommitSingleStatement(stmt tree.Statement) error {
+func (backSes *backSession) TxnCommitSingleStatement(stmt tree.Statement) error {
 	var err error
 	/*
 		Commit Rules:
@@ -1005,26 +1028,26 @@ func (backCtx *backExecCtx) TxnCommitSingleStatement(stmt tree.Statement) error 
 			if the statement is the one can be executed in the active transaction,
 				the transaction need to be committed at the end of the statement.
 	*/
-	if !backCtx.InMultiStmtTransactionMode() ||
-		backCtx.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) {
-		err = backCtx.txnHandler.CommitTxn()
-		backCtx.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-		backCtx.ClearOptionBits(OPTION_BEGIN)
+	if !backSes.InMultiStmtTransactionMode() ||
+		backSes.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) {
+		err = backSes.txnHandler.CommitTxn()
+		backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		backSes.ClearOptionBits(OPTION_BEGIN)
 	}
 	return err
 }
 
-func (backCtx *backExecCtx) IsDerivedStmt() bool {
-	return backCtx.derivedStmt
+func (backSes *backSession) IsDerivedStmt() bool {
+	return backSes.derivedStmt
 }
 
-func (backCtx *backExecCtx) TxnBegin() error {
+func (backSes *backSession) TxnBegin() error {
 	var err error
-	if backCtx.InMultiStmtTransactionMode() {
-		backCtx.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-		err = backCtx.txnHandler.CommitTxn()
+	if backSes.InMultiStmtTransactionMode() {
+		backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		err = backSes.txnHandler.CommitTxn()
 	}
-	backCtx.ClearOptionBits(OPTION_BEGIN)
+	backSes.ClearOptionBits(OPTION_BEGIN)
 	if err != nil {
 		/*
 			fix issue 6024.
@@ -1032,116 +1055,116 @@ func (backCtx *backExecCtx) TxnBegin() error {
 			we convert the error into a readable error.
 		*/
 		if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
-			return moerr.NewInternalError(backCtx.requestCtx, writeWriteConflictsErrorInfo())
+			return moerr.NewInternalError(backSes.requestCtx, writeWriteConflictsErrorInfo())
 		}
 		return err
 	}
-	backCtx.SetOptionBits(OPTION_BEGIN)
-	backCtx.SetServerStatus(SERVER_STATUS_IN_TRANS)
-	_, _, err = backCtx.txnHandler.NewTxn()
+	backSes.SetOptionBits(OPTION_BEGIN)
+	backSes.SetServerStatus(SERVER_STATUS_IN_TRANS)
+	_, _, err = backSes.txnHandler.NewTxn()
 	return err
 }
 
-func (backCtx *backExecCtx) TxnCommit() error {
+func (backSes *backSession) TxnCommit() error {
 	var err error
-	backCtx.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
-	err = backCtx.txnHandler.CommitTxn()
-	backCtx.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-	backCtx.ClearOptionBits(OPTION_BEGIN)
+	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
+	err = backSes.txnHandler.CommitTxn()
+	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+	backSes.ClearOptionBits(OPTION_BEGIN)
 	return err
 }
 
-func (backCtx *backExecCtx) TxnRollback() error {
+func (backSes *backSession) TxnRollback() error {
 	var err error
-	backCtx.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
-	err = backCtx.txnHandler.RollbackTxn()
-	backCtx.ClearOptionBits(OPTION_BEGIN)
+	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
+	err = backSes.txnHandler.RollbackTxn()
+	backSes.ClearOptionBits(OPTION_BEGIN)
 	return err
 }
 
-func (backCtx *backExecCtx) GetDatabaseName() string {
-	return backCtx.proto.GetDatabaseName()
+func (backSes *backSession) GetDatabaseName() string {
+	return backSes.proto.GetDatabaseName()
 }
 
-func (backCtx *backExecCtx) SetDatabaseName(s string) {
-	backCtx.proto.SetDatabaseName(s)
-	backCtx.GetTxnCompileCtx().SetDatabase(s)
+func (backSes *backSession) SetDatabaseName(s string) {
+	backSes.proto.SetDatabaseName(s)
+	backSes.GetTxnCompileCtx().SetDatabase(s)
 }
 
-func (backCtx *backExecCtx) ServerStatusIsSet(bit uint16) bool {
-	return backCtx.serverStatus&bit != 0
+func (backSes *backSession) ServerStatusIsSet(bit uint16) bool {
+	return backSes.serverStatus&bit != 0
 }
 
-func (backCtx *backExecCtx) InMultiStmtTransactionMode() bool {
-	return backCtx.OptionBitsIsSet(OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)
+func (backSes *backSession) InMultiStmtTransactionMode() bool {
+	return backSes.OptionBitsIsSet(OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)
 }
 
-func (backCtx *backExecCtx) rollbackWholeTxn() error {
-	err := backCtx.txnHandler.RollbackTxn()
-	backCtx.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-	backCtx.ClearOptionBits(OPTION_BEGIN)
+func (backSes *backSession) rollbackWholeTxn() error {
+	err := backSes.txnHandler.RollbackTxn()
+	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+	backSes.ClearOptionBits(OPTION_BEGIN)
 	return err
 }
 
-func (backCtx *backExecCtx) ClearServerStatus(bit uint16) {
-	backCtx.serverStatus &= ^bit
+func (backSes *backSession) ClearServerStatus(bit uint16) {
+	backSes.serverStatus &= ^bit
 }
 
-func (backCtx *backExecCtx) ClearOptionBits(bit uint32) {
-	backCtx.optionBits &= ^bit
+func (backSes *backSession) ClearOptionBits(bit uint32) {
+	backSes.optionBits &= ^bit
 }
 
-func (backCtx *backExecCtx) SetOptionBits(bit uint32) {
-	backCtx.optionBits |= bit
+func (backSes *backSession) SetOptionBits(bit uint32) {
+	backSes.optionBits |= bit
 }
 
-func (backCtx *backExecCtx) SetServerStatus(bit uint16) {
-	backCtx.serverStatus |= bit
+func (backSes *backSession) SetServerStatus(bit uint16) {
+	backSes.serverStatus |= bit
 }
 
-func (backCtx *backExecCtx) OptionBitsIsSet(bit uint32) bool {
-	return backCtx.optionBits&bit != 0
+func (backSes *backSession) OptionBitsIsSet(bit uint32) bool {
+	return backSes.optionBits&bit != 0
 }
 
-func (backCtx *backExecCtx) isShareTxn() bool {
-	return backCtx.shareTxn
+func (backSes *backSession) isShareTxn() bool {
+	return backSes.shareTxn
 }
 
-func (backCtx *backExecCtx) GetGlobalVar(name string) (interface{}, error) {
-	if def, val, ok := backCtx.gSysVars.GetGlobalSysVar(name); ok {
+func (backSes *backSession) GetGlobalVar(name string) (interface{}, error) {
+	if def, val, ok := backSes.gSysVars.GetGlobalSysVar(name); ok {
 		if def.GetScope() == ScopeSession {
 			//empty
-			return nil, moerr.NewInternalError(backCtx.requestCtx, errorSystemVariableSessionEmpty())
+			return nil, moerr.NewInternalError(backSes.requestCtx, errorSystemVariableSessionEmpty())
 		}
 		return val, nil
 	}
-	return nil, moerr.NewInternalError(backCtx.requestCtx, errorSystemVariableDoesNotExist())
+	return nil, moerr.NewInternalError(backSes.requestCtx, errorSystemVariableDoesNotExist())
 }
 
-func (backCtx *backExecCtx) SetMysqlResultSetOfBackgroundTask(mrs *MysqlResultSet) {
-	if len(backCtx.allResultSet) == 0 {
-		backCtx.allResultSet = append(backCtx.allResultSet, mrs)
+func (backSes *backSession) SetMysqlResultSetOfBackgroundTask(mrs *MysqlResultSet) {
+	if len(backSes.allResultSet) == 0 {
+		backSes.allResultSet = append(backSes.allResultSet, mrs)
 	}
 }
 
-func (backCtx *backExecCtx) SaveResultSet() {
-	if len(backCtx.allResultSet) == 0 && backCtx.mrs != nil {
-		backCtx.allResultSet = []*MysqlResultSet{backCtx.mrs}
+func (backSes *backSession) SaveResultSet() {
+	if len(backSes.allResultSet) == 0 && backSes.mrs != nil {
+		backSes.allResultSet = []*MysqlResultSet{backSes.mrs}
 	}
 }
 
-func (backCtx *backExecCtx) AppendResultBatch(bat *batch.Batch) error {
-	copied, err := bat.Dup(backCtx.pool)
+func (backSes *backSession) AppendResultBatch(bat *batch.Batch) error {
+	copied, err := bat.Dup(backSes.pool)
 	if err != nil {
 		return err
 	}
-	backCtx.resultBatches = append(backCtx.resultBatches, copied)
+	backSes.resultBatches = append(backSes.resultBatches, copied)
 	return nil
 }
 
-func (backCtx *backExecCtx) ReplaceDerivedStmt(b bool) bool {
-	prev := backCtx.derivedStmt
-	backCtx.derivedStmt = b
+func (backSes *backSession) ReplaceDerivedStmt(b bool) bool {
+	prev := backSes.derivedStmt
+	backSes.derivedStmt = b
 	return prev
 }
 

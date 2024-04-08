@@ -26,7 +26,7 @@ import (
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 )
 
-func processLoadLocal(ctx context.Context, ses TempInter, param *tree.ExternParam, writer *io.PipeWriter) (err error) {
+func processLoadLocal(ctx context.Context, ses FeSession, param *tree.ExternParam, writer *io.PipeWriter) (err error) {
 	proto := ses.GetMysqlProtocol()
 	defer func() {
 		err2 := writer.Close()

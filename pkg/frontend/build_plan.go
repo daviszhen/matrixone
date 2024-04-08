@@ -28,7 +28,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
-func buildPlan(requestCtx context.Context, ses TempInter, ctx plan2.CompilerContext, stmt tree.Statement) (*plan2.Plan, error) {
+func buildPlan(requestCtx context.Context, ses FeSession, ctx plan2.CompilerContext, stmt tree.Statement) (*plan2.Plan, error) {
 	start := time.Now()
 	defer func() {
 		v2.TxnStatementBuildPlanDurationHistogram.Observe(time.Since(start).Seconds())

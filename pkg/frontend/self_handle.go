@@ -376,7 +376,7 @@ func handleInFrontend(requestCtx context.Context,
 /*
 handle "SELECT @@xxx.yyyy"
 */
-func handleSelectVariables(ses TempInter, ve *tree.VarExpr, isLastStmt bool) error {
+func handleSelectVariables(ses FeSession, ve *tree.VarExpr, isLastStmt bool) error {
 	var err error = nil
 	mrs := ses.GetMysqlResultSet()
 	proto := ses.GetMysqlProtocol()
@@ -428,7 +428,7 @@ func handleSelectVariables(ses TempInter, ve *tree.VarExpr, isLastStmt bool) err
 /*
 handle cmd CMD_FIELD_LIST
 */
-func handleCmdFieldList(requestCtx context.Context, ses TempInter, icfl *InternalCmdFieldList) error {
+func handleCmdFieldList(requestCtx context.Context, ses FeSession, icfl *InternalCmdFieldList) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 
@@ -528,7 +528,7 @@ func doCmdFieldList(requestCtx context.Context, ses *Session, icfl *InternalCmdF
 }
 
 // handleDeallocate
-func handleDeallocate(ctx context.Context, ses TempInter, st *tree.Deallocate) error {
+func handleDeallocate(ctx context.Context, ses FeSession, st *tree.Deallocate) error {
 	return doDeallocate(ctx, ses.(*Session), st)
 }
 
@@ -542,7 +542,7 @@ func doDeallocate(ctx context.Context, ses *Session, st *tree.Deallocate) error 
 }
 
 // handleReset
-func handleReset(ctx context.Context, ses TempInter, st *tree.Reset) error {
+func handleReset(ctx context.Context, ses FeSession, st *tree.Reset) error {
 	return doReset(ctx, ses.(*Session), st)
 }
 
@@ -550,7 +550,7 @@ func doReset(ctx context.Context, ses *Session, st *tree.Reset) error {
 	return nil
 }
 
-func handleEmptyStmt(ctx context.Context, ses TempInter, stmt *tree.EmptyStmt) error {
+func handleEmptyStmt(ctx context.Context, ses FeSession, stmt *tree.EmptyStmt) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 

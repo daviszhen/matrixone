@@ -127,7 +127,7 @@ If it is Case4, Then
 
 	Create/Drop database commits current txn. a new txn for the next statement if needed.
 */
-func statementCanBeExecutedInUncommittedTransaction(ses TempInter, stmt tree.Statement) (bool, error) {
+func statementCanBeExecutedInUncommittedTransaction(ses FeSession, stmt tree.Statement) (bool, error) {
 	switch st := stmt.(type) {
 	//ddl statement
 	case *tree.CreateTable, *tree.CreateIndex, *tree.CreateView, *tree.AlterView, *tree.AlterTable:

@@ -109,7 +109,7 @@ func authenticateUserCanExecutePrepareOrExecute(requestCtx context.Context, ses 
 }
 
 // canExecuteStatementInUncommittedTxn checks the user can execute the statement in an uncommitted transaction
-func canExecuteStatementInUncommittedTransaction(requestCtx context.Context, ses TempInter, stmt tree.Statement) error {
+func canExecuteStatementInUncommittedTransaction(requestCtx context.Context, ses FeSession, stmt tree.Statement) error {
 	can, err := statementCanBeExecutedInUncommittedTransaction(ses, stmt)
 	if err != nil {
 		return err

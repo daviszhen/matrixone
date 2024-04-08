@@ -21,7 +21,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 )
 
-func doUse(ctx context.Context, ses TempInter, db string) error {
+func doUse(ctx context.Context, ses FeSession, db string) error {
 	if v, ok := ses.(*Session); ok {
 		defer RecordStatementTxnID(ctx, v)
 	}
@@ -54,6 +54,6 @@ func doUse(ctx context.Context, ses TempInter, db string) error {
 	return nil
 }
 
-func handleChangeDB(requestCtx context.Context, ses TempInter, db string) error {
+func handleChangeDB(requestCtx context.Context, ses FeSession, db string) error {
 	return doUse(requestCtx, ses, db)
 }

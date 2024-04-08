@@ -26,7 +26,7 @@ import (
 )
 
 // handleCreateRole creates the new role
-func handleCreateRole(ctx context.Context, ses TempInter, cr *tree.CreateRole) error {
+func handleCreateRole(ctx context.Context, ses FeSession, cr *tree.CreateRole) error {
 	tenant := ses.GetTenantInfo()
 
 	//step1 : create the role
@@ -34,32 +34,32 @@ func handleCreateRole(ctx context.Context, ses TempInter, cr *tree.CreateRole) e
 }
 
 // handleDropRole drops the role
-func handleDropRole(ctx context.Context, ses TempInter, dr *tree.DropRole) error {
+func handleDropRole(ctx context.Context, ses FeSession, dr *tree.DropRole) error {
 	return doDropRole(ctx, ses.(*Session), dr)
 }
 
 // handleGrantRole grants the role
-func handleGrantRole(ctx context.Context, ses TempInter, gr *tree.GrantRole) error {
+func handleGrantRole(ctx context.Context, ses FeSession, gr *tree.GrantRole) error {
 	return doGrantRole(ctx, ses.(*Session), gr)
 }
 
 // handleRevokeRole revokes the role
-func handleRevokeRole(ctx context.Context, ses TempInter, rr *tree.RevokeRole) error {
+func handleRevokeRole(ctx context.Context, ses FeSession, rr *tree.RevokeRole) error {
 	return doRevokeRole(ctx, ses.(*Session), rr)
 }
 
 // handleGrantRole grants the privilege to the role
-func handleGrantPrivilege(ctx context.Context, ses TempInter, gp *tree.GrantPrivilege) error {
+func handleGrantPrivilege(ctx context.Context, ses FeSession, gp *tree.GrantPrivilege) error {
 	return doGrantPrivilege(ctx, ses, gp)
 }
 
 // handleRevokePrivilege revokes the privilege from the user or role
-func handleRevokePrivilege(ctx context.Context, ses TempInter, rp *tree.RevokePrivilege) error {
+func handleRevokePrivilege(ctx context.Context, ses FeSession, rp *tree.RevokePrivilege) error {
 	return doRevokePrivilege(ctx, ses, rp)
 }
 
 // handleSwitchRole switches the role to another role
-func handleSwitchRole(ctx context.Context, ses TempInter, sr *tree.SetRole) error {
+func handleSwitchRole(ctx context.Context, ses FeSession, sr *tree.SetRole) error {
 	return doSwitchRole(ctx, ses.(*Session), sr)
 }
 
@@ -486,7 +486,7 @@ func doDropRole(ctx context.Context, ses *Session, dr *tree.DropRole) (err error
 }
 
 // doRevokePrivilege accomplishes the RevokePrivilege statement
-func doRevokePrivilege(ctx context.Context, ses TempInter, rp *tree.RevokePrivilege) (err error) {
+func doRevokePrivilege(ctx context.Context, ses FeSession, rp *tree.RevokePrivilege) (err error) {
 	var vr *verifiedRole
 	var objType objectType
 	var privLevel privilegeLevelType

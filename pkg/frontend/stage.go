@@ -26,15 +26,15 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
-func handleCreateStage(ctx context.Context, ses TempInter, cs *tree.CreateStage) error {
+func handleCreateStage(ctx context.Context, ses FeSession, cs *tree.CreateStage) error {
 	return doCreateStage(ctx, ses.(*Session), cs)
 }
 
-func handleAlterStage(ctx context.Context, ses TempInter, as *tree.AlterStage) error {
+func handleAlterStage(ctx context.Context, ses FeSession, as *tree.AlterStage) error {
 	return doAlterStage(ctx, ses.(*Session), as)
 }
 
-func handleDropStage(ctx context.Context, ses TempInter, ds *tree.DropStage) error {
+func handleDropStage(ctx context.Context, ses FeSession, ds *tree.DropStage) error {
 	return doDropStage(ctx, ses.(*Session), ds)
 }
 

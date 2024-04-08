@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"context"
+
 	"github.com/matrixorigin/matrixone/pkg/backup"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
@@ -26,7 +27,7 @@ func handleStartBackup(ctx context.Context, ses *Session, sb *tree.BackupStart) 
 	return doBackup(ctx, ses, sb)
 }
 
-func doBackup(ctx context.Context, ses TempInter, bs *tree.BackupStart) error {
+func doBackup(ctx context.Context, ses FeSession, bs *tree.BackupStart) error {
 	var (
 		err error
 	)

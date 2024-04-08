@@ -431,7 +431,7 @@ type resultFileInfo struct {
 	blockIndex int64
 }
 
-func handleDump(requestCtx context.Context, ses TempInter, dump *tree.MoDump) error {
+func handleDump(requestCtx context.Context, ses FeSession, dump *tree.MoDump) error {
 	return doDumpQueryResult(requestCtx, ses.(*Session), dump.ExportParams)
 }
 

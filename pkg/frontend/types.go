@@ -17,10 +17,16 @@ package frontend
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/fagongzi/goetty/v2/buf"
+	"github.com/google/uuid"
+	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/config"
+	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
+	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
+	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 
@@ -32,7 +38,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan"
+	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
+	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	"github.com/matrixorigin/matrixone/pkg/util"
 	util2 "github.com/matrixorigin/matrixone/pkg/util"
 )
@@ -312,6 +321,87 @@ func (s *SessionAllocator) Alloc(capacity int) []byte {
 
 func (s SessionAllocator) Free(bs []byte) {
 	s.mp.Free(bs)
+}
+
+var _ FeSession = &Session{}
+var _ FeSession = &backSession{}
+
+type FeSession interface {
+	GetRequestContext() context.Context
+	GetTimeZone() *time.Location
+	GetStatsCache() *plan2.StatsCache
+	GetUserName() string
+	GetSql() string
+	GetAccountId() uint32
+	GetTenantInfo() *TenantInfo
+	GetStorage() engine.Engine
+	GetBackgroundExec(ctx context.Context) BackgroundExec
+	GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec
+	getGlobalSystemVariableValue(name string) (interface{}, error)
+	GetSessionVar(name string) (interface{}, error)
+	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
+	GetConnectContext() context.Context
+	IfInitedTempEngine() bool
+	GetTempTableStorage() *memorystorage.Storage
+	GetDebugString() string
+	GetFromRealUser() bool
+	getLastCommitTS() timestamp.Timestamp
+	GetTenantName() string
+	SetTxnId(i []byte)
+	GetTxnId() uuid.UUID
+	GetStmtId() uuid.UUID
+	GetSqlOfStmt() string
+	updateLastCommitTS(ts timestamp.Timestamp)
+	TxnCreate() (context.Context, TxnOperator, error)
+	GetMysqlProtocol() MysqlProtocol
+	GetTxnHandler() *TxnHandler
+	GetDatabaseName() string
+	SetDatabaseName(db string)
+	GetMysqlResultSet() *MysqlResultSet
+	GetGlobalVar(name string) (interface{}, error)
+	SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response
+	GetServerStatus() uint16
+	GetTxnCompileCtx() *TxnCompilerContext
+	GetCmd() CommandType
+	IsBackgroundSession() bool
+	OptionBitsIsSet(begin uint32) bool
+	GetPrepareStmt(name string) (*PrepareStmt, error)
+	CountPayload(i int)
+	RemovePrepareStmt(name string)
+	SetShowStmtType(statement ShowStatementType)
+	SetSql(sql string)
+	GetMemPool() *mpool.MPool
+	GetProc() *process.Process
+	GetLastInsertID() uint64
+	GetSqlHelper() *SqlHelper
+	GetBuffer() *buffer.Buffer
+	GetStmtProfile() *process.StmtProfile
+	CopySeqToProc(proc *process.Process)
+	getQueryId(internal bool) []string
+	SetMysqlResultSet(mrs *MysqlResultSet)
+	GetConnectionID() uint32
+	SetRequestContext(ctx context.Context)
+	IsDerivedStmt() bool
+	SetAccountId(uint32)
+	SetPlan(plan *plan.Plan)
+	SetData([][]interface{})
+	GetIsInternal() bool
+	getCNLabels() map[string]string
+	SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error)
+	SetTempEngine(ctx context.Context, te engine.Engine) error
+	EnableInitTempEngine()
+	GetUpstream() FeSession
+	TxnCommitSingleStatement(stmt tree.Statement) error
+	InMultiStmtTransactionMode() bool
+	InActiveTransaction() bool
+	TxnRollbackSingleStatement(stmt tree.Statement, err error) error
+	cleanCache()
+	getNextProcessId() string
+	GetSqlCount() uint64
+	addSqlCount(a uint64)
+	GetStmtInfo() *motrace.StatementInfo
+	GetTxnInfo() string
+	GetUUID() []byte
 }
 
 type ExecCtx struct {

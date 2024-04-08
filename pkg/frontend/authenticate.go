@@ -2786,7 +2786,7 @@ func convertAstObjectTypeToObjectType(ctx context.Context, ot tree.ObjectType) (
 
 // checkPrivilegeObjectTypeAndPrivilegeLevel checks the relationship among the privilege type, the object type and the privilege level.
 // it returns the converted object type, the privilege level and the object id.
-func checkPrivilegeObjectTypeAndPrivilegeLevel(ctx context.Context, ses TempInter, bh BackgroundExec,
+func checkPrivilegeObjectTypeAndPrivilegeLevel(ctx context.Context, ses FeSession, bh BackgroundExec,
 	ot tree.ObjectType, pl tree.PrivilegeLevel) (privilegeLevelType, int64, error) {
 	var privLevel privilegeLevelType
 	var objId int64
@@ -2896,7 +2896,7 @@ func matchPrivilegeTypeWithObjectType(ctx context.Context, privType PrivilegeTyp
 }
 
 // doGrantPrivilege accomplishes the GrantPrivilege statement
-func doGrantPrivilege(ctx context.Context, ses TempInter, gp *tree.GrantPrivilege) (err error) {
+func doGrantPrivilege(ctx context.Context, ses FeSession, gp *tree.GrantPrivilege) (err error) {
 	var erArray []ExecResult
 	var roleId int64
 	var privType PrivilegeType

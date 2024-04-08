@@ -252,7 +252,7 @@ var connectorCols = []Column{
 	},
 }
 
-func showConnectors(ses TempInter) error {
+func showConnectors(ses FeSession) error {
 	ts := gPu.TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ses.GetRequestContext(),

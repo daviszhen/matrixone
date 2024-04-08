@@ -19,8 +19,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"go.uber.org/zap"
@@ -43,7 +44,7 @@ var (
 
 type TxnHandler struct {
 	storage     engine.Engine
-	ses         TempInter
+	ses         FeSession
 	txnOperator TxnOperator
 
 	// it is for the transaction and different from the requestCtx.
@@ -296,13 +297,13 @@ func (th *TxnHandler) GetTxnOperator() (context.Context, TxnOperator, error) {
 	return ctx, th.txnOperator, nil
 }
 
-func (th *TxnHandler) SetSession(ses TempInter) {
+func (th *TxnHandler) SetSession(ses FeSession) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	th.ses = ses
 }
 
-func (th *TxnHandler) GetSession() TempInter {
+func (th *TxnHandler) GetSession() FeSession {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.ses
@@ -800,7 +801,7 @@ func (ses *Session) setAutocommitOn() {
 }
 
 // get errors during the transaction. rollback the transaction
-func rollbackTxnFunc(reqCtx context.Context, ses TempInter, execErr error, execCtx *ExecCtx) error {
+func rollbackTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx *ExecCtx) error {
 	incStatementCounter(execCtx.tenant, execCtx.stmt)
 	incStatementErrorsCounter(execCtx.tenant, execCtx.stmt)
 	/*
@@ -828,7 +829,7 @@ func rollbackTxnFunc(reqCtx context.Context, ses TempInter, execErr error, execC
 
 // execution succeeds during the transaction. commit the transaction
 func commitTxnFunc(requestCtx context.Context,
-	ses TempInter,
+	ses FeSession,
 	execCtx *ExecCtx) (retErr error) {
 	// Call a defer function -- if TxnCommitSingleStatement paniced, we
 	// want to catch it and convert it to an error.
@@ -866,7 +867,7 @@ func finishTxnFunc(reqCtx context.Context, ses *Session, execErr error, execCtx 
 	return rollbackTxnFunc(reqCtx, ses, execErr, execCtx)
 }
 
-func finishTxnFuncInBack(reqCtx context.Context, ses TempInter, execErr error, execCtx *ExecCtx) (err error) {
+func finishTxnFuncInBack(reqCtx context.Context, ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
 	// First recover all panics.   If paniced, we will abort.
 	//if r := recover(); r != nil {
 	//	err = moerr.ConvertPanicError(requestCtx, r)

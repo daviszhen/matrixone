@@ -43,7 +43,7 @@ import (
 type TxnCompilerContext struct {
 	dbName               string
 	txnHandler           *TxnHandler
-	ses                  TempInter
+	ses                  FeSession
 	proc                 *process.Process
 	buildAlterView       bool
 	dbOfView, nameOfView string
@@ -77,13 +77,13 @@ func (tcc *TxnCompilerContext) GetBuildingAlterView() (bool, string, string) {
 	return tcc.buildAlterView, tcc.dbOfView, tcc.nameOfView
 }
 
-func (tcc *TxnCompilerContext) SetSession(ses TempInter) {
+func (tcc *TxnCompilerContext) SetSession(ses FeSession) {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	tcc.ses = ses
 }
 
-func (tcc *TxnCompilerContext) GetSession() TempInter {
+func (tcc *TxnCompilerContext) GetSession() FeSession {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	return tcc.ses

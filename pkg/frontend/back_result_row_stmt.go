@@ -16,24 +16,25 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
+	"go.uber.org/zap"
 )
 
 func executeResultRowStmtInBack(requestCtx context.Context,
-	backCtx *backExecCtx,
+	backSes *backSession,
 	execCtx *ExecCtx) (err error) {
 	var columns []interface{}
-	var mrs *MysqlResultSet
-	mrs = backCtx.GetMysqlResultSet()
+	mrs := backSes.GetMysqlResultSet()
 	// cw.Compile might rewrite sql, here we fetch the latest version
 	columns, err = execCtx.cw.GetColumns()
 	if err != nil {
-		//logError(ses, ses.GetDebugString(),
-		//	"Failed to get columns from computation handler",
-		//	zap.Error(err))
+		logError(backSes, backSes.GetDebugString(),
+			"Failed to get columns from computation handler",
+			zap.Error(err))
 		return
 	}
 	for _, c := range columns {
@@ -41,21 +42,16 @@ func executeResultRowStmtInBack(requestCtx context.Context,
 		mrs.AddColumn(mysqlc)
 	}
 	if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-		backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
+		backSes.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
 	}
 	runBegin := time.Now()
-	/*
-		Step 2: Start pipeline
-		Producing the data row and sending the data row
-	*/
-	// todo: add trace
 	if _, err = execCtx.runner.Run(0); err != nil {
 		return
 	}
 
 	// only log if run time is longer than 1s
 	if time.Since(runBegin) > time.Second {
-		//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+		logInfo(backSes, backSes.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
 	}
 	return
 }

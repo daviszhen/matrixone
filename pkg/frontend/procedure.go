@@ -39,28 +39,28 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func handleCreateFunction(ctx context.Context, ses TempInter, cf *tree.CreateFunction) error {
+func handleCreateFunction(ctx context.Context, ses FeSession, cf *tree.CreateFunction) error {
 	tenant := ses.GetTenantInfo()
 	return InitFunction(ctx, ses.(*Session), tenant, cf)
 }
 
-func handleDropFunction(ctx context.Context, ses TempInter, df *tree.DropFunction, proc *process.Process) error {
+func handleDropFunction(ctx context.Context, ses FeSession, df *tree.DropFunction, proc *process.Process) error {
 	return doDropFunction(ctx, ses.(*Session), df, func(path string) error {
 		return proc.FileService.Delete(ctx, path)
 	})
 }
 
-func handleCreateProcedure(ctx context.Context, ses TempInter, cp *tree.CreateProcedure) error {
+func handleCreateProcedure(ctx context.Context, ses FeSession, cp *tree.CreateProcedure) error {
 	tenant := ses.GetTenantInfo()
 
 	return InitProcedure(ctx, ses.(*Session), tenant, cp)
 }
 
-func handleDropProcedure(ctx context.Context, ses TempInter, dp *tree.DropProcedure) error {
+func handleDropProcedure(ctx context.Context, ses FeSession, dp *tree.DropProcedure) error {
 	return doDropProcedure(ctx, ses.(*Session), dp)
 }
 
-func handleCallProcedure(ctx context.Context, ses TempInter, call *tree.CallStmt, proc *process.Process) error {
+func handleCallProcedure(ctx context.Context, ses FeSession, call *tree.CallStmt, proc *process.Process) error {
 	proto := ses.GetMysqlProtocol()
 	results, err := doInterpretCall(ctx, ses.(*Session), call)
 	if err != nil {

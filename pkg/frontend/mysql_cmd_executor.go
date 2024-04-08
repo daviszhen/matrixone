@@ -507,17 +507,8 @@ func executeStmt(requestCtx context.Context,
 	default:
 	}
 
-	// end of preamble.
-
-	// deferred functions.
-
 	var cmpBegin time.Time
 	var ret interface{}
-
-	// XXX XXX
-	// I hope I can break the following code into several functions, but I can't.
-	// After separating the functions, the system cannot boot, due to mo_account
-	// not exists.  No clue why, the closure/capture must do some magic.
 
 	switch execCtx.stmt.HandleType() {
 	case tree.InFrontend:

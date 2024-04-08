@@ -30,15 +30,15 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
 )
 
-func handleCreatePublication(ctx context.Context, ses TempInter, cp *tree.CreatePublication) error {
+func handleCreatePublication(ctx context.Context, ses FeSession, cp *tree.CreatePublication) error {
 	return doCreatePublication(ctx, ses.(*Session), cp)
 }
 
-func handleAlterPublication(ctx context.Context, ses TempInter, ap *tree.AlterPublication) error {
+func handleAlterPublication(ctx context.Context, ses FeSession, ap *tree.AlterPublication) error {
 	return doAlterPublication(ctx, ses.(*Session), ap)
 }
 
-func handleDropPublication(ctx context.Context, ses TempInter, dp *tree.DropPublication) error {
+func handleDropPublication(ctx context.Context, ses FeSession, dp *tree.DropPublication) error {
 	return doDropPublication(ctx, ses.(*Session), dp)
 }
 
@@ -338,7 +338,7 @@ func createSubscriptionDatabase(ctx context.Context, bh BackgroundExec, newTenan
 	return err
 }
 
-func getSubscriptionMeta(ctx context.Context, dbName string, ses TempInter, txn TxnOperator) (*plan.SubscriptionMeta, error) {
+func getSubscriptionMeta(ctx context.Context, dbName string, ses FeSession, txn TxnOperator) (*plan.SubscriptionMeta, error) {
 	dbMeta, err := gPu.StorageEngine.Database(ctx, dbName, txn)
 	if err != nil {
 		logutil.Errorf("Get Subscription database %s meta error: %s", dbName, err.Error())
@@ -362,7 +362,7 @@ func isSubscriptionValid(accountList string, accName string) bool {
 	return strings.Contains(accountList, accName)
 }
 
-func checkSubscriptionValidCommon(ctx context.Context, ses TempInter, subName, accName, pubName string) (subs *plan.SubscriptionMeta, err error) {
+func checkSubscriptionValidCommon(ctx context.Context, ses FeSession, subName, accName, pubName string) (subs *plan.SubscriptionMeta, err error) {
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 	var (
@@ -502,7 +502,7 @@ func checkSubscriptionValidCommon(ctx context.Context, ses TempInter, subName, a
 	return subs, err
 }
 
-func checkSubscriptionValid(ctx context.Context, ses TempInter, createSql string) (*plan.SubscriptionMeta, error) {
+func checkSubscriptionValid(ctx context.Context, ses FeSession, createSql string) (*plan.SubscriptionMeta, error) {
 	var (
 		err                       error
 		lowerAny                  any
@@ -527,7 +527,7 @@ func checkSubscriptionValid(ctx context.Context, ses TempInter, createSql string
 	return checkSubscriptionValidCommon(ctx, ses, subName, accName, pubName)
 }
 
-func isDbPublishing(ctx context.Context, dbName string, ses TempInter) (ok bool, err error) {
+func isDbPublishing(ctx context.Context, dbName string, ses FeSession) (ok bool, err error) {
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 	var (

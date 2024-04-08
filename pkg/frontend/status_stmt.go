@@ -81,6 +81,8 @@ func executeStatusStmt(requestCtx context.Context, ses *Session, execCtx *ExecCt
 				return
 			}
 
+		} else {
+			return moerr.NewInternalError(requestCtx, "select without it generates the result rows")
 		}
 	default:
 		//change privilege
@@ -240,4 +242,3 @@ func respStatus(requestCtx context.Context,
 	}
 	return
 }
-

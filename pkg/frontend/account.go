@@ -307,7 +307,7 @@ func checkTenantExistsOrNot(ctx context.Context, bh BackgroundExec, userName str
 
 // handleCreateAccount creates a new user-level tenant in the context of the tenant SYS
 // which has been initialized.
-func handleCreateAccount(ctx context.Context, ses TempInter, ca *tree.CreateAccount) error {
+func handleCreateAccount(ctx context.Context, ses FeSession, ca *tree.CreateAccount) error {
 	//step1 : create new account.
 	return InitGeneralTenant(ctx, ses.(*Session), ca)
 }
@@ -699,12 +699,12 @@ func createTablesInInformationSchemaOfGeneralTenant(ctx context.Context, bh Back
 }
 
 // handleDropAccount drops a new user-level tenant
-func handleDropAccount(ctx context.Context, ses TempInter, da *tree.DropAccount) error {
+func handleDropAccount(ctx context.Context, ses FeSession, da *tree.DropAccount) error {
 	return doDropAccount(ctx, ses.(*Session), da)
 }
 
 // handleDropAccount drops a new user-level tenant
-func handleAlterAccount(ctx context.Context, ses TempInter, aa *tree.AlterAccount) error {
+func handleAlterAccount(ctx context.Context, ses FeSession, aa *tree.AlterAccount) error {
 	return doAlterAccount(ctx, ses.(*Session), aa)
 }
 
@@ -967,7 +967,7 @@ func doDropAccount(ctx context.Context, ses *Session, da *tree.DropAccount) (err
 
 	//set backgroundHandler's default schema
 	if handler, ok := bh.(*backExec); ok {
-		handler.backCtx.
+		handler.backSes.
 			txnCompileCtx.dbName = catalog.MO_CATALOG
 	}
 

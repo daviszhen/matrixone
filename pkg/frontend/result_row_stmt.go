@@ -27,7 +27,7 @@ import (
 )
 
 // executeResultRowStmt run the statemet that responses result rows
-func  executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *ExecCtx) (err error) {
+func executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *ExecCtx) (err error) {
 	var columns []interface{}
 
 	mrs := ses.GetMysqlResultSet()

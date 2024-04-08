@@ -26,7 +26,7 @@ import (
 /*
 handle setvar
 */
-func handleSetVar(ctx context.Context, ses TempInter, sv *tree.SetVar, sql string) error {
+func handleSetVar(ctx context.Context, ses FeSession, sv *tree.SetVar, sql string) error {
 	err := doSetVar(ctx, ses.(*Session), sv, sql)
 	if err != nil {
 		return err

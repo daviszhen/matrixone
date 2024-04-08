@@ -140,7 +140,7 @@ func (oq *outputQueue) flush() error {
 // For the background execution, we need to make a copy of the bytes. Because the data
 // has been saved in the session. Later the data will be used but then the batch.Batch has
 // been returned to the pipeline and may be reused and changed by the pipeline.
-func extractRowFromEveryVector(ses TempInter, dataSet *batch.Batch, j int, oq outputPool, needCopyBytes bool) ([]interface{}, error) {
+func extractRowFromEveryVector(ses FeSession, dataSet *batch.Batch, j int, oq outputPool, needCopyBytes bool) ([]interface{}, error) {
 	row, err := oq.getEmptyRow()
 	if err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func extractRowFromEveryVector(ses TempInter, dataSet *batch.Batch, j int, oq ou
 }
 
 // extractRowFromVector gets the rowIndex row from the i vector
-func extractRowFromVector(ses TempInter, vec *vector.Vector, i int, row []interface{}, rowIndex int, needCopyBytes bool) error {
+func extractRowFromVector(ses FeSession, vec *vector.Vector, i int, row []interface{}, rowIndex int, needCopyBytes bool) error {
 	if vec.IsConstNull() || vec.GetNulls().Contains(uint64(rowIndex)) {
 		row[i] = nil
 		return nil

@@ -118,7 +118,7 @@ func doShowErrors(ses *Session) error {
 	return err
 }
 
-func handleShowErrors(ses TempInter, isLastStmt bool) error {
+func handleShowErrors(ses FeSession, isLastStmt bool) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 	err = doShowErrors(ses.(*Session))
@@ -260,7 +260,7 @@ func doShowVariables(ses *Session, proc *process.Process, sv *tree.ShowVariables
 /*
 handle show variables
 */
-func handleShowVariables(ses TempInter, sv *tree.ShowVariables, proc *process.Process, isLastStmt bool) error {
+func handleShowVariables(ses FeSession, sv *tree.ShowVariables, proc *process.Process, isLastStmt bool) error {
 	proto := ses.GetMysqlProtocol()
 	err := doShowVariables(ses.(*Session), proc, sv)
 	if err != nil {
@@ -276,7 +276,7 @@ func handleShowVariables(ses TempInter, sv *tree.ShowVariables, proc *process.Pr
 }
 
 // handleShowAccounts lists the info of accounts
-func handleShowAccounts(ctx context.Context, ses TempInter, sa *tree.ShowAccounts, isLastStmt bool) error {
+func handleShowAccounts(ctx context.Context, ses FeSession, sa *tree.ShowAccounts, isLastStmt bool) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 	err = doShowAccounts(ctx, ses.(*Session), sa)
@@ -293,7 +293,7 @@ func handleShowAccounts(ctx context.Context, ses TempInter, sa *tree.ShowAccount
 }
 
 // handleShowCollation lists the info of collation
-func handleShowCollation(ses TempInter, sc *tree.ShowCollation, proc *process.Process, isLastStmt bool) error {
+func handleShowCollation(ses FeSession, sc *tree.ShowCollation, proc *process.Process, isLastStmt bool) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 	err = doShowCollation(ses.(*Session), proc, sc)
@@ -469,7 +469,7 @@ func doShowCollation(ses *Session, proc *process.Process, sc *tree.ShowCollation
 	return err
 }
 
-func handleShowSubscriptions(ctx context.Context, ses TempInter, ss *tree.ShowSubscriptions, isLastStmt bool) error {
+func handleShowSubscriptions(ctx context.Context, ses FeSession, ss *tree.ShowSubscriptions, isLastStmt bool) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 	err = doShowSubscriptions(ctx, ses.(*Session), ss)
@@ -563,7 +563,7 @@ func doShowBackendServers(ses *Session) error {
 	return nil
 }
 
-func handleShowBackendServers(ctx context.Context, ses TempInter, isLastStmt bool) error {
+func handleShowBackendServers(ctx context.Context, ses FeSession, isLastStmt bool) error {
 	var err error
 	proto := ses.GetMysqlProtocol()
 	if err := doShowBackendServers(ses.(*Session)); err != nil {

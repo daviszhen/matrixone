@@ -25,12 +25,12 @@ import (
 )
 
 // handleAlterDatabaseConfig alter a database's mysql_compatibility_mode
-func handleAlterDataBaseConfig(ctx context.Context, ses TempInter, ad *tree.AlterDataBaseConfig) error {
+func handleAlterDataBaseConfig(ctx context.Context, ses FeSession, ad *tree.AlterDataBaseConfig) error {
 	return doAlterDatabaseConfig(ctx, ses.(*Session), ad)
 }
 
 // handleAlterAccountConfig alter a account's mysql_compatibility_mode
-func handleAlterAccountConfig(ctx context.Context, ses TempInter, st *tree.AlterDataBaseConfig) error {
+func handleAlterAccountConfig(ctx context.Context, ses FeSession, st *tree.AlterDataBaseConfig) error {
 	return doAlterAccountConfig(ctx, ses.(*Session), st)
 }
 

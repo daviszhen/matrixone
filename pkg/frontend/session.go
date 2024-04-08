@@ -103,84 +103,6 @@ const (
 	TSInitGlobalSysVarEnd   TS = "TSInitGlobalSysVarEnd"
 )
 
-var _ TempInter = &Session{}
-var _ TempInter = &backExecCtx{}
-
-type TempInter interface {
-	GetRequestContext() context.Context
-	GetTimeZone() *time.Location
-	GetStatsCache() *plan2.StatsCache
-	GetUserName() string
-	GetSql() string
-	GetAccountId() uint32
-	GetTenantInfo() *TenantInfo
-	GetStorage() engine.Engine
-	GetBackgroundExec(ctx context.Context) BackgroundExec
-	GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec
-	getGlobalSystemVariableValue(name string) (interface{}, error)
-	GetSessionVar(name string) (interface{}, error)
-	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
-	GetConnectContext() context.Context
-	IfInitedTempEngine() bool
-	GetTempTableStorage() *memorystorage.Storage
-	GetDebugString() string
-	GetFromRealUser() bool
-	getLastCommitTS() timestamp.Timestamp
-	GetTenantName() string
-	SetTxnId(i []byte)
-	GetTxnId() uuid.UUID
-	GetStmtId() uuid.UUID
-	GetSqlOfStmt() string
-	updateLastCommitTS(ts timestamp.Timestamp)
-	TxnCreate() (context.Context, TxnOperator, error)
-	GetMysqlProtocol() MysqlProtocol
-	GetTxnHandler() *TxnHandler
-	GetDatabaseName() string
-	SetDatabaseName(db string)
-	GetMysqlResultSet() *MysqlResultSet
-	GetGlobalVar(name string) (interface{}, error)
-	SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response
-	GetServerStatus() uint16
-	GetTxnCompileCtx() *TxnCompilerContext
-	GetCmd() CommandType
-	IsBackgroundSession() bool
-	OptionBitsIsSet(begin uint32) bool
-	GetPrepareStmt(name string) (*PrepareStmt, error)
-	CountPayload(i int)
-	RemovePrepareStmt(name string)
-	SetShowStmtType(statement ShowStatementType)
-	SetSql(sql string)
-	GetMemPool() *mpool.MPool
-	GetProc() *process.Process
-	GetLastInsertID() uint64
-	GetSqlHelper() *SqlHelper
-	GetBuffer() *buffer.Buffer
-	GetStmtProfile() *process.StmtProfile
-	CopySeqToProc(proc *process.Process)
-	getQueryId(internal bool) []string
-	SetMysqlResultSet(mrs *MysqlResultSet)
-	GetConnectionID() uint32
-	SetRequestContext(ctx context.Context)
-	IsDerivedStmt() bool
-	SetAccountId(uint32)
-	SetPlan(plan *plan.Plan)
-	SetData([][]interface{})
-	GetIsInternal() bool
-	getCNLabels() map[string]string
-	SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error)
-	SetTempEngine(ctx context.Context, te engine.Engine) error
-	EnableInitTempEngine()
-	GetUpstream() TempInter
-	TxnCommitSingleStatement(stmt tree.Statement) error
-	InMultiStmtTransactionMode() bool
-	InActiveTransaction() bool
-	TxnRollbackSingleStatement(stmt tree.Statement, err error) error
-	cleanCache()
-	getNextProcessId() string
-	GetSqlCount() uint64
-	addSqlCount(a uint64)
-}
-
 type Session struct {
 	// account id
 	accountId uint32
@@ -374,6 +296,10 @@ type Session struct {
 	sqlCount uint64
 }
 
+func (ses *Session) GetStmtInfo() *motrace.StatementInfo {
+	return ses.tStmt
+}
+
 func (ses *Session) getNextProcessId() string {
 	/*
 		temporary method:
@@ -391,7 +317,7 @@ func (ses *Session) addSqlCount(a uint64) {
 	ses.sqlCount += a
 }
 
-func (ses *Session) GetUpstream() TempInter {
+func (ses *Session) GetUpstream() FeSession {
 	return ses.upstream
 }
 
@@ -1027,7 +953,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		} else {
 			callback = fakeDataSetFetcher2
 		}
-		backCtx := &backExecCtx{
+		backSes := &backSession{
 			requestCtx:     ctx,
 			connectCtx:     ses.connectCtx,
 			pool:           ses.mp,
@@ -1049,24 +975,24 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 			label:          make(map[string]string),
 			timeZone:       time.Local,
 		}
-		backCtx.SetOptionBits(OPTION_AUTOCOMMIT)
-		backCtx.GetTxnCompileCtx().SetSession(backCtx)
-		backCtx.GetTxnHandler().SetSession(backCtx)
+		backSes.SetOptionBits(OPTION_AUTOCOMMIT)
+		backSes.GetTxnCompileCtx().SetSession(backSes)
+		backSes.GetTxnHandler().SetSession(backSes)
 		//var accountId uint32
 		//accountId, err = defines.GetAccountId(ctx)
 		//if err != nil {
 		//	panic(err)
 		//}
-		//backCtx.tenant = &TenantInfo{
+		//backSes.tenant = &TenantInfo{
 		//	TenantID:      accountId,
 		//	UserID:        defines.GetUserId(ctx),
 		//	DefaultRoleID: defines.GetRoleId(ctx),
 		//}
 		bh := &backExec{
-			backCtx: backCtx,
+			backSes: backSes,
 		}
 		//the derived statement execute in a shared transaction in background session
-		bh.backCtx.ReplaceDerivedStmt(true)
+		bh.backSes.ReplaceDerivedStmt(true)
 		return bh
 	}
 
@@ -1086,7 +1012,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
 	txnHandler := InitTxnHandler(gPu.StorageEngine, nil, nil)
-	backCtx := &backExecCtx{
+	backSes := &backSession{
 		requestCtx:     ses.GetRequestContext(),
 		connectCtx:     ses.GetConnectContext(),
 		pool:           ses.GetMemPool(),
@@ -1108,21 +1034,21 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 		label:          make(map[string]string),
 		timeZone:       time.Local,
 	}
-	backCtx.GetTxnCompileCtx().SetSession(backCtx)
-	backCtx.GetTxnHandler().SetSession(backCtx)
+	backSes.GetTxnCompileCtx().SetSession(backSes)
+	backSes.GetTxnHandler().SetSession(backSes)
 	//var accountId uint32
 	//var err error
 	//accountId, err = defines.GetAccountId(ctx)
 	//if err != nil {
 	//	panic(err)
 	//}
-	//backCtx.tenant = &TenantInfo{
+	//backSes.tenant = &TenantInfo{
 	//	TenantID:      accountId,
 	//	UserID:        defines.GetUserId(ctx),
 	//	DefaultRoleID: defines.GetRoleId(ctx),
 	//}
 	bh := &backExec{
-		backCtx: backCtx,
+		backSes: backSes,
 	}
 	return bh
 	//bh := &BackgroundHandler{
