@@ -19,6 +19,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -39,7 +41,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"time"
 )
 
 type backExec struct {
@@ -301,51 +302,16 @@ func executeStmtInBack(requestCtx context.Context,
 ) (err error) {
 	var cmpBegin time.Time
 	var ret interface{}
-	var runner ComputationRunner
-	var selfHandle bool
 
-	// XXX XXX
-	// I hope I can break the following code into several functions, but I can't.
-	// After separating the functions, the system cannot boot, due to mo_account
-	// not exists.  No clue why, the closure/capture must do some magic.
-
-	//check transaction states
-	switch execCtx.stmt.(type) {
-	case *tree.BeginTransaction:
-		err = backCtx.TxnBegin()
-		if err != nil {
-			return
-		}
-	case *tree.CommitTransaction:
-		err = backCtx.TxnCommit()
-		if err != nil {
-			return
-		}
-	case *tree.RollbackTransaction:
-		err = backCtx.TxnRollback()
-		if err != nil {
-			return
-		}
+	switch execCtx.stmt.HandleType() {
+	case tree.InFrontend:
+		return handleInFrontendInBack(requestCtx, backCtx, execCtx)
+	case tree.InBackend:
+	case tree.Unknown:
+		return moerr.NewInternalError(requestCtx, "backExec needs set handle type for %s", execCtx.sqlOfStmt)
 	}
 
-	selfHandle = false
 	switch st := execCtx.stmt.(type) {
-	case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
-		selfHandle = true
-	case *tree.SetRole:
-		selfHandle = true
-		//switch role
-		err = handleSwitchRole(requestCtx, backCtx, st)
-		if err != nil {
-			return
-		}
-	case *tree.Use:
-		selfHandle = true
-		//use database
-		err = handleChangeDB(requestCtx, backCtx, st.Name.Compare())
-		if err != nil {
-			return
-		}
 	case *tree.CreateDatabase:
 		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
 		if err != nil {
@@ -365,122 +331,6 @@ func executeStmtInBack(requestCtx context.Context,
 		if string(st.Name) == backCtx.GetDatabaseName() {
 			backCtx.SetDatabaseName("")
 		}
-	case *tree.SetVar:
-		selfHandle = true
-		err = handleSetVar(requestCtx, backCtx, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		}
-	case *tree.ShowVariables:
-		selfHandle = true
-		err = handleShowVariables(backCtx, st, execCtx.proc, execCtx.isLastStmt)
-		if err != nil {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		selfHandle = true
-		err = handleShowErrors(backCtx, execCtx.isLastStmt)
-		if err != nil {
-			return
-		}
-	case *tree.CreateAccount:
-		selfHandle = true
-		if err = handleCreateAccount(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropAccount:
-		selfHandle = true
-		if err = handleDropAccount(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterAccount:
-		selfHandle = true
-		if err = handleAlterAccount(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateUser:
-		selfHandle = true
-		if err = handleCreateUser(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropUser:
-		selfHandle = true
-		if err = handleDropUser(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.AlterUser: //TODO
-		selfHandle = true
-		if err = handleAlterUser(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.CreateRole:
-		selfHandle = true
-		if err = handleCreateRole(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.DropRole:
-		selfHandle = true
-		if err = handleDropRole(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	case *tree.Grant:
-		selfHandle = true
-		switch st.Typ {
-		case tree.GrantTypeRole:
-			if err = handleGrantRole(requestCtx, backCtx, &st.GrantRole); err != nil {
-				return
-			}
-		case tree.GrantTypePrivilege:
-			if err = handleGrantPrivilege(requestCtx, backCtx, &st.GrantPrivilege); err != nil {
-				return
-			}
-		}
-	case *tree.Revoke:
-		selfHandle = true
-		switch st.Typ {
-		case tree.RevokeTypeRole:
-			if err = handleRevokeRole(requestCtx, backCtx, &st.RevokeRole); err != nil {
-				return
-			}
-		case tree.RevokeTypePrivilege:
-			if err = handleRevokePrivilege(requestCtx, backCtx, &st.RevokePrivilege); err != nil {
-				return
-			}
-		}
-
-	case *tree.ShowAccounts:
-		selfHandle = true
-		if err = handleShowAccounts(requestCtx, backCtx, st, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.ShowCollation:
-		selfHandle = true
-		if err = handleShowCollation(backCtx, st, execCtx.proc, execCtx.isLastStmt); err != nil {
-			return
-		}
-	case *tree.SetTransaction:
-		selfHandle = true
-		//TODO: handle set transaction
-	case *tree.LockTableStmt:
-		selfHandle = true
-	case *tree.UnLockTableStmt:
-		selfHandle = true
-	case *tree.ShowGrants:
-		if len(st.Username) == 0 {
-			st.Username = execCtx.userName
-		}
-		if len(st.Hostname) == 0 || st.Hostname == "%" {
-			st.Hostname = rootHost
-		}
-	case *tree.EmptyStmt:
-		selfHandle = true
-		if err = handleEmptyStmt(requestCtx, backCtx, st); err != nil {
-			return
-		}
-	}
-
-	if selfHandle {
-		return
 	}
 
 	cmpBegin = time.Now()
@@ -488,135 +338,50 @@ func executeStmtInBack(requestCtx context.Context,
 	if ret, err = execCtx.cw.Compile(requestCtx, backCtx, backCtx.outputCallback); err != nil {
 		return
 	}
+
+	// cw.Compile may rewrite the stmt in the EXECUTE statement, we fetch the latest version
+	//need to check again.
 	execCtx.stmt = execCtx.cw.GetAst()
-	// reset some special stmt for execute statement
-	switch st := execCtx.stmt.(type) {
-	case *tree.SetVar:
-		err = handleSetVar(requestCtx, backCtx, st, execCtx.sqlOfStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowVariables:
-		err = handleShowVariables(backCtx, st, execCtx.proc, execCtx.isLastStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
-	case *tree.ShowErrors, *tree.ShowWarnings:
-		err = handleShowErrors(backCtx, execCtx.isLastStmt)
-		if err != nil {
-			return
-		} else {
-			return
-		}
+	switch execCtx.stmt.HandleType() {
+	case tree.InFrontend:
+		return handleInFrontendInBack(requestCtx, backCtx, execCtx)
+	case tree.InBackend:
+	case tree.Unknown:
+		return moerr.NewInternalError(requestCtx, "backExec needs set handle type for %s", execCtx.sqlOfStmt)
 	}
 
-	runner = ret.(ComputationRunner)
+	execCtx.runner = ret.(ComputationRunner)
 
 	// only log if build time is longer than 1s
 	if time.Since(cmpBegin) > time.Second {
 		//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
-	var columns []interface{}
-	var mrs *MysqlResultSet
-	mrs = backCtx.GetMysqlResultSet()
-	// cw.Compile might rewrite sql, here we fetch the latest version
-	switch execCtx.stmt.(type) {
-	//produce result set
-	case *tree.Select:
-		//no select into in the background exec
-		columns, err = execCtx.cw.GetColumns()
+	resultType := execCtx.stmt.ResultType()
+	switch resultType {
+	case tree.ResultRow:
+		err = executeResultRowStmtInBack(requestCtx, backCtx, execCtx)
 		if err != nil {
-			//logError(backCtx, backCtx.GetDebugString(),
-			//	"Failed to get columns from computation handler",
-			//	zap.Error(err))
-			return
+			return err
 		}
-		for _, c := range columns {
-			mysqlc := c.(Column)
-			mrs.AddColumn(mysqlc)
-		}
-		if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-			backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
-		}
-		runBegin := time.Now()
-		/*
-			Step 2: Start pipeline
-			Producing the data row and sending the data row
-		*/
-		// todo: add trace
-		if _, err = runner.Run(0); err != nil {
-			return
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-		}
-
-	case *tree.ShowCreateTable, *tree.ShowCreateDatabase, *tree.ShowTables, *tree.ShowSequences, *tree.ShowDatabases, *tree.ShowColumns,
-		*tree.ShowProcessList, *tree.ShowStatus, *tree.ShowTableStatus, *tree.ShowGrants, *tree.ShowRolesStmt,
-		*tree.ShowIndex, *tree.ShowCreateView, *tree.ShowTarget, *tree.ShowCollation, *tree.ValuesStatement,
-		*tree.ExplainFor, *tree.ExplainStmt, *tree.ShowTableNumber, *tree.ShowColumnNumber, *tree.ShowTableValues, *tree.ShowLocks, *tree.ShowNodeList, *tree.ShowFunctionOrProcedureStatus,
-		*tree.ShowPublications, *tree.ShowCreatePublications, *tree.ShowStages:
-		columns, err = execCtx.cw.GetColumns()
+	case tree.Status:
+		err = executeStatusStmtInBack(requestCtx, backCtx, execCtx)
 		if err != nil {
-			//logError(ses, ses.GetDebugString(),
-			//	"Failed to get columns from computation handler",
-			//	zap.Error(err))
-			return
+			return err
 		}
-		for _, c := range columns {
-			mysqlc := c.(Column)
-			mrs.AddColumn(mysqlc)
+	case tree.NoResp:
+	case tree.RespItself:
+	case tree.Undefined:
+		isExecute := false
+		switch execCtx.stmt.(type) {
+		case *tree.Execute:
+			isExecute = true
 		}
-		if c, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-			backCtx.rs = &plan.ResultColDef{ResultCols: plan2.GetResultColumnsFromPlan(c.plan)}
-		}
-		runBegin := time.Now()
-		/*
-			Step 2: Start pipeline
-			Producing the data row and sending the data row
-		*/
-		// todo: add trace
-		if _, err = runner.Run(0); err != nil {
-			return
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
-		}
-
-		//just status, no result set
-	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase,
-		*tree.CreateIndex, *tree.DropIndex,
-		*tree.CreateView, *tree.DropView, *tree.AlterView, *tree.AlterTable, *tree.AlterSequence,
-		*tree.CreateSequence, *tree.DropSequence,
-		*tree.Insert, *tree.Update, *tree.Replace,
-		*tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction,
-		*tree.SetVar,
-		*tree.Load,
-		*tree.CreateUser, *tree.DropUser, *tree.AlterUser,
-		*tree.CreateRole, *tree.DropRole,
-		*tree.Revoke, *tree.Grant,
-		*tree.SetDefaultRole, *tree.SetRole, *tree.SetPassword, *tree.CreateStream,
-		*tree.Delete, *tree.TruncateTable, *tree.LockTableStmt, *tree.UnLockTableStmt:
-		runBegin := time.Now()
-
-		if _, err = runner.Run(0); err != nil {
-			return
-		}
-
-		// only log if run time is longer than 1s
-		if time.Since(runBegin) > time.Second {
-			//logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
+		if !isExecute {
+			return moerr.NewInternalError(requestCtx, "need set result type for %s", execCtx.sqlOfStmt)
 		}
 	}
+
 	return
 }
 
