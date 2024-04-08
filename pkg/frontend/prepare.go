@@ -162,7 +162,7 @@ func handleExplainStmt(requestCtx context.Context, ses FeSession, stmt *tree.Exp
 
 	//	mysql COM_QUERY response: End after the column has been sent.
 	//	send EOF packet
-	err = protocol.SendEOFPacketIf(0, ses.GetServerStatus())
+	err = protocol.SendEOFPacketIf(0, ses.GetTxnHandler().GetServerStatus())
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func handleExplainStmt(requestCtx context.Context, ses FeSession, stmt *tree.Exp
 		return err
 	}
 
-	err = protocol.sendEOFOrOkPacket(0, ses.GetServerStatus())
+	err = protocol.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
 	if err != nil {
 		return err
 	}

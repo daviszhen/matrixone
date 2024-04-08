@@ -352,7 +352,6 @@ type FeSession interface {
 	GetStmtId() uuid.UUID
 	GetSqlOfStmt() string
 	updateLastCommitTS(ts timestamp.Timestamp)
-	TxnCreate() (context.Context, TxnOperator, error)
 	GetMysqlProtocol() MysqlProtocol
 	GetTxnHandler() *TxnHandler
 	GetDatabaseName() string
@@ -360,11 +359,9 @@ type FeSession interface {
 	GetMysqlResultSet() *MysqlResultSet
 	GetGlobalVar(name string) (interface{}, error)
 	SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response
-	GetServerStatus() uint16
 	GetTxnCompileCtx() *TxnCompilerContext
 	GetCmd() CommandType
 	IsBackgroundSession() bool
-	OptionBitsIsSet(begin uint32) bool
 	GetPrepareStmt(name string) (*PrepareStmt, error)
 	CountPayload(i int)
 	RemovePrepareStmt(name string)
@@ -391,10 +388,6 @@ type FeSession interface {
 	SetTempEngine(ctx context.Context, te engine.Engine) error
 	EnableInitTempEngine()
 	GetUpstream() FeSession
-	TxnCommitSingleStatement(stmt tree.Statement) error
-	InMultiStmtTransactionMode() bool
-	InActiveTransaction() bool
-	TxnRollbackSingleStatement(stmt tree.Statement, err error) error
 	cleanCache()
 	getNextProcessId() string
 	GetSqlCount() uint64

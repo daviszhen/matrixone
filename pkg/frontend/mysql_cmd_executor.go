@@ -71,7 +71,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(gPu.SV.LengthOfQueryPrinted))))
 		err = doComQuery(requestCtx, ses, &UserInput{sql: query})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_QUERY, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 		return resp, nil
 	case COM_INIT_DB:
@@ -80,7 +80,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		query := "use `" + dbname + "`"
 		err = doComQuery(requestCtx, ses, &UserInput{sql: query})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_INIT_DB, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_INIT_DB, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 
 		return resp, nil
@@ -90,12 +90,12 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		query := makeCmdFieldListSql(payload)
 		err = doComQuery(requestCtx, ses, &UserInput{sql: query})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_FIELD_LIST, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_FIELD_LIST, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 
 		return resp, nil
 	case COM_PING:
-		resp = NewGeneralOkResponse(COM_PING, ses.GetServerStatus())
+		resp = NewGeneralOkResponse(COM_PING, ses.GetTxnHandler().GetServerStatus())
 
 		return resp, nil
 
@@ -112,7 +112,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 
 		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_PREPARE, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_PREPARE, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 		return resp, nil
 
@@ -122,11 +122,11 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		var prepareStmt *PrepareStmt
 		sql, prepareStmt, err = parseStmtExecute(requestCtx, ses, data)
 		if err != nil {
-			return NewGeneralErrorResponse(COM_STMT_EXECUTE, ses.GetServerStatus(), err), nil
+			return NewGeneralErrorResponse(COM_STMT_EXECUTE, ses.GetTxnHandler().GetServerStatus(), err), nil
 		}
 		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 		if prepareStmt.params != nil {
 			prepareStmt.params.GetNulls().Reset()
@@ -141,7 +141,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		data := req.GetData().([]byte)
 		err = parseStmtSendLongData(requestCtx, ses, data)
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, ses.GetTxnHandler().GetServerStatus(), err)
 			return resp, nil
 		}
 		return nil, nil
@@ -157,7 +157,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 
 		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_CLOSE, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_CLOSE, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 		return resp, nil
 
@@ -171,7 +171,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
 		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_STMT_RESET, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_STMT_RESET, ses.GetTxnHandler().GetServerStatus(), err)
 		}
 		return resp, nil
 
@@ -179,12 +179,12 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		data := req.GetData().([]byte)
 		err := handleSetOption(requestCtx, ses, data)
 		if err != nil {
-			resp = NewGeneralErrorResponse(COM_SET_OPTION, ses.GetServerStatus(), err)
+			resp = NewGeneralErrorResponse(COM_SET_OPTION, ses.GetTxnHandler().GetServerStatus(), err)
 		}
-		return NewGeneralOkResponse(COM_SET_OPTION, ses.GetServerStatus()), nil
+		return NewGeneralOkResponse(COM_SET_OPTION, ses.GetTxnHandler().GetServerStatus()), nil
 
 	default:
-		resp = NewGeneralErrorResponse(req.GetCmd(), ses.GetServerStatus(), moerr.NewInternalError(requestCtx, "unsupported command. 0x%x", req.GetCmd()))
+		resp = NewGeneralErrorResponse(req.GetCmd(), ses.GetTxnHandler().GetServerStatus(), moerr.NewInternalError(requestCtx, "unsupported command. 0x%x", req.GetCmd()))
 	}
 	return resp, nil
 }
@@ -361,7 +361,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			drop table test1;    <- has active transaction, error
 			                     <- has active transaction
 		*/
-		if ses.InActiveTransaction() {
+		if ses.GetTxnHandler().InActiveTransaction() {
 			err = canExecuteStatementInUncommittedTransaction(requestCtx, ses, stmt)
 			if err != nil {
 				logStatementStatus(requestCtx, ses, stmt, fail, err)

@@ -29,7 +29,7 @@ func handleKill(ctx context.Context, ses *Session, k *tree.Kill) error {
 	if err != nil {
 		return err
 	}
-	resp := NewGeneralOkResponse(COM_QUERY, ses.GetServerStatus())
+	resp := NewGeneralOkResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus())
 	if err = proto.SendResponse(ctx, resp); err != nil {
 		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}

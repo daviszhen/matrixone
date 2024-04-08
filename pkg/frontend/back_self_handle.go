@@ -27,17 +27,17 @@ func handleInFrontendInBack(requestCtx context.Context,
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
 	case *tree.BeginTransaction:
-		err = backSes.TxnBegin()
+		err = backSes.GetTxnHandler().TxnBegin()
 		if err != nil {
 			return
 		}
 	case *tree.CommitTransaction:
-		err = backSes.TxnCommit()
+		err = backSes.GetTxnHandler().TxnCommit()
 		if err != nil {
 			return
 		}
 	case *tree.RollbackTransaction:
-		err = backSes.TxnRollback()
+		err = backSes.GetTxnHandler().TxnRollback()
 		if err != nil {
 			return
 		}

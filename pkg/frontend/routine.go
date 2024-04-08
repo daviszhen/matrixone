@@ -263,7 +263,7 @@ func (rt *Routine) handleRequest(req *Request) error {
 
 		//ensure cleaning the transaction
 		logError(ses, ses.GetDebugString(), "rollback the txn.")
-		err = ses.TxnRollback()
+		err = ses.GetTxnHandler().TxnRollback()
 		if err != nil {
 			logError(ses, ses.GetDebugString(),
 				"Failed to rollback txn",
@@ -344,7 +344,7 @@ func (rt *Routine) cleanup() {
 		ses := rt.getSession()
 		//step A: rollback the txn
 		if ses != nil {
-			err := ses.TxnRollback()
+			err := ses.GetTxnHandler().TxnRollback()
 			if err != nil {
 				logError(ses, ses.GetDebugString(),
 					"Failed to rollback txn",

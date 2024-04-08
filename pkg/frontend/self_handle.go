@@ -33,18 +33,18 @@ func handleInFrontend(requestCtx context.Context,
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
 	case *tree.BeginTransaction:
-		err = ses.TxnBegin()
+		err = ses.GetTxnHandler().TxnBegin()
 		if err != nil {
 			return
 		}
 		RecordStatementTxnID(requestCtx, ses)
 	case *tree.CommitTransaction:
-		err = ses.TxnCommit()
+		err = ses.GetTxnHandler().TxnCommit()
 		if err != nil {
 			return
 		}
 	case *tree.RollbackTransaction:
-		err = ses.TxnRollback()
+		err = ses.GetTxnHandler().TxnRollback()
 		if err != nil {
 			return
 		}
@@ -441,7 +441,7 @@ func handleCmdFieldList(requestCtx context.Context, ses FeSession, icfl *Interna
 		mysql CMD_FIELD_LIST response: End after the column has been sent.
 		send EOF packet
 	*/
-	err = proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
+	err = proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
 	if err != nil {
 		return err
 	}
@@ -554,7 +554,7 @@ func handleEmptyStmt(ctx context.Context, ses FeSession, stmt *tree.EmptyStmt) e
 	var err error
 	proto := ses.GetMysqlProtocol()
 
-	resp := NewGeneralOkResponse(COM_QUERY, ses.GetServerStatus())
+	resp := NewGeneralOkResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus())
 	if err = proto.SendResponse(ctx, resp); err != nil {
 		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}

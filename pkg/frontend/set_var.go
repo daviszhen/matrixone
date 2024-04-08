@@ -76,7 +76,7 @@ func doSetVar(ctx context.Context, ses *Session, sv *tree.SetVar, sql string) er
 				if err != nil {
 					return err
 				}
-				err = ses.SetAutocommit(oldValue, newValue)
+				err = ses.GetTxnHandler().SetAutocommit(oldValue, newValue)
 				if err != nil {
 					return err
 				}

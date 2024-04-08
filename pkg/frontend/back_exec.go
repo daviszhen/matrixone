@@ -17,7 +17,6 @@ package frontend
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -79,7 +78,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 		return moerr.NewInternalError(ctx, "Exec() can run one statement at one time. but get '%d' statements now, sql = %s", len(statements), sql)
 	}
 	//share txn can not run transaction statement
-	if back.backSes.isShareTxn() {
+	if back.backSes.GetTxnHandler().IsShareTxn() {
 		for _, stmt := range statements {
 			switch stmt.(type) {
 			case *tree.BeginTransaction, *tree.CommitTransaction, *tree.RollbackTransaction:
@@ -222,7 +221,7 @@ func doComQueryInBack(requestCtx context.Context,
 			drop table test1;    <- has active transaction, error
 			                     <- has active transaction
 		*/
-		if backSes.InActiveTransaction() {
+		if backSes.GetTxnHandler().InActiveTransaction() {
 			err = canExecuteStatementInUncommittedTransaction(requestCtx, backSes, stmt)
 			if err != nil {
 				return err
@@ -436,10 +435,7 @@ var NewBackgroundExec = func(
 		outputCallback: fakeDataSetFetcher2,
 		allResultSet:   nil,
 		resultBatches:  nil,
-		serverStatus:   0,
 		derivedStmt:    false,
-		optionBits:     0,
-		shareTxn:       false,
 		gSysVars:       GSysVariables,
 		label:          make(map[string]string),
 		timeZone:       time.Local,
@@ -490,10 +486,10 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.State
 	}
 
 	prevDB := ses.GetDatabaseName()
-	prevOptionBits := ses.GetOptionBits()
-	prevServerStatus := ses.GetServerStatus()
+	prevOptionBits := ses.GetTxnHandler().GetOptionBits()
+	prevServerStatus := ses.GetTxnHandler().GetServerStatus()
 	//autocommit = on
-	ses.setAutocommitOn()
+	ses.GetTxnHandler().setAutocommitOn()
 	//1. replace output callback by batchFetcher.
 	// the result batch will be saved in the session.
 	// you can get the result batch by calling GetResultBatches()
@@ -511,8 +507,8 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.State
 		p := ses.GetTxnCompileCtx().GetProcess()
 		p.FreeVectors()
 		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.SetOptionBits(prevOptionBits)
-		ses.SetServerStatus(prevServerStatus)
+		ses.GetTxnHandler().SetOptionBits(prevOptionBits)
+		ses.GetTxnHandler().SetServerStatus(prevServerStatus)
 		ses.SetOutputCallback(getDataFromPipeline)
 		ses.ReplaceProtocol(prevProto)
 	}()
@@ -616,11 +612,10 @@ type backSession struct {
 	// result batches of executing the sql in background task
 	// set by func batchFetcher
 	resultBatches []*batch.Batch
-	serverStatus  uint16
-	derivedStmt   bool
-	optionBits    uint32
-	shareTxn      bool
-	gSysVars      *GlobalSystemVariables
+
+	derivedStmt bool
+
+	gSysVars *GlobalSystemVariables
 	// when starting a transaction in session, the snapshot ts of the transaction
 	// is to get a TN push to CN to get the maximum commitTS. but there is a problem,
 	// when the last transaction ends and the next one starts, it is possible that the
@@ -795,10 +790,6 @@ func (backSes *backSession) GetCmd() CommandType {
 	return COM_QUERY
 }
 
-func (backSes *backSession) GetServerStatus() uint16 {
-	return backSes.serverStatus
-}
-
 func (backSes *backSession) SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response {
 	return nil
 }
@@ -813,17 +804,6 @@ func (backSes *backSession) GetTxnHandler() *TxnHandler {
 
 func (backSes *backSession) GetMysqlProtocol() MysqlProtocol {
 	return backSes.proto
-}
-
-func (backSes *backSession) TxnCreate() (context.Context, TxnOperator, error) {
-	// SERVER_STATUS_IN_TRANS should be set to true regardless of whether autocommit is equal to 1.
-	backSes.SetServerStatus(SERVER_STATUS_IN_TRANS)
-
-	if !backSes.txnHandler.IsValidTxnOperator() {
-		return backSes.txnHandler.NewTxn()
-	}
-	txnCtx, txnOp, err := backSes.txnHandler.GetTxnOperator()
-	return txnCtx, txnOp, err
 }
 
 func (backSes *backSession) updateLastCommitTS(lastCommitTS timestamp.Timestamp) {
@@ -966,120 +946,8 @@ func (backSes *backSession) clear() {
 	backSes.gSysVars = nil
 }
 
-func (backSes *backSession) InActiveTransaction() bool {
-	return backSes.ServerStatusIsSet(SERVER_STATUS_IN_TRANS)
-}
-
-func (backSes *backSession) TxnRollbackSingleStatement(stmt tree.Statement, inputErr error) error {
-	var err error
-	var rollbackWholeTxn bool
-	if inputErr != nil {
-		rollbackWholeTxn = isErrorRollbackWholeTxn(inputErr)
-	}
-	/*
-			Rollback Rules:
-			1, if it is in single-statement mode (Case2):
-				it rollbacks.
-			2, if it is in multi-statement mode (Case1,Case3,Case4):
-		        the transaction need to be rollback at the end of the statement.
-				(every error will abort the transaction.)
-	*/
-	if !backSes.InMultiStmtTransactionMode() ||
-		backSes.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) ||
-		rollbackWholeTxn {
-		//Case1.1: autocommit && not_begin
-		//Case1.2: (not_autocommit || begin) && activeTxn && needToBeCommitted
-		//Case1.3: the error that should rollback the whole txn
-		err = backSes.rollbackWholeTxn()
-	} else {
-		//Case2: not ( autocommit && !begin ) && not ( activeTxn && needToBeCommitted )
-		//<==>  ( not_autocommit || begin ) && not ( activeTxn && needToBeCommitted )
-		//just rollback statement
-		var err3 error
-		txnCtx, txnOp, err3 := backSes.txnHandler.GetTxnOperator()
-		if err3 != nil {
-			return err3
-		}
-
-		//non derived statement
-		if txnOp != nil && !backSes.IsDerivedStmt() {
-			//incrStatement has been called
-			ok, id := backSes.txnHandler.calledIncrStmt()
-			if ok && bytes.Equal(txnOp.Txn().ID, id) {
-				err = txnOp.GetWorkspace().RollbackLastStatement(txnCtx)
-				backSes.txnHandler.disableIncrStmt()
-				if err != nil {
-					err4 := backSes.rollbackWholeTxn()
-					return errors.Join(err, err4)
-				}
-			}
-		}
-	}
-	return err
-}
-
-func (backSes *backSession) TxnCommitSingleStatement(stmt tree.Statement) error {
-	var err error
-	/*
-		Commit Rules:
-		1, if it is in single-statement mode:
-			it commits.
-		2, if it is in multi-statement mode:
-			if the statement is the one can be executed in the active transaction,
-				the transaction need to be committed at the end of the statement.
-	*/
-	if !backSes.InMultiStmtTransactionMode() ||
-		backSes.InActiveTransaction() && NeedToBeCommittedInActiveTransaction(stmt) {
-		err = backSes.txnHandler.CommitTxn()
-		backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-		backSes.ClearOptionBits(OPTION_BEGIN)
-	}
-	return err
-}
-
 func (backSes *backSession) IsDerivedStmt() bool {
 	return backSes.derivedStmt
-}
-
-func (backSes *backSession) TxnBegin() error {
-	var err error
-	if backSes.InMultiStmtTransactionMode() {
-		backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-		err = backSes.txnHandler.CommitTxn()
-	}
-	backSes.ClearOptionBits(OPTION_BEGIN)
-	if err != nil {
-		/*
-			fix issue 6024.
-			When we get a w-w conflict during commit the txn,
-			we convert the error into a readable error.
-		*/
-		if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
-			return moerr.NewInternalError(backSes.requestCtx, writeWriteConflictsErrorInfo())
-		}
-		return err
-	}
-	backSes.SetOptionBits(OPTION_BEGIN)
-	backSes.SetServerStatus(SERVER_STATUS_IN_TRANS)
-	_, _, err = backSes.txnHandler.NewTxn()
-	return err
-}
-
-func (backSes *backSession) TxnCommit() error {
-	var err error
-	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
-	err = backSes.txnHandler.CommitTxn()
-	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-	backSes.ClearOptionBits(OPTION_BEGIN)
-	return err
-}
-
-func (backSes *backSession) TxnRollback() error {
-	var err error
-	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY)
-	err = backSes.txnHandler.RollbackTxn()
-	backSes.ClearOptionBits(OPTION_BEGIN)
-	return err
 }
 
 func (backSes *backSession) GetDatabaseName() string {
@@ -1089,45 +957,6 @@ func (backSes *backSession) GetDatabaseName() string {
 func (backSes *backSession) SetDatabaseName(s string) {
 	backSes.proto.SetDatabaseName(s)
 	backSes.GetTxnCompileCtx().SetDatabase(s)
-}
-
-func (backSes *backSession) ServerStatusIsSet(bit uint16) bool {
-	return backSes.serverStatus&bit != 0
-}
-
-func (backSes *backSession) InMultiStmtTransactionMode() bool {
-	return backSes.OptionBitsIsSet(OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)
-}
-
-func (backSes *backSession) rollbackWholeTxn() error {
-	err := backSes.txnHandler.RollbackTxn()
-	backSes.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-	backSes.ClearOptionBits(OPTION_BEGIN)
-	return err
-}
-
-func (backSes *backSession) ClearServerStatus(bit uint16) {
-	backSes.serverStatus &= ^bit
-}
-
-func (backSes *backSession) ClearOptionBits(bit uint32) {
-	backSes.optionBits &= ^bit
-}
-
-func (backSes *backSession) SetOptionBits(bit uint32) {
-	backSes.optionBits |= bit
-}
-
-func (backSes *backSession) SetServerStatus(bit uint16) {
-	backSes.serverStatus |= bit
-}
-
-func (backSes *backSession) OptionBitsIsSet(bit uint32) bool {
-	return backSes.optionBits&bit != 0
-}
-
-func (backSes *backSession) isShareTxn() bool {
-	return backSes.shareTxn
 }
 
 func (backSes *backSession) GetGlobalVar(name string) (interface{}, error) {

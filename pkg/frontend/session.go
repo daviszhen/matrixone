@@ -664,7 +664,7 @@ func NewSession(proto Protocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables
 	ses.isNotBackgroundSession = isNotBackgroundSession
 	ses.sqlHelper = &SqlHelper{ses: ses}
 	ses.uuid, _ = uuid.NewV7()
-	ses.SetOptionBits(OPTION_AUTOCOMMIT)
+	ses.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 	ses.GetTxnCompileCtx().SetSession(ses)
 	ses.GetTxnHandler().SetSession(ses)
 	if ses.mp == nil {
@@ -967,27 +967,14 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 			outputCallback: callback,
 			allResultSet:   nil,
 			resultBatches:  nil,
-			serverStatus:   0,
 			derivedStmt:    false,
-			optionBits:     0,
-			shareTxn:       false,
 			gSysVars:       GSysVariables,
 			label:          make(map[string]string),
 			timeZone:       time.Local,
 		}
-		backSes.SetOptionBits(OPTION_AUTOCOMMIT)
+		backSes.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 		backSes.GetTxnCompileCtx().SetSession(backSes)
 		backSes.GetTxnHandler().SetSession(backSes)
-		//var accountId uint32
-		//accountId, err = defines.GetAccountId(ctx)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//backSes.tenant = &TenantInfo{
-		//	TenantID:      accountId,
-		//	UserID:        defines.GetUserId(ctx),
-		//	DefaultRoleID: defines.GetRoleId(ctx),
-		//}
 		bh := &backExec{
 			backSes: backSes,
 		}
@@ -996,17 +983,6 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		return bh
 	}
 
-	{
-		//bh := &BackgroundHandler{
-		//	mce: NewMysqlCmdExecutor(),
-		//	ses: NewBackgroundSession(ctx, ses, ses.GetMemPool(), ses.GetParameterUnit(), GSysVariables, true),
-		//}
-		////the derived statement execute in a shared transaction in background session
-		//bh.ses.ReplaceDerivedStmt(true)
-		//if newRawBatch {
-		//	bh.ses.SetOutputCallback(batchFetcher)
-		//}
-	}
 	return nil
 }
 
@@ -1026,10 +1002,7 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 		outputCallback: batchFetcher2,
 		allResultSet:   nil,
 		resultBatches:  nil,
-		serverStatus:   0,
 		derivedStmt:    false,
-		optionBits:     0,
-		shareTxn:       false,
 		gSysVars:       GSysVariables,
 		label:          make(map[string]string),
 		timeZone:       time.Local,
@@ -2089,9 +2062,9 @@ func (ses *Session) SetNewResponse(category int, affectedRows uint64, cmd int, d
 	var resp *Response
 	if !isLastStmt {
 		resp = NewResponse(category, affectedRows, 0, 0,
-			ses.GetServerStatus()|SERVER_MORE_RESULTS_EXISTS, cmd, d)
+			ses.GetTxnHandler().GetServerStatus()|SERVER_MORE_RESULTS_EXISTS, cmd, d)
 	} else {
-		resp = NewResponse(category, affectedRows, 0, 0, ses.GetServerStatus(), cmd, d)
+		resp = NewResponse(category, affectedRows, 0, 0, ses.GetTxnHandler().GetServerStatus(), cmd, d)
 	}
 	return resp
 }

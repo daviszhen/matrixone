@@ -73,7 +73,7 @@ func executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *Exe
 			mysql COM_QUERY response: End after the column has been sent.
 			send EOF packet
 		*/
-		err = execCtx.proto.SendEOFPacketIf(0, ses.GetServerStatus())
+		err = execCtx.proto.SendEOFPacketIf(0, ses.GetTxnHandler().GetServerStatus())
 		if err != nil {
 			return
 		}
@@ -129,7 +129,7 @@ func executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *Exe
 			mysql COM_QUERY response: End after the column has been sent.
 			send EOF packet
 		*/
-		err = execCtx.proto.SendEOFPacketIf(0, ses.GetServerStatus())
+		err = execCtx.proto.SendEOFPacketIf(0, ses.GetTxnHandler().GetServerStatus())
 		if err != nil {
 			return
 		}
@@ -186,7 +186,7 @@ func executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *Exe
 			mysql COM_QUERY response: End after the column has been sent.
 			send EOF packet
 		*/
-		err = execCtx.proto.SendEOFPacketIf(0, ses.GetServerStatus())
+		err = execCtx.proto.SendEOFPacketIf(0, ses.GetTxnHandler().GetServerStatus())
 		if err != nil {
 			return
 		}
@@ -226,7 +226,7 @@ func respResultRow(requestCtx context.Context,
 		}
 		ses.SetSeqLastValue(execCtx.proc)
 
-		err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
+		err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
 		if err != nil {
 			return
 		}
@@ -260,14 +260,14 @@ func respResultRow(requestCtx context.Context,
 				return
 			}
 
-			err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
+			err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
 			if err != nil {
 				return
 			}
 		}
 	default:
 
-		err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetServerStatus())
+		err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
 		if err != nil {
 			return
 		}

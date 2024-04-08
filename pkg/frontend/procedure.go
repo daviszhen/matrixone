@@ -67,7 +67,7 @@ func handleCallProcedure(ctx context.Context, ses FeSession, call *tree.CallStmt
 		return err
 	}
 
-	resp := NewGeneralOkResponse(COM_QUERY, ses.GetServerStatus())
+	resp := NewGeneralOkResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus())
 
 	if len(results) == 0 {
 		if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
