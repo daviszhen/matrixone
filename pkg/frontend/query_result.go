@@ -181,7 +181,7 @@ func saveQueryResultMeta(ses *Session) error {
 		Ast:         string(st),
 		ColumnMap:   colMap,
 	}
-	metaBat, err := buildQueryResultMetaBatch(m, ses.mp)
+	metaBat, err := buildQueryResultMetaBatch(m, ses.pool)
 	if err != nil {
 		return err
 	}

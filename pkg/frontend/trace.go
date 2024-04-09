@@ -105,7 +105,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	stm.Account = tenant.GetTenant()
 	stm.RoleId = proc.SessionInfo.RoleId
 	stm.User = tenant.GetUser()
-	stm.Host = ses.protocol.Peer()
+	stm.Host = ses.proto.Peer()
 	stm.Database = ses.GetDatabaseName()
 	stm.Statement = text
 	stm.StatementFingerprint = "" // fixme= (Reserved)

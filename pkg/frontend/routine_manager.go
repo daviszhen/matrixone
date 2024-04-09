@@ -15,8 +15,6 @@
 package frontend
 
 import (
-	"bytes"
-	"container/list"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -547,46 +545,6 @@ func (rm *RoutineManager) clientCount() int {
 	defer rm.mu.RUnlock()
 	count = len(rm.clients)
 	return count
-}
-
-type info struct {
-	id    uint32
-	peer  string
-	count []uint64
-}
-
-func (rm *RoutineManager) collectClientInfo(infos *list.List) {
-	rm.mu.RLock()
-	defer rm.mu.RUnlock()
-	for _, routine := range rm.clients {
-		proto := routine.getProtocol()
-		infos.PushBack(&info{
-			proto.ConnectionID(),
-			proto.Peer(),
-			proto.resetDebugCount(),
-		})
-	}
-}
-
-func (rm *RoutineManager) printDebug() {
-	infos := list.New()
-	rm.collectClientInfo(infos)
-
-	bb := bytes.Buffer{}
-	bb.WriteString("Clients:")
-	bb.WriteString(fmt.Sprintf("(%d)\n", infos.Len()))
-	for e := infos.Front(); e != nil; e = e.Next() {
-		d := e.Value.(*info)
-		if d == nil {
-			continue
-		}
-		bb.WriteString(fmt.Sprintf("%d|%s|", d.id, d.peer))
-		for i, u := range d.count {
-			bb.WriteString(fmt.Sprintf("%d:0x%x ", i, u))
-		}
-		bb.WriteByte('\n')
-	}
-	logutil.Info(bb.String())
 }
 
 func (rm *RoutineManager) cleanKillQueue() {

@@ -228,7 +228,7 @@ func doComQueryInBack(requestCtx context.Context,
 			}
 		}
 
-		execCtx := &ExecCtx{
+		execCtx := ExecCtx{
 			stmt:       stmt,
 			isLastStmt: i >= len(cws)-1,
 			tenant:     tenant,
@@ -237,7 +237,7 @@ func doComQueryInBack(requestCtx context.Context,
 			cw:         cw,
 			proc:       proc,
 		}
-		err = executeStmtInBackWithTxn(requestCtx, backSes, execCtx)
+		err = executeStmtInBackWithTxn(requestCtx, backSes, &execCtx)
 		if err != nil {
 			return err
 		}
@@ -422,38 +422,28 @@ var NewBackgroundExec = func(
 	mp *mpool.MPool) BackgroundExec {
 	txnHandler := InitTxnHandler(gPu.StorageEngine, nil, nil)
 	backSes := &backSession{
-		requestCtx:     reqCtx,
-		connectCtx:     upstream.GetConnectContext(),
-		pool:           mp,
-		proto:          &FakeProtocol{},
-		buf:            buffer.New(),
-		stmtProfile:    process.StmtProfile{},
-		tenant:         nil,
-		txnHandler:     txnHandler,
-		txnCompileCtx:  InitTxnCompilerContext(txnHandler, ""),
-		mrs:            nil,
-		outputCallback: fakeDataSetFetcher2,
-		allResultSet:   nil,
-		resultBatches:  nil,
-		derivedStmt:    false,
-		gSysVars:       GSysVariables,
-		label:          make(map[string]string),
-		timeZone:       time.Local,
+		requestCtx: reqCtx,
+		connectCtx: upstream.GetConnectContext(),
+		feSessionImpl: feSessionImpl{
+			pool:           mp,
+			proto:          &FakeProtocol{},
+			buf:            buffer.New(),
+			stmtProfile:    process.StmtProfile{},
+			tenant:         nil,
+			txnHandler:     txnHandler,
+			txnCompileCtx:  InitTxnCompilerContext(txnHandler, ""),
+			mrs:            nil,
+			outputCallback: fakeDataSetFetcher2,
+			allResultSet:   nil,
+			resultBatches:  nil,
+			derivedStmt:    false,
+			gSysVars:       GSysVariables,
+			label:          make(map[string]string),
+			timeZone:       time.Local,
+		},
 	}
 	backSes.GetTxnCompileCtx().SetSession(backSes)
 	backSes.GetTxnHandler().SetSession(backSes)
-	//var accountId uint32
-	//var err error
-	//accountId, err = defines.GetAccountId(reqCtx)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//backSes.tenant = &TenantInfo{
-	//	TenantID:      accountId,
-	//	UserID:        defines.GetUserId(reqCtx),
-	//	DefaultRoleID: defines.GetRoleId(reqCtx),
-	//}
-
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -592,43 +582,9 @@ func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) 
 }
 
 type backSession struct {
-	requestCtx    context.Context
-	connectCtx    context.Context
-	pool          *mpool.MPool
-	proto         MysqlProtocol
-	buf           *buffer.Buffer
-	stmtProfile   process.StmtProfile
-	tenant        *TenantInfo
-	txnHandler    *TxnHandler
-	txnCompileCtx *TxnCompilerContext
-	mrs           *MysqlResultSet
-	//it gets the result set from the pipeline and send it to the client
-	outputCallback func(interface{}, *batch.Batch) error
-
-	//all the result set of executing the sql in background task
-	allResultSet []*MysqlResultSet
-	rs           *plan.ResultColDef
-
-	// result batches of executing the sql in background task
-	// set by func batchFetcher
-	resultBatches []*batch.Batch
-
-	derivedStmt bool
-
-	gSysVars *GlobalSystemVariables
-	// when starting a transaction in session, the snapshot ts of the transaction
-	// is to get a TN push to CN to get the maximum commitTS. but there is a problem,
-	// when the last transaction ends and the next one starts, it is possible that the
-	// log of the last transaction has not been pushed to CN, we need to wait until at
-	// least the commit of the last transaction log of the previous transaction arrives.
-	lastCommitTS timestamp.Timestamp
-	upstream     *Session
-	sql          string
-	accountId    uint32
-	label        map[string]string
-	timeZone     *time.Location
-
-	sqlCount uint64
+	feSessionImpl
+	requestCtx context.Context
+	connectCtx context.Context
 }
 
 func (backSes *backSession) GetUUID() []byte {

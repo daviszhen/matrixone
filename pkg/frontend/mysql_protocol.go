@@ -206,15 +206,6 @@ type MysqlProtocol interface {
 
 var _ MysqlProtocol = &MysqlProtocolImpl{}
 
-func (ses *Session) GetMysqlProtocol() MysqlProtocol {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	if ses.protocol != nil {
-		return ses.protocol.(MysqlProtocol)
-	}
-	return nil
-}
-
 type debugStats struct {
 	writeCount uint64
 	// record 2 cases data, all belong to flush op.

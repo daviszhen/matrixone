@@ -132,8 +132,10 @@ func InitSysTenant(ctx context.Context) (err error) {
 	//Note: it is special here. The connection ctx here is ctx also.
 	//Actually, it is ok here. the ctx is moServerCtx instead of requestCtx
 	upstream := &Session{
+		feSessionImpl: feSessionImpl{
+			proto: &FakeProtocol{},
+		},
 		connectCtx:   ctx,
-		protocol:     &FakeProtocol{},
 		seqCurValues: make(map[uint64]string),
 		seqLastValue: new(string),
 	}
