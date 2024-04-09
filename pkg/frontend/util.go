@@ -65,6 +65,33 @@ func writeWriteConflictsErrorInfo() string {
 	return "Write conflicts detected. Previous transaction need to be aborted."
 }
 
+type CloseFlag struct {
+	//closed flag
+	closed uint32
+}
+
+// 1 for closed
+// 0 for others
+func (cf *CloseFlag) setClosed(value uint32) {
+	atomic.StoreUint32(&cf.closed, value)
+}
+
+func (cf *CloseFlag) Open() {
+	cf.setClosed(0)
+}
+
+func (cf *CloseFlag) Close() {
+	cf.setClosed(1)
+}
+
+func (cf *CloseFlag) IsClosed() bool {
+	return atomic.LoadUint32(&cf.closed) != 0
+}
+
+func (cf *CloseFlag) IsOpened() bool {
+	return atomic.LoadUint32(&cf.closed) == 0
+}
+
 func Min(a int, b int) int {
 	if a < b {
 		return a

@@ -333,6 +333,7 @@ func (rm *RoutineManager) getRoutineById(id uint64) *Routine {
 			rt = value
 			break
 		}
+		fmt.Println("connection", value.getConnectionID())
 	}
 	return rt
 }

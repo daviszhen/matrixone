@@ -20,8 +20,7 @@ type Statement interface {
 	fmt.Stringer
 	NodeFormatter
 	StatementType
-	ResultType() ResultType
-	HandleType() HandleType
+	StmtKind() StmtKind
 }
 
 type StatementType interface {
@@ -56,924 +55,524 @@ const (
 	QueryTypeOth = "Other"
 )
 
+//result type bit format
+//all bits zero : undefined
+//bit 0~1 :
+//		00 undefined. invalid result type or the statement based on the real statement like EXECUTE,CALL
+//		01 result row
+//		10 status
+//bit 2~4 :
+//		000 stream result row
+//		001 prebuild all result rows before sending
+//		010 no resp. do no response to the client. like COM_QUIT command, Deallocate from COM_STMT_CLOSE.
+//		011 resp in handle function. result row or status. like EXECUTE,CALL.
+//		100 resp_status
+//bit 5
+//		0 in computation engine
+//		1 in the frontend
+
+type StmtKind int
+
 type ResultType int
-
-const (
-	//invalid result type or the statement
-	//based on the real statement like EXECUTE
-	Undefined ResultType = iota
-
-	//response result rows to the client.
-	//like SELECT...,SHOW...,
-	ResultRow
-
-	//response status(success or fail) to the client.
-	//like CREATE...,DROP...,
-	Status
-
-	//do no response to the client.
-	//like COM_QUIT command, Deallocate
-	NoResp
-
-	//response result rows or status to the client
-	//based on the real logic.
-	//like CALL...,
-	RespItself
-)
-
+type RespType int
 type HandleType int
 
 const (
-	//invalid handle type
-	Unknown HandleType = iota
+	UNDEFINED  ResultType = 0x0
+	RESULT_ROW ResultType = 0x1
+	STATUS     ResultType = 0x2
 
-	//statement handled in the frontend
-	InFrontend
+	STREAM_RESULT_ROW   RespType = 0x0
+	PREBUILD_RESULT_ROW RespType = 0x1
+	NO_RESP             RespType = 0x2
+	RESP_ITSELF         RespType = 0x3
+	RESP_STATUS         RespType = 0x4
 
-	//statement handled in the computation engine
-	InBackend
+	IN_BACKEND  HandleType = 0x0
+	IN_FRONTEND HandleType = 0x1
 )
 
-func (node *Select) HandleType() HandleType {
-	return InBackend
+func MakeStmtKind(resTyp ResultType, respTyp RespType, handleTyp HandleType) StmtKind {
+	return StmtKind(int(resTyp) | (int(respTyp) << 2) | (int(handleTyp) << 5))
 }
 
-func (node *Select) ResultType() ResultType {
+func (t StmtKind) ResType() ResultType {
+	return ResultType((0x3 & int(t)))
+}
+
+func (t StmtKind) RespType() RespType {
+	return RespType((int(t) >> 2) & 0x7)
+}
+
+func (t StmtKind) HandleType() HandleType {
+	return HandleType((int(t) >> 5) & 0x1)
+}
+
+var (
+	//response result rows to the client.
+	//like SELECT...,SHOW...,
+	defaultResRowTyp = MakeStmtKind(RESULT_ROW, STREAM_RESULT_ROW, IN_BACKEND)
+
+	//response status(success or fail) to the client.
+	//like CREATE...,DROP...,
+	defaultStatusTyp = MakeStmtKind(STATUS, RESP_STATUS, IN_BACKEND)
+
+	frontendStatusTyp = MakeStmtKind(STATUS, RESP_STATUS, IN_FRONTEND)
+
+	//like statements: they composite the result set themselves
+	//    ShowConnectors
+	//    ExplainStmt
+	//    ShowTableStatus
+	//    ShowErrors
+	//    ShowVariables
+	//    ShowAccounts
+	//    ShowCollation
+	//    ShowSubscriptions
+	//    ShowBackendServers
+	compositeResRowType = MakeStmtKind(RESULT_ROW, PREBUILD_RESULT_ROW, IN_FRONTEND)
+)
+
+func (node *Select) StmtKind() StmtKind {
 	if node.Ep != nil {
-		return Status
+		return defaultStatusTyp
 	}
-	return ResultRow
+	return defaultResRowTyp
 }
 
-func (node *Use) HandleType() HandleType {
-	return InFrontend
+func (node *Use) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *Use) ResultType() ResultType {
-	return Status
+func (node *BeginTransaction) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *BeginTransaction) HandleType() HandleType {
-	return InFrontend
+func (node *CommitTransaction) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *BeginTransaction) ResultType() ResultType {
-	return Status
+func (node *RollbackTransaction) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CommitTransaction) HandleType() HandleType {
-	return InFrontend
+func (node *CreatePublication) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CommitTransaction) ResultType() ResultType {
-	return Status
+func (node *AlterPublication) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *RollbackTransaction) HandleType() HandleType {
-	return InFrontend
+func (node *DropPublication) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *RollbackTransaction) ResultType() ResultType {
-	return Status
+func (node *ShowSubscriptions) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *CreatePublication) HandleType() HandleType {
-	return InFrontend
+func (node *CreateStage) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreatePublication) ResultType() ResultType {
-	return Status
+func (node *DropStage) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterPublication) HandleType() HandleType {
-	return InFrontend
+func (node *AlterStage) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterPublication) ResultType() ResultType {
-	return Status
+func (node *CreateAccount) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropPublication) HandleType() HandleType {
-	return InFrontend
+func (node *DropAccount) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropPublication) ResultType() ResultType {
-	return Status
+func (node *AlterAccount) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowSubscriptions) HandleType() HandleType {
-	return InFrontend
+func (node *AlterDataBaseConfig) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowSubscriptions) ResultType() ResultType {
-	return ResultRow
+func (node *CreateUser) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateStage) HandleType() HandleType {
-	return InFrontend
+func (node *DropUser) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateStage) ResultType() ResultType {
-	return Status
+func (node *AlterUser) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropStage) HandleType() HandleType {
-	return InFrontend
+func (node *CreateRole) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropStage) ResultType() ResultType {
-	return Status
+func (node *DropRole) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterStage) HandleType() HandleType {
-	return InFrontend
+func (node *CreateFunction) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterStage) ResultType() ResultType {
-	return Status
+func (node *DropFunction) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateAccount) HandleType() HandleType {
-	return InFrontend
+func (node *CreateProcedure) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateAccount) ResultType() ResultType {
-	return Status
+func (node *DropProcedure) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropAccount) HandleType() HandleType {
-	return InFrontend
+func (node *CallStmt) StmtKind() StmtKind {
+	return MakeStmtKind(UNDEFINED, RESP_ITSELF, IN_FRONTEND)
 }
 
-func (node *DropAccount) ResultType() ResultType {
-	return Status
+func (node *Grant) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterAccount) HandleType() HandleType {
-	return InFrontend
+func (node *Revoke) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterAccount) ResultType() ResultType {
-	return Status
+func (node *Kill) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterDataBaseConfig) HandleType() HandleType {
-	return InFrontend
+func (node *ShowAccounts) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *AlterDataBaseConfig) ResultType() ResultType {
-	return Status
+func (node *ShowBackendServers) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *CreateUser) HandleType() HandleType {
-	return InFrontend
+func (node *SetTransaction) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateUser) ResultType() ResultType {
-	return Status
+func (node *LockTableStmt) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropUser) HandleType() HandleType {
-	return InFrontend
+func (node *UnLockTableStmt) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *DropUser) ResultType() ResultType {
-	return Status
+func (node *BackupStart) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterUser) HandleType() HandleType {
-	return InFrontend
+func (node *EmptyStmt) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterUser) ResultType() ResultType {
-	return Status
+func (node *prepareImpl) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateRole) HandleType() HandleType {
-	return InFrontend
+func (node *Execute) StmtKind() StmtKind {
+	return MakeStmtKind(UNDEFINED, RESP_ITSELF, IN_BACKEND)
 }
 
-func (node *CreateRole) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropRole) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *DropRole) ResultType() ResultType {
-	return Status
-}
-
-func (node *CreateFunction) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *CreateFunction) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropFunction) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *DropFunction) ResultType() ResultType {
-	return Status
-}
-
-func (node *CreateProcedure) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *CreateProcedure) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropProcedure) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *DropProcedure) ResultType() ResultType {
-	return Status
-}
-
-func (node *CallStmt) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *CallStmt) ResultType() ResultType {
-	return RespItself
-}
-
-func (node *Grant) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *Grant) ResultType() ResultType {
-	return Status
-}
-
-func (node *Revoke) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *Revoke) ResultType() ResultType {
-	return Status
-}
-
-func (node *Kill) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *Kill) ResultType() ResultType {
-	return Status
-}
-
-func (node *ShowAccounts) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *ShowAccounts) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *ShowBackendServers) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *ShowBackendServers) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *SetTransaction) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *SetTransaction) ResultType() ResultType {
-	return Status
-}
-
-func (node *LockTableStmt) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *LockTableStmt) ResultType() ResultType {
-	return Status
-}
-
-func (node *UnLockTableStmt) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *UnLockTableStmt) ResultType() ResultType {
-	return Status
-}
-
-func (node *BackupStart) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *BackupStart) ResultType() ResultType {
-	return Status
-}
-
-func (node *EmptyStmt) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *EmptyStmt) ResultType() ResultType {
-	return Status
-}
-
-func (node *prepareImpl) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *prepareImpl) ResultType() ResultType {
-	return Status
-}
-
-func (node *Execute) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *Execute) ResultType() ResultType {
-	return Undefined
-}
-
-func (node *Deallocate) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *Deallocate) ResultType() ResultType {
+func (node *Deallocate) StmtKind() StmtKind {
 	//if it triggered by COM_STMT_CLOSE, it should return NoResp
-	return Status
+	return frontendStatusTyp
 }
 
-func (node *Update) HandleType() HandleType {
-	return InBackend
+func (node *Update) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *Update) ResultType() ResultType {
-	return Status
+func (node *CreateDatabase) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *CreateDatabase) HandleType() HandleType {
-	return InBackend
+func (node *CreateTable) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *CreateDatabase) ResultType() ResultType {
-	return Status
+func (node *CreateView) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *CreateTable) HandleType() HandleType {
-	return InBackend
+func (node *ShowDatabases) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *CreateTable) ResultType() ResultType {
-	return Status
+func (node *ShowTables) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *CreateView) HandleType() HandleType {
-	return InBackend
+func (node *ShowCreateTable) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *CreateView) ResultType() ResultType {
-	return Status
+func (node *Insert) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowDatabases) HandleType() HandleType {
-	return InBackend
+func (node *ShowVariables) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *ShowDatabases) ResultType() ResultType {
-	return ResultRow
+func (node *ShowIndex) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowTables) HandleType() HandleType {
-	return InBackend
+func (node *ShowTarget) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowTables) ResultType() ResultType {
-	return ResultRow
+func (node *ShowCollation) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *ShowCreateTable) HandleType() HandleType {
-	return InBackend
+func (node *ShowFunctionOrProcedureStatus) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowCreateTable) ResultType() ResultType {
-	return ResultRow
+func (node *ShowGrants) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *Insert) HandleType() HandleType {
-	return InBackend
+func (node *ShowTableStatus) StmtKind() StmtKind {
+	//FIXME: result row,prebuild result row, in backend
+	return compositeResRowType
 }
 
-func (node *Insert) ResultType() ResultType {
-	return Status
+func (node *ExplainStmt) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *ShowVariables) HandleType() HandleType {
-	return InFrontend
+func (node *ExplainAnalyze) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowVariables) ResultType() ResultType {
-	return ResultRow
+func (node *ExplainFor) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowIndex) HandleType() HandleType {
-	return InBackend
+func (node *ShowColumns) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowIndex) ResultType() ResultType {
-	return ResultRow
+func (node *ShowStatus) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowTarget) HandleType() HandleType {
-	return InBackend
+func (node *ShowWarnings) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *ShowTarget) ResultType() ResultType {
-	return ResultRow
+func (node *ShowErrors) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *ShowCollation) HandleType() HandleType {
-	return InFrontend
+func (node *ShowProcessList) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowCollation) ResultType() ResultType {
-	return ResultRow
+func (node *ShowCreateDatabase) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowFunctionOrProcedureStatus) HandleType() HandleType {
-	return InBackend
+func (node *ShowStages) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowFunctionOrProcedureStatus) ResultType() ResultType {
-	return ResultRow
+func (node *ShowCreatePublications) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowGrants) HandleType() HandleType {
-	return InBackend
+func (node *ShowPublications) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowGrants) ResultType() ResultType {
-	return ResultRow
+func (node *ShowTableSize) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowTableStatus) HandleType() HandleType {
-	return InBackend
+func (node *ShowRolesStmt) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowTableStatus) ResultType() ResultType {
-	return ResultRow
+func (node *ShowConnectors) StmtKind() StmtKind {
+	return compositeResRowType
 }
 
-func (node *ExplainStmt) HandleType() HandleType {
-	return InFrontend
+func (node *AlterTable) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ExplainStmt) ResultType() ResultType {
-	return ResultRow
+func (node *CreateConnector) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ExplainAnalyze) HandleType() HandleType {
-	return InBackend
+func (node *CreateStream) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ExplainAnalyze) ResultType() ResultType {
-	return ResultRow
+func (node *DropTable) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ExplainFor) HandleType() HandleType {
-	return InBackend
+func (node *Load) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ExplainFor) ResultType() ResultType {
-	return ResultRow
+func (node *AlterView) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowColumns) HandleType() HandleType {
-	return InBackend
+func (node *TruncateTable) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowColumns) ResultType() ResultType {
-	return ResultRow
+func (node *Delete) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowStatus) HandleType() HandleType {
-	return InBackend
+func (node *SetVar) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowStatus) ResultType() ResultType {
-	return ResultRow
+func (node *Replace) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowWarnings) HandleType() HandleType {
-	return InFrontend
+func (node *CreateIndex) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowWarnings) ResultType() ResultType {
-	return ResultRow
+func (node *DropDatabase) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowErrors) HandleType() HandleType {
-	return InFrontend
+func (node *SetDefaultRole) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowErrors) ResultType() ResultType {
-	return ResultRow
+func (node *SetPassword) StmtKind() StmtKind {
+	return MakeStmtKind(STATUS, RESP_STATUS, IN_FRONTEND)
 }
 
-func (node *ShowProcessList) HandleType() HandleType {
-	return InBackend
+func (node *DropIndex) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowProcessList) ResultType() ResultType {
-	return ResultRow
+func (node *AnalyzeStmt) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowCreateDatabase) HandleType() HandleType {
-	return InBackend
+func (node *SetRole) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowCreateDatabase) ResultType() ResultType {
-	return ResultRow
+func (node *Do) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowStages) HandleType() HandleType {
-	return InBackend
+func (node *Declare) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowStages) ResultType() ResultType {
-	return ResultRow
+func (node *CreateExtension) StmtKind() StmtKind {
+	return MakeStmtKind(UNDEFINED, RESP_STATUS, IN_FRONTEND)
 }
 
-func (node *ShowCreatePublications) HandleType() HandleType {
-	return InBackend
+func (node *LoadExtension) StmtKind() StmtKind {
+	return MakeStmtKind(UNDEFINED, RESP_STATUS, IN_FRONTEND)
 }
 
-func (node *ShowCreatePublications) ResultType() ResultType {
-	return ResultRow
+func (node *ValuesStatement) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *ShowPublications) HandleType() HandleType {
-	return InBackend
+func (node *MoDump) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowPublications) ResultType() ResultType {
-	return ResultRow
+func (node *CreateSequence) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowTableSize) HandleType() HandleType {
-	return InBackend
+func (node *AlterSequence) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *ShowTableSize) ResultType() ResultType {
-	return ResultRow
+func (node *Reset) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowRolesStmt) HandleType() HandleType {
-	return InBackend
+func (node *DropConnector) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowRolesStmt) ResultType() ResultType {
-	return ResultRow
+func (node *ResumeDaemonTask) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowConnectors) HandleType() HandleType {
-	return InFrontend
+func (node *CancelDaemonTask) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *ShowConnectors) ResultType() ResultType {
-	return ResultRow
+func (node *PauseDaemonTask) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterTable) HandleType() HandleType {
-	return InBackend
+func (node *PrepareString) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *AlterTable) ResultType() ResultType {
-	return Status
+func (node *PrepareStmt) StmtKind() StmtKind {
+	return frontendStatusTyp
 }
 
-func (node *CreateConnector) HandleType() HandleType {
-	return InFrontend
+func (node *DropView) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *CreateConnector) ResultType() ResultType {
-	return Status
+func (node *ShowCreateView) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *CreateStream) HandleType() HandleType {
-	return InBackend
+func (node *DropSequence) StmtKind() StmtKind {
+	return defaultStatusTyp
 }
 
-func (node *CreateStream) ResultType() ResultType {
-	return Status
+func (node *ShowTableNumber) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *DropTable) HandleType() HandleType {
-	return InBackend
+func (node *ShowColumnNumber) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *DropTable) ResultType() ResultType {
-	return Status
+func (node *ShowTableValues) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *Load) HandleType() HandleType {
-	return InBackend
+func (node *ShowNodeList) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *Load) ResultType() ResultType {
-	return Status
+func (node *ShowLocks) StmtKind() StmtKind {
+	return defaultResRowTyp
 }
 
-func (node *AlterView) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *AlterView) ResultType() ResultType {
-	return Status
-}
-
-func (node *TruncateTable) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *TruncateTable) ResultType() ResultType {
-	return Status
-}
-
-func (node *Delete) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *Delete) ResultType() ResultType {
-	return Status
-}
-
-func (node *SetVar) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *SetVar) ResultType() ResultType {
-	return Status
-}
-
-func (node *Replace) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *Replace) ResultType() ResultType {
-	return Status
-}
-
-func (node *CreateIndex) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *CreateIndex) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropDatabase) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *DropDatabase) ResultType() ResultType {
-	return Status
-}
-
-func (node *SetDefaultRole) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *SetDefaultRole) ResultType() ResultType {
-	return Status
-}
-
-func (node *SetPassword) HandleType() HandleType {
-	return Unknown
-}
-
-func (node *SetPassword) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropIndex) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *DropIndex) ResultType() ResultType {
-	return Status
-}
-
-func (node *AnalyzeStmt) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *AnalyzeStmt) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *SetRole) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *SetRole) ResultType() ResultType {
-	return Status
-}
-
-func (node *Do) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *Do) ResultType() ResultType {
-	return Status
-}
-
-func (node *Declare) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *Declare) ResultType() ResultType {
-	return Status
-}
-
-func (node *CreateExtension) HandleType() HandleType {
-	return Unknown
-}
-
-func (node *CreateExtension) ResultType() ResultType {
-	return Undefined
-}
-
-func (node *LoadExtension) HandleType() HandleType {
-	return Unknown
-}
-
-func (node *LoadExtension) ResultType() ResultType {
-	return Undefined
-}
-
-func (node *ValuesStatement) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ValuesStatement) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *MoDump) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *MoDump) ResultType() ResultType {
-	return Status
-}
-
-func (node *CreateSequence) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *CreateSequence) ResultType() ResultType {
-	return Status
-}
-
-func (node *AlterSequence) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *AlterSequence) ResultType() ResultType {
-	return Status
-}
-
-func (node *Reset) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *Reset) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropConnector) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *DropConnector) ResultType() ResultType {
-	return Status
-}
-
-func (node *ResumeDaemonTask) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *ResumeDaemonTask) ResultType() ResultType {
-	return Status
-}
-
-func (node *CancelDaemonTask) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *CancelDaemonTask) ResultType() ResultType {
-	return Status
-}
-
-func (node *PauseDaemonTask) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *PauseDaemonTask) ResultType() ResultType {
-	return Status
-}
-
-func (node *PrepareString) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *PrepareString) ResultType() ResultType {
-	return Status
-}
-
-func (node *PrepareStmt) HandleType() HandleType {
-	return InFrontend
-}
-
-func (node *PrepareStmt) ResultType() ResultType {
-	return Status
-}
-
-func (node *DropView) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *DropView) ResultType() ResultType {
-	return Status
-}
-
-func (node *ShowCreateView) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowCreateView) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *DropSequence) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *DropSequence) ResultType() ResultType {
-	return Status
-}
-
-func (node *ShowTableNumber) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowTableNumber) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *ShowColumnNumber) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowColumnNumber) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *ShowTableValues) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowTableValues) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *ShowNodeList) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowNodeList) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *ShowLocks) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowLocks) ResultType() ResultType {
-	return ResultRow
-}
-
-func (node *ShowSequences) HandleType() HandleType {
-	return InBackend
-}
-
-func (node *ShowSequences) ResultType() ResultType {
-	return ResultRow
+func (node *ShowSequences) StmtKind() StmtKind {
+	return defaultResRowTyp
 }

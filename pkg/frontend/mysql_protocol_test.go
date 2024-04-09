@@ -102,11 +102,12 @@ func TestMysqlClientProtocol_Handshake(t *testing.T) {
 	_, err = toml.DecodeFile("test/system_vars_config.toml", pu.SV)
 	require.NoError(t, err)
 	pu.SV.SkipCheckUser = true
+	gPu = pu
 
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 
 	// A mock autoincrcache manager.
-	aicm := &defines.AutoIncrCacheManager{}
+	gAicm = &defines.AutoIncrCacheManager{}
 	rm, _ := NewRoutineManager(ctx)
 
 	wg := sync.WaitGroup{}
@@ -178,7 +179,7 @@ func TestKIll(t *testing.T) {
 	pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
 	require.NoError(t, err)
 	pu.SV.SkipCheckUser = true
-
+	gPu = pu
 	sql1 := "select connection_id();"
 	var sql2, sql3, sql4 string
 
@@ -245,7 +246,7 @@ func TestKIll(t *testing.T) {
 
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 	// A mock autoincrcache manager.
-	aicm := &defines.AutoIncrCacheManager{}
+	gAicm = &defines.AutoIncrCacheManager{}
 	gRtMgr, _ = NewRoutineManager(ctx)
 
 	wg := sync.WaitGroup{}
@@ -276,6 +277,7 @@ func TestKIll(t *testing.T) {
 	connIdRow = conn2.QueryRow(sql1)
 	err = connIdRow.Scan(&conn2Id)
 	require.NoError(t, err)
+	fmt.Println("conn==>", conn1Id, conn2Id)
 
 	wgSleep := sync.WaitGroup{}
 	wgSleep.Add(1)
@@ -1273,8 +1275,8 @@ func (tRM *TestRoutineManager) resultsetHandler(rs goetty.IOSession, msg interfa
 	if !ok {
 		return moerr.NewInternalError(ctx, "message is not Packet")
 	}
-
-	ses := NewSession(pro, nil, pu, nil, nil)
+	gPu = pu
+	ses := NewSession(pro, nil, nil, false, nil)
 	ses.SetRequestContext(ctx)
 	pro.SetSession(ses)
 
@@ -1625,7 +1627,7 @@ func openDbConn(t *testing.T, port int) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	} else {
-		db.SetConnMaxLifetime(time.Minute * 3)
+		db.SetConnMaxLifetime(time.Minute * 30)
 		db.SetMaxOpenConns(1)
 		db.SetMaxIdleConns(1)
 		time.Sleep(time.Millisecond * 100)
@@ -1895,10 +1897,11 @@ func Test_openpacket(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		gPu = pu
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
-		ses := NewSession(proto, nil, pu, nil, nil)
+		ses := NewSession(proto, nil, nil, false, nil)
 		ses.SetRequestContext(context.TODO())
 		proto.ses = ses
 
@@ -1923,10 +1926,11 @@ func Test_openpacket(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		gPu = pu
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
-		ses := NewSession(proto, nil, pu, nil, nil)
+		ses := NewSession(proto, nil, nil, false, nil)
 		ses.SetRequestContext(context.TODO())
 		proto.ses = ses
 
@@ -2042,6 +2046,7 @@ func Test_openpacket(t *testing.T) {
 			convey.So(bytes.Equal(res, want), convey.ShouldBeTrue)
 		}
 	})
+
 }
 
 func TestSendPrepareResponse(t *testing.T) {
@@ -2061,7 +2066,11 @@ func TestSendPrepareResponse(t *testing.T) {
 		}
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
-		proto.SetSession(&Session{})
+		proto.SetSession(&Session{
+			feSessionImpl: feSessionImpl{
+				txnHandler: &TxnHandler{},
+			},
+		})
 
 		st := tree.NewPrepareString(tree.Identifier(getPrepareStmtName(1)), "select ?, 1")
 		stmts, err := mysql.Parse(ctx, st.Sql, 1)
@@ -2271,9 +2280,10 @@ func Test_resultset(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		gPu = pu
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, nil)
+		ses := NewSession(proto, nil, &gSys, true, nil)
 		ses.SetRequestContext(ctx)
 		proto.ses = ses
 
@@ -2304,9 +2314,10 @@ func Test_resultset(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		gPu = pu
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, nil)
+		ses := NewSession(proto, nil, &gSys, true, nil)
 		ses.SetRequestContext(ctx)
 		proto.ses = ses
 
@@ -2337,9 +2348,10 @@ func Test_resultset(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		gPu = pu
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, nil)
+		ses := NewSession(proto, nil, &gSys, true, nil)
 		ses.SetRequestContext(ctx)
 		proto.ses = ses
 
@@ -2373,9 +2385,10 @@ func Test_resultset(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		gPu = pu
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, pu, &gSys, nil)
+		ses := NewSession(proto, nil, &gSys, true, nil)
 		ses.SetRequestContext(ctx)
 		ses.cmd = COM_STMT_EXECUTE
 		proto.ses = ses

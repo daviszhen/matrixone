@@ -30,15 +30,15 @@ func respClientFunc(requestCtx context.Context,
 	ses *Session,
 	execCtx *ExecCtx) (err error) {
 
-	switch execCtx.stmt.ResultType() {
-	case tree.ResultRow:
-		return respResultRow(requestCtx, ses, execCtx)
-	case tree.Status:
+	switch execCtx.stmt.StmtKind().RespType() {
+	case tree.STREAM_RESULT_ROW:
+		return respStreamResultRow(requestCtx, ses, execCtx)
+	case tree.PREBUILD_RESULT_ROW:
+		return respPrebuildResultRow(requestCtx, ses, execCtx)
+	case tree.NO_RESP:
+	case tree.RESP_ITSELF:
+	case tree.RESP_STATUS:
 		return respStatus(requestCtx, ses, execCtx)
-	case tree.NoResp:
-	case tree.RespItself:
-	case tree.Undefined:
-		return moerr.NewInternalError(requestCtx, "need set result type for %s", execCtx.sqlOfStmt)
 	}
 
 	if ses.GetQueryInExecute() {

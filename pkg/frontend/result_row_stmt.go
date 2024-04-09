@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
@@ -216,7 +217,7 @@ func executeResultRowStmt(requestCtx context.Context, ses *Session, execCtx *Exe
 	return
 }
 
-func respResultRow(requestCtx context.Context,
+func respStreamResultRow(requestCtx context.Context,
 	ses *Session,
 	execCtx *ExecCtx) (err error) {
 	switch statement := execCtx.stmt.(type) {
@@ -278,4 +279,15 @@ func respResultRow(requestCtx context.Context,
 	}
 
 	return
+}
+
+func respPrebuildResultRow(requestCtx context.Context,
+	ses *Session,
+	execCtx *ExecCtx) (err error) {
+	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
+	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, execCtx.isLastStmt)
+	if err := execCtx.proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
+	}
+	return err
 }

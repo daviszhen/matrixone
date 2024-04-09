@@ -67,6 +67,8 @@ func handleCallProcedure(ctx context.Context, ses FeSession, call *tree.CallStmt
 		return err
 	}
 
+	ses.SetMysqlResultSet(nil)
+
 	resp := NewGeneralOkResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus())
 
 	if len(results) == 0 {

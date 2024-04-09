@@ -33,7 +33,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae/route"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"go.uber.org/zap"
 )
 
 func handleShowTableStatus(ses *Session, stmt *tree.ShowTableStatus, proc *process.Process) error {
@@ -75,12 +74,6 @@ func handleShowTableStatus(ses *Session, stmt *tree.ShowTableStatus, proc *proce
 		}
 		mrs.AddRow(row)
 	}
-	if err := ses.GetMysqlProtocol().SendResultSetTextBatchRowSpeedup(mrs, mrs.GetRowCount()); err != nil {
-		logError(ses, ses.GetDebugString(),
-			"Failed to handle 'SHOW TABLE STATUS'",
-			zap.Error(err))
-		return err
-	}
 	return nil
 }
 
@@ -120,17 +113,9 @@ func doShowErrors(ses *Session) error {
 
 func handleShowErrors(ses FeSession, isLastStmt bool) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	err = doShowErrors(ses.(*Session))
 	if err != nil {
 		return err
-	}
-
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-
-	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
-		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -261,16 +246,9 @@ func doShowVariables(ses *Session, proc *process.Process, sv *tree.ShowVariables
 handle show variables
 */
 func handleShowVariables(ses FeSession, sv *tree.ShowVariables, proc *process.Process, isLastStmt bool) error {
-	proto := ses.GetMysqlProtocol()
 	err := doShowVariables(ses.(*Session), proc, sv)
 	if err != nil {
 		return err
-	}
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-
-	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
-		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -278,16 +256,9 @@ func handleShowVariables(ses FeSession, sv *tree.ShowVariables, proc *process.Pr
 // handleShowAccounts lists the info of accounts
 func handleShowAccounts(ctx context.Context, ses FeSession, sa *tree.ShowAccounts, isLastStmt bool) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	err = doShowAccounts(ctx, ses.(*Session), sa)
 	if err != nil {
 		return err
-	}
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-
-	if err = proto.SendResponse(ctx, resp); err != nil {
-		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -295,16 +266,9 @@ func handleShowAccounts(ctx context.Context, ses FeSession, sa *tree.ShowAccount
 // handleShowCollation lists the info of collation
 func handleShowCollation(ses FeSession, sc *tree.ShowCollation, proc *process.Process, isLastStmt bool) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	err = doShowCollation(ses.(*Session), proc, sc)
 	if err != nil {
 		return err
-	}
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-
-	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
-		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -471,16 +435,9 @@ func doShowCollation(ses *Session, proc *process.Process, sc *tree.ShowCollation
 
 func handleShowSubscriptions(ctx context.Context, ses FeSession, ss *tree.ShowSubscriptions, isLastStmt bool) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	err = doShowSubscriptions(ctx, ses.(*Session), ss)
 	if err != nil {
 		return err
-	}
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-
-	if err = proto.SendResponse(ctx, resp); err != nil {
-		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}
 	return err
 }
@@ -565,15 +522,8 @@ func doShowBackendServers(ses *Session) error {
 
 func handleShowBackendServers(ctx context.Context, ses FeSession, isLastStmt bool) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	if err := doShowBackendServers(ses.(*Session)); err != nil {
 		return err
-	}
-
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-	if err := proto.SendResponse(ctx, resp); err != nil {
-		return moerr.NewInternalError(ctx, "routine send response failed, error: %v ", err)
 	}
 	return err
 }

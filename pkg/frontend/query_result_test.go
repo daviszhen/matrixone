@@ -17,9 +17,10 @@ package frontend
 import (
 	"context"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"io"
 	"testing"
+
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 
 	"github.com/BurntSushi/toml"
 	"github.com/golang/mock/gomock"
@@ -64,7 +65,7 @@ func newTestSession(t *testing.T, ctrl *gomock.Controller) *Session {
 	}
 	//file service
 	pu.FileService = newLocalETLFS(t, defines.SharedFileServiceName)
-
+	gPu = pu
 	//io session
 	ioses := mock_frontend.NewMockIOSession(ctrl)
 	ioses.EXPECT().Write(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
@@ -74,7 +75,7 @@ func newTestSession(t *testing.T, ctrl *gomock.Controller) *Session {
 
 	testutil.SetupAutoIncrService()
 	//new session
-	ses := NewSession(proto, testPool, pu, GSysVariables, nil)
+	ses := NewSession(proto, testPool, GSysVariables, true, nil)
 	var c clock.Clock
 	_, _ = ses.SetTempTableStorage(c)
 	return ses
@@ -119,7 +120,7 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	}
 	ses.SetTenantInfo(tenant)
 	proc := testutil.NewProcess()
-	proc.FileService = ses.pu.FileService
+	proc.FileService = gPu.FileService
 	ses.GetTxnCompileCtx().SetProcess(proc)
 	ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
 
@@ -209,7 +210,7 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	err = doDumpQueryResult(ctx, ses, ep)
 	assert.Nil(t, err)
 
-	fs := ses.GetParameterUnit().FileService
+	fs := gPu.FileService
 
 	//csvBuf := &bytes.Buffer{}
 	var r io.ReadCloser

@@ -17,21 +17,15 @@ package frontend
 import (
 	"context"
 
-	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
 // handleKill kill a connection or query
 func handleKill(ctx context.Context, ses *Session, k *tree.Kill) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	err = doKill(ctx, ses, k)
 	if err != nil {
 		return err
-	}
-	resp := NewGeneralOkResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus())
-	if err = proto.SendResponse(ctx, resp); err != nil {
-		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
 	}
 	return err
 }

@@ -379,7 +379,6 @@ handle "SELECT @@xxx.yyyy"
 func handleSelectVariables(ses FeSession, ve *tree.VarExpr, isLastStmt bool) error {
 	var err error = nil
 	mrs := ses.GetMysqlResultSet()
-	proto := ses.GetMysqlProtocol()
 
 	col := new(MysqlColumn)
 	col.SetColumnType(defines.MYSQL_TYPE_VARCHAR)
@@ -415,13 +414,6 @@ func handleSelectVariables(ses FeSession, ve *tree.VarExpr, isLastStmt bool) err
 	}
 
 	mrs.AddRow(row)
-
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, mrs)
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-
-	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
-		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed.")
-	}
 	return err
 }
 
@@ -432,6 +424,7 @@ func handleCmdFieldList(requestCtx context.Context, ses FeSession, icfl *Interna
 	var err error
 	proto := ses.GetMysqlProtocol()
 
+	ses.SetMysqlResultSet(nil)
 	err = doCmdFieldList(requestCtx, ses.(*Session), icfl)
 	if err != nil {
 		return err
@@ -552,12 +545,6 @@ func doReset(ctx context.Context, ses *Session, st *tree.Reset) error {
 
 func handleEmptyStmt(ctx context.Context, ses FeSession, stmt *tree.EmptyStmt) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
-
-	resp := NewGeneralOkResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus())
-	if err = proto.SendResponse(ctx, resp); err != nil {
-		return moerr.NewInternalError(ctx, "routine send response failed. error:%v ", err)
-	}
 	return err
 }
 

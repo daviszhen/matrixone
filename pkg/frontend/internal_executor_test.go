@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
+	"github.com/matrixorigin/matrixone/pkg/common/runtime"
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	ie "github.com/matrixorigin/matrixone/pkg/util/internalExecutor"
@@ -51,31 +52,28 @@ func (e *miniExec) SetSession(sess FeSession) {
 }
 
 func TestIe(t *testing.T) {
-	//runtime.SetupProcessLevelRuntime(runtime.DefaultRuntime())
-	//
-	//ctx := context.TODO()
-	//pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
-	//
-	//// Mock autoIncrCaches
-	//aicm := &defines.AutoIncrCacheManager{}
-	//
-	//executor := newIe(pu, aicm)
-	//executor.ApplySessionOverride(ie.NewOptsBuilder().Username("dump").Finish())
-	//sess := executor.newCmdSession(ctx, ie.NewOptsBuilder().Database("mo_catalog").Internal(true).Finish())
-	//assert.Equal(t, "dump", sess.GetMysqlProtocol().GetUserName())
-	//
-	//err := executor.Exec(ctx, "whatever", ie.NewOptsBuilder().Finish())
-	//assert.NoError(t, err)
-	//res := executor.Query(ctx, "whatever", ie.NewOptsBuilder().Finish())
-	//assert.NoError(t, err)
-	//assert.Equal(t, uint64(0), res.RowCount())
+	runtime.SetupProcessLevelRuntime(runtime.DefaultRuntime())
+
+	ctx := context.TODO()
+	pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
+	gPu = pu
+	executor := newIe()
+	executor.ApplySessionOverride(ie.NewOptsBuilder().Username("dump").Finish())
+	sess := executor.newCmdSession(ctx, ie.NewOptsBuilder().Database("mo_catalog").Internal(true).Finish())
+	assert.Equal(t, "dump", sess.GetMysqlProtocol().GetUserName())
+
+	err := executor.Exec(ctx, "whatever", ie.NewOptsBuilder().Finish())
+	assert.Error(t, err)
+	res := executor.Query(ctx, "whatever", ie.NewOptsBuilder().Finish())
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), res.RowCount())
 }
 
 func TestIeProto(t *testing.T) {
-	pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
+	gPu = config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 
 	// Mock autoIncrCaches
-	aicm := &defines.AutoIncrCacheManager{}
+	gAicm = &defines.AutoIncrCacheManager{}
 
 	executor := NewInternalExecutor()
 	p := executor.proto

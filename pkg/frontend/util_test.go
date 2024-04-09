@@ -633,8 +633,8 @@ func TestGetExprValue(t *testing.T) {
 		}
 
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
-
-		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, nil)
+		gPu = pu
+		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
 		ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ses.requestCtx = ctx
 		ses.connectCtx = ctx
@@ -738,8 +738,8 @@ func TestGetExprValue(t *testing.T) {
 		}
 
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
-
-		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, nil)
+		gPu = pu
+		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
 		ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ses.requestCtx = ctx
 		ses.connectCtx = ctx
@@ -893,7 +893,9 @@ func Test_makeExecuteSql(t *testing.T) {
 	}
 
 	pu := config.NewParameterUnit(sv, eng, txnClient, nil)
-	ses1 := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), pu, GSysVariables, nil)
+	gPu = pu
+	ses1 := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, 
+	nil)
 
 	ses1.SetUserDefinedVar("var2", "val2", "set var2 = val2")
 	ses1.SetUserDefinedVar("var3", "val3", "set var3 = val3")

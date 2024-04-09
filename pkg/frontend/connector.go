@@ -164,15 +164,8 @@ func handleDropConnector(ctx context.Context, ses *Session, st *tree.DropConnect
 
 func handleShowConnectors(ctx context.Context, ses *Session, isLastStmt bool) error {
 	var err error
-	proto := ses.GetMysqlProtocol()
 	if err := showConnectors(ses); err != nil {
 		return err
-	}
-
-	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
-	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, isLastStmt)
-	if err := proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
-		return moerr.NewInternalError(ses.GetRequestContext(), "routine send response failed, error: %v ", err)
 	}
 	return err
 }

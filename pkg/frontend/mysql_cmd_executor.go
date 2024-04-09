@@ -510,13 +510,11 @@ func executeStmt(requestCtx context.Context,
 	var cmpBegin time.Time
 	var ret interface{}
 
-	switch execCtx.stmt.HandleType() {
-	case tree.InFrontend:
+	switch execCtx.stmt.StmtKind().HandleType() {
+	case tree.IN_FRONTEND:
 		return handleInFrontend(requestCtx, ses, execCtx)
-	case tree.InBackend:
+	case tree.IN_BACKEND:
 		//in the computation engine
-	case tree.Unknown:
-		return moerr.NewInternalError(requestCtx, "need set handle type for %s", execCtx.sqlOfStmt)
 	}
 
 	switch st := execCtx.stmt.(type) {
@@ -586,12 +584,11 @@ func executeStmt(requestCtx context.Context,
 	// cw.Compile may rewrite the stmt in the EXECUTE statement, we fetch the latest version
 	//need to check again.
 	execCtx.stmt = execCtx.cw.GetAst()
-	switch execCtx.stmt.HandleType() {
-	case tree.InFrontend:
+	switch execCtx.stmt.StmtKind().HandleType() {
+	case tree.IN_FRONTEND:
 		return handleInFrontend(requestCtx, ses, execCtx)
-	case tree.InBackend:
-	case tree.Unknown:
-		return moerr.NewInternalError(requestCtx, "need set handle type for %s", execCtx.sqlOfStmt)
+	case tree.IN_BACKEND:
+
 	}
 
 	execCtx.runner = ret.(ComputationRunner)
@@ -601,21 +598,19 @@ func executeStmt(requestCtx context.Context,
 		logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
-	resultType := execCtx.stmt.ResultType()
-	switch resultType {
-	case tree.ResultRow:
+	StmtKind := execCtx.stmt.StmtKind().ResType()
+	switch StmtKind {
+	case tree.RESULT_ROW:
 		err = executeResultRowStmt(requestCtx, ses, execCtx)
 		if err != nil {
 			return err
 		}
-	case tree.Status:
+	case tree.STATUS:
 		err = executeStatusStmt(requestCtx, ses, execCtx)
 		if err != nil {
 			return err
 		}
-	case tree.NoResp:
-	case tree.RespItself:
-	case tree.Undefined:
+	case tree.UNDEFINED:
 		isExecute := false
 		switch execCtx.stmt.(type) {
 		case *tree.Execute:

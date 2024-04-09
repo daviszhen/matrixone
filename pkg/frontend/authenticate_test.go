@@ -18,15 +18,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/BurntSushi/toml"
 	"github.com/fagongzi/goetty/v2"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
 	"github.com/stretchr/testify/assert"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 
@@ -239,6 +240,7 @@ func Test_checkTenantExistsOrNot(t *testing.T) {
 
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
+		gPu = pu
 
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 
@@ -389,7 +391,11 @@ func Test_initFunction(t *testing.T) {
 			DefaultRoleID: moAdminRoleID,
 		}
 
-		ses := &Session{tenant: tenant}
+		ses := &Session{
+			feSessionImpl: feSessionImpl{
+				tenant: tenant,
+			},
+		}
 		err := InitFunction(ctx, ses, tenant, cu)
 		convey.So(err, convey.ShouldBeNil)
 	})
@@ -7360,6 +7366,7 @@ func Test_genRevokeCases(t *testing.T) {
 func newSes(priv *privilege, ctrl *gomock.Controller) *Session {
 	pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 	pu.SV.SetDefaultValues()
+	gPu = pu
 
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
 	ctx = defines.AttachAccountId(ctx, 0)
@@ -7370,7 +7377,7 @@ func newSes(priv *privilege, ctrl *gomock.Controller) *Session {
 	ioses.EXPECT().Ref().AnyTimes()
 	proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 
-	ses := NewSession(proto, nil, pu, GSysVariables, nil)
+	ses := NewSession(proto, nil, GSysVariables, true, nil)
 	tenant := &TenantInfo{
 		Tenant:        sysAccountName,
 		User:          rootName,
@@ -10621,9 +10628,12 @@ func TestUpload(t *testing.T) {
 		}
 		//file service
 		pu.FileService = fs
+		gPu = pu
 		ses := &Session{
-			protocol: proto,
-			proc:     proc,
+			feSessionImpl: feSessionImpl{
+				proto: proto,
+			},
+			proc: proc,
 		}
 		fp, err := Upload(proc.Ctx, ses, "test.py", "test")
 		convey.So(err, convey.ShouldBeNil)

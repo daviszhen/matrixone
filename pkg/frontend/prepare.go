@@ -131,50 +131,20 @@ func handleExplainStmt(requestCtx context.Context, ses FeSession, stmt *tree.Exp
 		return err
 	}
 
-	protocol := ses.GetMysqlProtocol()
-
 	explainColName := "QUERY PLAN"
 	columns, err := GetExplainColumns(requestCtx, explainColName)
 	if err != nil {
 		return err
 	}
 
-	//	Step 1 : send column count and column definition.
-	//send column count
-	colCnt := uint64(len(columns))
-	err = protocol.SendColumnCountPacket(colCnt)
-	if err != nil {
-		return err
-	}
-	//send columns
-	//column_count * Protocol::ColumnDefinition packets
-	cmd := ses.GetCmd()
 	mrs := ses.GetMysqlResultSet()
 	for _, c := range columns {
 		mysqlc := c.(Column)
 		mrs.AddColumn(mysqlc)
-		//	mysql COM_QUERY response: send the column definition per column
-		err := protocol.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
-		if err != nil {
-			return err
-		}
 	}
 
-	//	mysql COM_QUERY response: End after the column has been sent.
-	//	send EOF packet
-	err = protocol.SendEOFPacketIf(0, ses.GetTxnHandler().GetServerStatus())
-	if err != nil {
-		return err
-	}
-
-	err = buildMoExplainQuery(explainColName, buffer, ses.(*Session), getDataFromPipeline)
-	if err != nil {
-		return err
-	}
-
-	err = protocol.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
-	if err != nil {
-		return err
+	for _, line := range buffer.Lines {
+		mrs.AddRow([]any{line})
 	}
 	return nil
 }

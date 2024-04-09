@@ -77,16 +77,17 @@ func TestTxnHandler_NewTxn(t *testing.T) {
 
 		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
 		convey.So(err, convey.ShouldBeNil)
-
+		gPu = pu
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
 		txn := InitTxnHandler(eng, nil, nil)
 		txn.ses = &Session{
+			feSessionImpl: feSessionImpl{
+				gSysVars: &gSys,
+			},
 			requestCtx: ctx,
-			pu:         pu,
 			connectCtx: ctx,
-			gSysVars:   &gSys,
 		}
 		var c clock.Clock
 		_, _ = txn.ses.(*Session).SetTempTableStorage(c)
@@ -142,16 +143,17 @@ func TestTxnHandler_CommitTxn(t *testing.T) {
 
 		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
 		convey.So(err, convey.ShouldBeNil)
-
+		gPu = pu
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
 		txn := InitTxnHandler(eng, nil, nil)
 		txn.ses = &Session{
+			feSessionImpl: feSessionImpl{
+				gSysVars: &gSys,
+			},
 			requestCtx: ctx,
-			pu:         pu,
 			connectCtx: ctx,
-			gSysVars:   &gSys,
 		}
 		var c clock.Clock
 		_, _ = txn.ses.(*Session).SetTempTableStorage(c)
@@ -201,11 +203,10 @@ func TestTxnHandler_RollbackTxn(t *testing.T) {
 
 		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
 		convey.So(err, convey.ShouldBeNil)
-
+		gPu = pu
 		txn := InitTxnHandler(eng, nil, nil)
 		txn.ses = &Session{
 			requestCtx: ctx,
-			pu:         pu,
 			connectCtx: ctx,
 		}
 		var c clock.Clock
@@ -242,7 +243,7 @@ func TestSession_TxnBegin(t *testing.T) {
 		hints := engine.Hints{CommitOrRollbackTimeout: time.Second * 10}
 		eng.EXPECT().Hints().Return(hints).AnyTimes()
 		eng.EXPECT().New(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-		session := NewSession(proto, nil, config.NewParameterUnit(&config.FrontendParameters{}, eng, txnClient, nil), gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session.SetRequestContext(ctx)
 		session.SetConnectContext(ctx)
@@ -258,26 +259,26 @@ func TestSession_TxnBegin(t *testing.T) {
 		InitGlobalSystemVariables(gSysVars)
 
 		ses := genSession(ctrl, gSysVars)
-		err := ses.TxnBegin()
+		err := ses.GetTxnHandler().TxnBegin()
 		convey.So(err, convey.ShouldBeNil)
-		err = ses.TxnCommit()
+		err = ses.GetTxnHandler().TxnCommit()
 		convey.So(err, convey.ShouldBeNil)
-		err = ses.TxnBegin()
+		err = ses.GetTxnHandler().TxnBegin()
 		convey.So(err, convey.ShouldBeNil)
-		err = ses.SetAutocommit(true, false)
+		err = ses.GetTxnHandler().SetAutocommit(true, false)
 		convey.So(err, convey.ShouldBeNil)
-		err = ses.TxnCommit()
+		err = ses.GetTxnHandler().TxnCommit()
 		convey.So(err, convey.ShouldBeNil)
 		_, _, err = ses.GetTxnHandler().GetTxn()
 		convey.So(err, convey.ShouldBeNil)
 
-		err = ses.TxnCommit()
+		err = ses.GetTxnHandler().TxnCommit()
 		convey.So(err, convey.ShouldBeNil)
 
-		err = ses.SetAutocommit(false, true)
+		err = ses.GetTxnHandler().SetAutocommit(false, true)
 		convey.So(err, convey.ShouldBeNil)
 
-		err = ses.SetAutocommit(false, false)
+		err = ses.GetTxnHandler().SetAutocommit(false, false)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
@@ -296,7 +297,7 @@ func TestVariables(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
 		txnClient := mock_frontend.NewMockTxnClient(ctrl)
 		txnClient.EXPECT().New(gomock.Any(), gomock.Any()).AnyTimes()
-		session := NewSession(proto, nil, config.NewParameterUnit(&config.FrontendParameters{}, nil, txnClient, nil), gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		session.SetRequestContext(context.Background())
 		return session
 	}
@@ -552,7 +553,7 @@ func TestSession_TxnCompilerContext(t *testing.T) {
 			t.Error(err)
 		}
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
-		session := NewSession(proto, nil, pu, gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session.SetRequestContext(ctx)
 		session.SetConnectContext(ctx)
@@ -633,7 +634,7 @@ func TestSession_GetTempTableStorage(t *testing.T) {
 			t.Error(err)
 		}
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
-		session := NewSession(proto, nil, pu, gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		session.SetRequestContext(context.Background())
 		session.SetConnectContext(context.Background())
 		return session
@@ -664,7 +665,7 @@ func TestIfInitedTempEngine(t *testing.T) {
 			t.Error(err)
 		}
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
-		session := NewSession(proto, nil, pu, gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		session.SetRequestContext(context.Background())
 		return session
 	}
@@ -692,7 +693,7 @@ func TestSetTempTableStorage(t *testing.T) {
 			t.Error(err)
 		}
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
-		session := NewSession(proto, nil, pu, gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		session.SetRequestContext(context.Background())
 		return session
 	}
@@ -840,7 +841,7 @@ func TestSession_Migrate(t *testing.T) {
 		rel.EXPECT().GetTableID(gomock.Any()).Return(tid).AnyTimes()
 		db.EXPECT().IsSubscription(gomock.Any()).Return(false).AnyTimes()
 		db.EXPECT().Relation(gomock.Any(), gomock.Any(), gomock.Any()).Return(rel, nil).AnyTimes()
-		session := NewSession(proto, nil, config.NewParameterUnit(&config.FrontendParameters{}, eng, txnClient, nil), gSysVars, nil)
+		session := NewSession(proto, nil, gSysVars, true, nil)
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session.SetRequestContext(ctx)
 		session.SetConnectContext(ctx)
