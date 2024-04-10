@@ -150,6 +150,7 @@ func Test_ConnectionCount(t *testing.T) {
 	pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
 	require.NoError(t, err)
 	pu.SV.SkipCheckUser = true
+	gPu = pu
 
 	noResultSet := make(map[string]bool)
 	resultSet := make(map[string]*result)
