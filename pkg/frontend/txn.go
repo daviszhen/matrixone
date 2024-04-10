@@ -827,10 +827,10 @@ func rollbackTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execC
 	//logError(ses, ses.GetDebugString(), execErr.Error())
 	txnErr := ses.GetTxnHandler().TxnRollbackSingleStatement(execCtx.stmt, execErr)
 	if txnErr != nil {
-		//logStatementStatus(reqCtx, ses, execCtx.stmt, fail, txnErr)
+		logStatementStatus(reqCtx, ses, execCtx.stmt, fail, txnErr)
 		return txnErr
 	}
-	//logStatementStatus(reqCtx, ses, execCtx.stmt, fail, execErr)
+	logStatementStatus(reqCtx, ses, execCtx.stmt, fail, execErr)
 	return execErr
 }
 
@@ -850,31 +850,13 @@ func commitTxnFunc(requestCtx context.Context,
 	incStatementCounter(execCtx.tenant, execCtx.stmt)
 	retErr = ses.GetTxnHandler().TxnCommitSingleStatement(execCtx.stmt)
 	if retErr != nil {
-		//logStatementStatus(requestCtx, ses, execCtx.stmt, fail, retErr)
+		logStatementStatus(requestCtx, ses, execCtx.stmt, fail, retErr)
 	}
 	return
 }
 
 // finish the transaction
-func finishTxnFunc(reqCtx context.Context, ses *Session, execErr error, execCtx *ExecCtx) (err error) {
-	// First recover all panics.   If paniced, we will abort.
-	//if r := recover(); r != nil {
-	//	err = moerr.ConvertPanicError(requestCtx, r)
-	//}
-
-	if execErr == nil {
-		err = commitTxnFunc(reqCtx, ses, execCtx)
-		if err == nil {
-			return err
-		}
-		// if commitTxnFunc failed, we will rollback the transaction.
-		execErr = err
-	}
-
-	return rollbackTxnFunc(reqCtx, ses, execErr, execCtx)
-}
-
-func finishTxnFuncInBack(reqCtx context.Context, ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
+func finishTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
 	// First recover all panics.   If paniced, we will abort.
 	//if r := recover(); r != nil {
 	//	err = moerr.ConvertPanicError(requestCtx, r)

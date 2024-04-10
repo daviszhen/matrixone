@@ -52,7 +52,7 @@ func (s statementStatus) String() string {
 }
 
 // logStatementStatus prints the status of the statement into the log.
-func logStatementStatus(ctx context.Context, ses *Session, stmt tree.Statement, status statementStatus, err error) {
+func logStatementStatus(ctx context.Context, ses FeSession, stmt tree.Statement, status statementStatus, err error) {
 	var stmtStr string
 	stm := motrace.StatementFromContext(ctx)
 	if stm == nil {
@@ -65,7 +65,7 @@ func logStatementStatus(ctx context.Context, ses *Session, stmt tree.Statement, 
 	logStatementStringStatus(ctx, ses, stmtStr, status, err)
 }
 
-func logStatementStringStatus(ctx context.Context, ses *Session, stmtStr string, status statementStatus, err error) {
+func logStatementStringStatus(ctx context.Context, ses FeSession, stmtStr string, status statementStatus, err error) {
 	str := SubStringFromBegin(stmtStr, int(gPu.SV.LengthOfQueryPrinted))
 	outBytes, outPacket := ses.GetMysqlProtocol().CalculateOutTrafficBytes(true)
 	if status == success {
@@ -74,8 +74,11 @@ func logStatementStringStatus(ctx context.Context, ses *Session, stmtStr string,
 	} else {
 		logError(ses, ses.GetDebugString(), "query trace status", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.StatementField(str), logutil.StatusField(status.String()), logutil.ErrorField(err), trace.ContextField(ctx))
 	}
-	// pls make sure: NO ONE use the ses.tStmt after EndStatement
-	motrace.EndStatement(ctx, err, ses.sentRows.Load(), outBytes, outPacket)
+	if !ses.IsBackgroundSession() {
+		// pls make sure: NO ONE use the ses.tStmt after EndStatement
+		motrace.EndStatement(ctx, err, ses.SendRows(), outBytes, outPacket)
+	}
+
 	// need just below EndStatement
 	ses.SetTStmt(nil)
 }

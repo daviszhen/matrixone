@@ -389,7 +389,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			return err
 		}
 
-		err = respClientWhenSuccessFunc(requestCtx, ses, &execCtx)
+		err = respClientWhenSuccess(requestCtx, ses, &execCtx)
 		if err != nil {
 			return err
 		}

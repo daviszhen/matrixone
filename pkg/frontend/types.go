@@ -391,6 +391,8 @@ type FeSession interface {
 	GetStmtInfo() *motrace.StatementInfo
 	GetTxnInfo() string
 	GetUUID() []byte
+	SendRows() int64
+	SetTStmt(stmt *motrace.StatementInfo)
 }
 
 type ExecCtx struct {

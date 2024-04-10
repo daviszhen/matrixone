@@ -252,7 +252,7 @@ func executeStmtInBackWithTxn(requestCtx context.Context,
 ) (err error) {
 	// defer transaction state management.
 	defer func() {
-		err = finishTxnFuncInBack(requestCtx, backSes, err, execCtx)
+		err = finishTxnFunc(requestCtx, backSes, err, execCtx)
 	}()
 
 	// statement management
@@ -437,6 +437,7 @@ var NewBackgroundExec = func(
 			timeZone:       time.Local,
 		},
 	}
+	backSes.uuid, _ = uuid.NewV7()
 	backSes.GetTxnCompileCtx().SetSession(backSes)
 	backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
@@ -582,8 +583,11 @@ type backSession struct {
 	connectCtx context.Context
 }
 
-func (backSes *backSession) GetUUID() []byte {
-	return []byte{}
+func (backSes *backSession) SetTStmt(stmt *motrace.StatementInfo) {
+
+}
+func (backSes *backSession) SendRows() int64 {
+	return 0
 }
 
 func (backSes *backSession) GetTxnInfo() string {

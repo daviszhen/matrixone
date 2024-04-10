@@ -229,6 +229,10 @@ type Session struct {
 	disableTrace bool
 }
 
+func (ses *Session) SendRows() int64 {
+	return ses.sentRows.Load()
+}
+
 func (ses *Session) GetStmtInfo() *motrace.StatementInfo {
 	return ses.tStmt
 }
@@ -799,6 +803,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 				timeZone:       time.Local,
 			},
 		}
+		backSes.uuid, _ = uuid.NewV7()
 		backSes.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 		backSes.GetTxnCompileCtx().SetSession(backSes)
 		backSes.GetTxnHandler().SetSession(backSes)
@@ -836,6 +841,7 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 			timeZone:       time.Local,
 		},
 	}
+	backSes.uuid, _ = uuid.NewV7()
 	backSes.GetTxnCompileCtx().SetSession(backSes)
 	backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{

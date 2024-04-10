@@ -26,7 +26,7 @@ func setResponse(ses *Session, isLastStmt bool, rspLen uint64) *Response {
 }
 
 // response the client
-func respClientWhenSuccessFunc(requestCtx context.Context,
+func respClientWhenSuccess(requestCtx context.Context,
 	ses *Session,
 	execCtx *ExecCtx) (err error) {
 
