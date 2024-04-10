@@ -31,12 +31,14 @@ func respClientFunc(requestCtx context.Context,
 	execCtx *ExecCtx) (err error) {
 
 	switch execCtx.stmt.StmtKind().RespType() {
-	case tree.STREAM_RESULT_ROW:
+	case tree.RESP_STREAM_RESULT_ROW:
 		return respStreamResultRow(requestCtx, ses, execCtx)
-	case tree.PREBUILD_RESULT_ROW:
+	case tree.RESP_PREBUILD_RESULT_ROW:
 		return respPrebuildResultRow(requestCtx, ses, execCtx)
-	case tree.NO_RESP:
-	case tree.RESP_ITSELF:
+	case tree.RESP_MIXED_RESULT_ROW:
+		return respMixedResultRow(requestCtx, ses, execCtx)
+	case tree.RESP_NOTHING:
+	case tree.RESP_BY_SITUATION:
 	case tree.RESP_STATUS:
 		return respStatus(requestCtx, ses, execCtx)
 	}

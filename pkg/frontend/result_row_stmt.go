@@ -291,3 +291,21 @@ func respPrebuildResultRow(requestCtx context.Context,
 	}
 	return err
 }
+
+func respMixedResultRow(requestCtx context.Context,
+	ses *Session,
+	execCtx *ExecCtx) (err error) {
+	mrs := ses.GetMysqlResultSet()
+	if err := ses.GetMysqlProtocol().SendResultSetTextBatchRowSpeedup(mrs, mrs.GetRowCount()); err != nil {
+		logError(ses, ses.GetDebugString(),
+			"Failed to handle 'SHOW TABLE STATUS'",
+			zap.Error(err))
+		return err
+	}
+	err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
+	if err != nil {
+		return
+	}
+
+	return err
+}

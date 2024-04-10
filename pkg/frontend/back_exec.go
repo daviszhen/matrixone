@@ -352,19 +352,19 @@ func executeStmtInBack(requestCtx context.Context,
 		logInfo(backSes, backSes.GetDebugString(), fmt.Sprintf("time of Exec.Build : %s", time.Since(cmpBegin).String()))
 	}
 
-	StmtKind := execCtx.stmt.StmtKind().ResType()
+	StmtKind := execCtx.stmt.StmtKind().OutputType()
 	switch StmtKind {
-	case tree.RESULT_ROW:
+	case tree.OUTPUT_RESULT_ROW:
 		err = executeResultRowStmtInBack(requestCtx, backSes, execCtx)
 		if err != nil {
 			return err
 		}
-	case tree.STATUS:
+	case tree.OUTPUT_STATUS:
 		err = executeStatusStmtInBack(requestCtx, backSes, execCtx)
 		if err != nil {
 			return err
 		}
-	case tree.UNDEFINED:
+	case tree.OUTPUT_UNDEFINED:
 		isExecute := false
 		switch execCtx.stmt.(type) {
 		case *tree.Execute:

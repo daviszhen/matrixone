@@ -67,37 +67,41 @@ const (
 //		010 no resp. do no response to the client. like COM_QUIT command, Deallocate from COM_STMT_CLOSE.
 //		011 resp in handle function. result row or status. like EXECUTE,CALL.
 //		100 resp_status
+//		101 mixed result row. show table status. stream column def. composite result row.
 //bit 5
 //		0 in computation engine
 //		1 in the frontend
 
 type StmtKind int
 
-type ResultType int
+type OutputType int
 type RespType int
 type HandleType int
 
 const (
-	UNDEFINED  ResultType = 0x0
-	RESULT_ROW ResultType = 0x1
-	STATUS     ResultType = 0x2
+	OUTPUT_UNDEFINED  OutputType = 0x0
+	OUTPUT_RESULT_ROW OutputType = 0x1
+	OUTPUT_STATUS     OutputType = 0x2
 
-	STREAM_RESULT_ROW   RespType = 0x0
-	PREBUILD_RESULT_ROW RespType = 0x1
-	NO_RESP             RespType = 0x2
-	RESP_ITSELF         RespType = 0x3
-	RESP_STATUS         RespType = 0x4
+	//
+	RESP_STREAM_RESULT_ROW   RespType = 0x0
+	RESP_PREBUILD_RESULT_ROW RespType = 0x1
+	RESP_NOTHING             RespType = 0x2
+	RESP_BY_SITUATION        RespType = 0x3
+	RESP_STATUS              RespType = 0x4
+	RESP_MIXED_RESULT_ROW    RespType = 0x5
 
+	//
 	IN_BACKEND  HandleType = 0x0
 	IN_FRONTEND HandleType = 0x1
 )
 
-func MakeStmtKind(resTyp ResultType, respTyp RespType, handleTyp HandleType) StmtKind {
+func MakeStmtKind(resTyp OutputType, respTyp RespType, handleTyp HandleType) StmtKind {
 	return StmtKind(int(resTyp) | (int(respTyp) << 2) | (int(handleTyp) << 5))
 }
 
-func (t StmtKind) ResType() ResultType {
-	return ResultType((0x3 & int(t)))
+func (t StmtKind) OutputType() OutputType {
+	return OutputType((0x3 & int(t)))
 }
 
 func (t StmtKind) RespType() RespType {
@@ -111,13 +115,13 @@ func (t StmtKind) HandleType() HandleType {
 var (
 	//response result rows to the client.
 	//like SELECT...,SHOW...,
-	defaultResRowTyp = MakeStmtKind(RESULT_ROW, STREAM_RESULT_ROW, IN_BACKEND)
+	defaultResRowTyp = MakeStmtKind(OUTPUT_RESULT_ROW, RESP_STREAM_RESULT_ROW, IN_BACKEND)
 
 	//response status(success or fail) to the client.
 	//like CREATE...,DROP...,
-	defaultStatusTyp = MakeStmtKind(STATUS, RESP_STATUS, IN_BACKEND)
+	defaultStatusTyp = MakeStmtKind(OUTPUT_STATUS, RESP_STATUS, IN_BACKEND)
 
-	frontendStatusTyp = MakeStmtKind(STATUS, RESP_STATUS, IN_FRONTEND)
+	frontendStatusTyp = MakeStmtKind(OUTPUT_STATUS, RESP_STATUS, IN_FRONTEND)
 
 	//like statements: they composite the result set themselves
 	//    ShowConnectors
@@ -129,7 +133,7 @@ var (
 	//    ShowCollation
 	//    ShowSubscriptions
 	//    ShowBackendServers
-	compositeResRowType = MakeStmtKind(RESULT_ROW, PREBUILD_RESULT_ROW, IN_FRONTEND)
+	compositeResRowType = MakeStmtKind(OUTPUT_RESULT_ROW, RESP_PREBUILD_RESULT_ROW, IN_FRONTEND)
 )
 
 func (node *Select) StmtKind() StmtKind {
@@ -236,7 +240,7 @@ func (node *DropProcedure) StmtKind() StmtKind {
 }
 
 func (node *CallStmt) StmtKind() StmtKind {
-	return MakeStmtKind(UNDEFINED, RESP_ITSELF, IN_FRONTEND)
+	return MakeStmtKind(OUTPUT_UNDEFINED, RESP_BY_SITUATION, IN_FRONTEND)
 }
 
 func (node *Grant) StmtKind() StmtKind {
@@ -284,7 +288,7 @@ func (node *prepareImpl) StmtKind() StmtKind {
 }
 
 func (node *Execute) StmtKind() StmtKind {
-	return MakeStmtKind(UNDEFINED, RESP_ITSELF, IN_BACKEND)
+	return MakeStmtKind(OUTPUT_UNDEFINED, RESP_BY_SITUATION, IN_BACKEND)
 }
 
 func (node *Deallocate) StmtKind() StmtKind {
@@ -350,7 +354,7 @@ func (node *ShowGrants) StmtKind() StmtKind {
 
 func (node *ShowTableStatus) StmtKind() StmtKind {
 	//FIXME: result row,prebuild result row, in backend
-	return compositeResRowType
+	return MakeStmtKind(OUTPUT_RESULT_ROW, RESP_MIXED_RESULT_ROW, IN_BACKEND)
 }
 
 func (node *ExplainStmt) StmtKind() StmtKind {
@@ -466,7 +470,7 @@ func (node *SetDefaultRole) StmtKind() StmtKind {
 }
 
 func (node *SetPassword) StmtKind() StmtKind {
-	return MakeStmtKind(STATUS, RESP_STATUS, IN_FRONTEND)
+	return MakeStmtKind(OUTPUT_STATUS, RESP_STATUS, IN_FRONTEND)
 }
 
 func (node *DropIndex) StmtKind() StmtKind {
@@ -490,11 +494,11 @@ func (node *Declare) StmtKind() StmtKind {
 }
 
 func (node *CreateExtension) StmtKind() StmtKind {
-	return MakeStmtKind(UNDEFINED, RESP_STATUS, IN_FRONTEND)
+	return MakeStmtKind(OUTPUT_UNDEFINED, RESP_STATUS, IN_FRONTEND)
 }
 
 func (node *LoadExtension) StmtKind() StmtKind {
-	return MakeStmtKind(UNDEFINED, RESP_STATUS, IN_FRONTEND)
+	return MakeStmtKind(OUTPUT_UNDEFINED, RESP_STATUS, IN_FRONTEND)
 }
 
 func (node *ValuesStatement) StmtKind() StmtKind {
