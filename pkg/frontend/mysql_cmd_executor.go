@@ -388,6 +388,11 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 		if err != nil {
 			return err
 		}
+
+		err = respClientWhenSuccessFunc(requestCtx, ses, &execCtx)
+		if err != nil {
+			return err
+		}
 	} // end of for
 
 	if canCache && !ses.isCached(input.getSql()) {

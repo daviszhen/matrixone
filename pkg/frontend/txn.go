@@ -865,7 +865,7 @@ func finishTxnFunc(reqCtx context.Context, ses *Session, execErr error, execCtx 
 	if execErr == nil {
 		err = commitTxnFunc(reqCtx, ses, execCtx)
 		if err == nil {
-			return respClientFunc(reqCtx, ses, execCtx)
+			return err
 		}
 		// if commitTxnFunc failed, we will rollback the transaction.
 		execErr = err
