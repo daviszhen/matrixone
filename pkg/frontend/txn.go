@@ -905,3 +905,318 @@ func finishTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx
 
 	return rollbackTxnFunc(reqCtx, ses, execErr, execCtx)
 }
+
+type FeTxnOption struct {
+	byBegin    bool
+	autoCommit bool
+}
+
+const (
+	defaultServerStatus uint32 = 0
+	defaultOptionBits   uint32 = OPTION_AUTOCOMMIT
+)
+
+type Txn struct {
+	storage engine.Engine
+	txnOp   TxnOperator
+
+	// it is for the transaction and different from the requestCtx.
+	// it is created before the transaction is started and
+	// released after the transaction is commit or rollback.
+	// the lifetime of txnCtx is longer than the requestCtx.
+	// the timeout of txnCtx is from the FrontendParameters.SessionTimeout with
+	// default 24 hours.
+	txnCtx             context.Context
+	txnCtxCancel       context.CancelFunc
+	shareTxn           bool
+	mu                 sync.Mutex
+	hasCalledStartStmt bool
+	prevTxnId          []byte
+	hasCalledIncrStmt  bool
+	prevIncrTxnId      []byte
+
+	//the server status
+	serverStatus uint32
+
+	//the option bits
+	optionBits uint32
+}
+
+func NewTxn() *Txn {
+	return &Txn{}
+}
+
+func (th *Txn) invalidTxnUnsafe() {
+	if th.txnCtxCancel != nil {
+		th.txnCtxCancel()
+		th.txnCtxCancel = nil
+	}
+	th.txnCtx = nil
+	th.txnOp = nil
+}
+
+func (th *Txn) InActiveTxn() bool {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.inActiveTxnUnsafe()
+}
+
+// inActiveTxnUnsafe can not be used outside the Txn.
+// refresh server status also
+func (th *Txn) inActiveTxnUnsafe() bool {
+	ret := th.txnOp != nil && th.txnCtx != nil
+	if ret {
+		SetBits(&th.serverStatus, uint32(SERVER_STATUS_IN_TRANS))
+	} else {
+		SetBits(&th.serverStatus, defaultServerStatus)
+	}
+	return ret
+}
+
+// Create starts a new txn
+func (th *Txn) Create(opt TxnOption, execCtx *ExecCtx) error {
+	var err error
+	var txnCtx context.Context
+	var txnOp TxnOperator
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	defer th.invalidTxnUnsafe()
+	if th.shareTxn {
+		return moerr.NewInternalError(execCtx.reqCtx, "NewTxn: the share txn is not allowed to create new txn")
+	}
+
+	//in active txn
+	if th.inActiveTxnUnsafe() {
+		//commit txn first
+		err = th.commitUnsafe(execCtx)
+		if err != nil {
+			/*
+				fix issue 6024.
+				When we get a w-w conflict during commit the txn,
+				we convert the error into a readable error.
+			*/
+			if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
+				return moerr.NewInternalError(execCtx.reqCtx, writeWriteConflictsErrorInfo())
+			}
+			return err
+		}
+	}
+	th.invalidTxnUnsafe()
+	defer func() {
+		if err != nil {
+			tenant := execCtx.tenant
+			incTransactionErrorsCounter(tenant, metric.SQLTypeBegin)
+		}
+	}()
+	txnCtx, txnOp, err = th.newTxnOperatorUnsafe(execCtx)
+	if err != nil {
+		return err
+	}
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+	storage := th.storage
+	err = storage.New(txnCtx, txnOp)
+	if err != nil {
+		execCtx.ses.SetTxnId(dumpUUID[:])
+	} else {
+		execCtx.ses.SetTxnId(txnOp.Txn().ID)
+	}
+	return err
+}
+
+// newTxnOperatorUnsafe creates a new txn operator using TxnClient. Should not be called outside txn
+func (th *Txn) newTxnOperatorUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator, error) {
+	var err error
+	if getGlobalPu().TxnClient == nil {
+		panic("must set txn client")
+	}
+
+	if th.shareTxn {
+		return nil, nil, moerr.NewInternalError(execCtx.reqCtx, "NewTxnOperator: the share txn is not allowed to create new txn")
+	}
+
+	var opts []client.TxnOption
+	rt := moruntime.ProcessLevelRuntime()
+	if rt != nil {
+		if v, ok := rt.GetGlobalVariables(moruntime.TxnOptions); ok {
+			opts = v.([]client.TxnOption)
+		}
+	}
+
+	txnCtx, err := th.createTxnCtxUnsafe(execCtx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if txnCtx == nil {
+		panic("context should not be nil")
+	}
+
+	accountID := uint32(0)
+	userName := ""
+	connectionID := uint32(0)
+	if execCtx.proto != nil {
+		connectionID = execCtx.proto.ConnectionID()
+	}
+	if execCtx.ses.GetTenantInfo() != nil {
+		accountID = execCtx.ses.GetTenantInfo().TenantID
+		userName = execCtx.ses.GetTenantInfo().User
+	}
+	sessionInfo := execCtx.ses.GetDebugString()
+	opts = append(opts,
+		client.WithTxnCreateBy(
+			accountID,
+			userName,
+			execCtx.ses.GetUUIDString(),
+			connectionID),
+		client.WithSessionInfo(sessionInfo))
+
+	if execCtx.ses.GetFromRealUser() {
+		opts = append(opts,
+			client.WithUserTxn())
+	}
+
+	if execCtx.ses.IsBackgroundSession() ||
+		execCtx.ses.DisableTrace() {
+		opts = append(opts, client.WithDisableTrace(true))
+	} else {
+		varVal, err := execCtx.ses.GetSessionVar("disable_txn_trace")
+		if err != nil {
+			return nil, nil, err
+		}
+		if gsv, ok := GSysVariables.GetDefinitionOfSysVar("disable_txn_trace"); ok {
+			if svbt, ok2 := gsv.GetType().(SystemVariableBoolType); ok2 {
+				if svbt.IsTrue(varVal) {
+					opts = append(opts, client.WithDisableTrace(true))
+				}
+			}
+		}
+	}
+
+	th.txnOp, err = getGlobalPu().TxnClient.New(
+		txnCtx,
+		execCtx.ses.getLastCommitTS(),
+		opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if th.txnOp == nil {
+		return nil, nil, moerr.NewInternalError(execCtx.reqCtx, "NewTxnOperator: txnClient new a null txn")
+	}
+	return txnCtx, th.txnOp, err
+}
+
+// createTxnCtxUnsafe creates txn ctx. Should not be called outside txn
+func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) (context.Context, error) {
+	if th.txnCtx == nil {
+		th.txnCtx, th.txnCtxCancel = context.WithTimeout(execCtx.reqCtx,
+			getGlobalPu().SV.SessionTimeout.Duration)
+	}
+
+	reqCtx := execCtx.ses.GetRequestContext()
+	retTxnCtx := th.txnCtx
+
+	accountId, err := defines.GetAccountId(reqCtx)
+	if err != nil {
+		return nil, err
+	}
+	retTxnCtx = defines.AttachAccountId(retTxnCtx, accountId)
+	retTxnCtx = defines.AttachUserId(retTxnCtx, defines.GetUserId(reqCtx))
+	retTxnCtx = defines.AttachRoleId(retTxnCtx, defines.GetRoleId(reqCtx))
+	if v := reqCtx.Value(defines.NodeIDKey{}); v != nil {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.NodeIDKey{}, v)
+	}
+	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(reqCtx))
+	if execCtx.ses.GetTenantInfo() != nil && execCtx.ses.GetTenantInfo().User == db_holder.MOLoggerUser {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.IsMoLogger{}, true)
+	}
+
+	if storage, ok := reqCtx.Value(defines.TemporaryTN{}).(*memorystorage.Storage); ok {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, storage)
+	} else if execCtx.ses.IfInitedTempEngine() {
+		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
+	}
+	return retTxnCtx, nil
+}
+
+func (th *Txn) GetTxn() (context.Context, TxnOperator, error) {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.txnCtx, th.txnOp, nil
+}
+
+func (th *Txn) Commit(execCtx *ExecCtx) error {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return nil
+}
+
+func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
+	_, span := trace.Start(execCtx.reqCtx, "TxnHandler.CommitTxn",
+		trace.WithKind(trace.SpanKindStatement))
+	defer span.End(trace.WithStatementExtra(execCtx.ses.GetTxnId(), execCtx.ses.GetStmtId(), execCtx.ses.GetSqlOfStmt()))
+	if !th.inActiveTxnUnsafe() || th.shareTxn {
+		return nil
+	}
+	sessionInfo := execCtx.ses.GetDebugString()
+	if th.txnOp == nil {
+		th.invalidTxnUnsafe()
+	}
+	if th.txnCtx == nil {
+		panic("context should not be nil")
+	}
+	if execCtx.ses.IfInitedTempEngine() && execCtx.ses.GetTempTableStorage() != nil {
+		th.txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.GetTempTableStorage())
+	}
+	storage := th.GetStorage()
+	ctx2, cancel := context.WithTimeout(
+		txnCtx,
+		storage.Hints().CommitOrRollbackTimeout,
+	)
+	defer cancel()
+	val, e := ses.GetSessionVar("mo_pk_check_by_dn")
+	if e != nil {
+		return e
+	}
+	if val != nil {
+		ctx2 = context.WithValue(ctx2, defines.PkCheckByTN{}, val.(int8))
+	}
+	defer func() {
+		// metric count
+		tenant := ses.GetTenantName()
+		incTransactionCounter(tenant)
+		if err != nil {
+			incTransactionErrorsCounter(tenant, metric.SQLTypeCommit)
+		}
+	}()
+
+	if logutil.GetSkip1Logger().Core().Enabled(zap.DebugLevel) {
+		txnId := txnOp.Txn().DebugString()
+		logDebugf(sessionInfo, "CommitTxn txnId:%s", txnId)
+		defer func() {
+			logDebugf(sessionInfo, "CommitTxn exit txnId:%s", txnId)
+		}()
+	}
+	if txnOp != nil {
+		th.ses.SetTxnId(txnOp.Txn().ID)
+		err = txnOp.Commit(ctx2)
+		if err != nil {
+			th.SetTxnOperatorInvalid()
+		}
+		ses.updateLastCommitTS(txnOp.Txn().CommitTS)
+	}
+	th.SetTxnOperatorInvalid()
+	th.ses.SetTxnId(dumpUUID[:])
+	return err
+	return nil
+}
+
+func (th *Txn) Rollback(execCtx *ExecCtx) error {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return nil
+}
+
+func (th *Txn) rollbackUnsafe(execCtx *ExecCtx) error {
+	return nil
+}

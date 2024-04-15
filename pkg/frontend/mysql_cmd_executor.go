@@ -2820,6 +2820,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			ses.proc.UnixTime = proc.UnixTime
 		}
 		execCtx := ExecCtx{
+			reqCtx:     requestCtx,
 			stmt:       stmt,
 			isLastStmt: i >= len(cws)-1,
 			tenant:     tenant,
@@ -2828,6 +2829,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			cw:         cw,
 			proc:       proc,
 			proto:      proto,
+			accout:     ses.tenant,
 		}
 		err = executeStmtWithResponse(requestCtx, ses, &execCtx)
 		if err != nil {
