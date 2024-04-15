@@ -907,12 +907,14 @@ func finishTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx
 }
 
 type FeTxnOption struct {
-	byBegin    bool
+	//byBegin denotes the txn started by the BEGIN stmt
+	byBegin bool
+	//autoCommit the variable AUTOCOMMIT is enabled
 	autoCommit bool
 }
 
 const (
-	defaultServerStatus uint32 = 0
+	defaultServerStatus uint32 = uint32(SERVER_STATUS_AUTOCOMMIT)
 	defaultOptionBits   uint32 = OPTION_AUTOCOMMIT
 )
 
@@ -942,17 +944,26 @@ type Txn struct {
 	optionBits uint32
 }
 
-func NewTxn() *Txn {
-	return &Txn{}
+func InitTxn(storage engine.Engine, txnCtx context.Context, txnOp TxnOperator) *Txn {
+	return &Txn{
+		storage:      &engine.EntireEngine{Engine: storage},
+		txnCtx:       txnCtx,
+		txnOp:        txnOp,
+		shareTxn:     txnCtx != nil && txnOp != nil,
+		serverStatus: defaultServerStatus,
+		optionBits:   defaultOptionBits,
+	}
 }
 
-func (th *Txn) invalidTxnUnsafe() {
+func (th *Txn) invalidateTxnUnsafe() {
 	if th.txnCtxCancel != nil {
 		th.txnCtxCancel()
 		th.txnCtxCancel = nil
 	}
 	th.txnCtx = nil
 	th.txnOp = nil
+	resetBits(&th.serverStatus, defaultServerStatus)
+	resetBits(&th.optionBits, defaultOptionBits)
 }
 
 func (th *Txn) InActiveTxn() bool {
@@ -964,51 +975,89 @@ func (th *Txn) InActiveTxn() bool {
 // inActiveTxnUnsafe can not be used outside the Txn.
 // refresh server status also
 func (th *Txn) inActiveTxnUnsafe() bool {
+	if th.txnOp == nil && th.txnCtx != nil {
+		panic("txnOp == nil and txnCtx != nil")
+	} else if th.txnOp != nil && th.txnCtx == nil {
+		panic("txnOp != nil and txnCtx == nil")
+	}
 	ret := th.txnOp != nil && th.txnCtx != nil
 	if ret {
-		SetBits(&th.serverStatus, uint32(SERVER_STATUS_IN_TRANS))
+		setBits(&th.serverStatus, uint32(SERVER_STATUS_IN_TRANS))
 	} else {
-		SetBits(&th.serverStatus, defaultServerStatus)
+		resetBits(&th.serverStatus, defaultServerStatus)
+		resetBits(&th.optionBits, defaultOptionBits)
 	}
 	return ret
 }
 
-// Create starts a new txn
-func (th *Txn) Create(opt TxnOption, execCtx *ExecCtx) error {
+// Create starts a new txn.
+// option bits decide the actual behaviour
+func (th *Txn) Create(opt FeTxnOption, execCtx *ExecCtx) error {
+	var err error
+	th.mu.Lock()
+	defer th.mu.Unlock()
+
+	// check BEGIN stmt
+	if opt.byBegin || !th.inActiveTxnUnsafe() {
+		//commit existed txn anyway
+		err = th.createUnsafe(execCtx)
+		if err != nil {
+			return err
+		}
+		resetBits(&th.serverStatus, defaultServerStatus)
+		resetBits(&th.optionBits, defaultOptionBits)
+		setBits(&th.serverStatus, uint32(SERVER_STATUS_IN_TRANS))
+
+		if opt.byBegin {
+			setBits(&th.optionBits, OPTION_BEGIN)
+		} else {
+			clearBits(&th.optionBits, OPTION_BEGIN)
+		}
+
+		if opt.autoCommit {
+			clearBits(&th.optionBits, OPTION_NOT_AUTOCOMMIT)
+			setBits(&th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT))
+		} else {
+			setBits(&th.optionBits, OPTION_NOT_AUTOCOMMIT)
+			clearBits(&th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT))
+		}
+	}
+	return nil
+}
+
+// starts a new txn.
+// if there is a txn existed, commit it before creating a new one.
+func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
 	var err error
 	var txnCtx context.Context
 	var txnOp TxnOperator
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	defer th.invalidTxnUnsafe()
+	defer th.inActiveTxnUnsafe()
 	if th.shareTxn {
 		return moerr.NewInternalError(execCtx.reqCtx, "NewTxn: the share txn is not allowed to create new txn")
 	}
 
 	//in active txn
-	if th.inActiveTxnUnsafe() {
-		//commit txn first
-		err = th.commitUnsafe(execCtx)
-		if err != nil {
-			/*
-				fix issue 6024.
-				When we get a w-w conflict during commit the txn,
-				we convert the error into a readable error.
-			*/
-			if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
-				return moerr.NewInternalError(execCtx.reqCtx, writeWriteConflictsErrorInfo())
-			}
-			return err
+	//commit existed txn first
+	err = th.commitUnsafe(execCtx)
+	if err != nil {
+		/*
+			fix issue 6024.
+			When we get a w-w conflict during commit the txn,
+			we convert the error into a readable error.
+		*/
+		if moerr.IsMoErrCode(err, moerr.ErrTxnWWConflict) {
+			return moerr.NewInternalError(execCtx.reqCtx, writeWriteConflictsErrorInfo())
 		}
+		return err
 	}
-	th.invalidTxnUnsafe()
+
 	defer func() {
 		if err != nil {
 			tenant := execCtx.tenant
 			incTransactionErrorsCounter(tenant, metric.SQLTypeBegin)
 		}
 	}()
-	txnCtx, txnOp, err = th.newTxnOperatorUnsafe(execCtx)
+	txnCtx, txnOp, err = th.createTxnOpUnsafe(execCtx)
 	if err != nil {
 		return err
 	}
@@ -1025,8 +1074,8 @@ func (th *Txn) Create(opt TxnOption, execCtx *ExecCtx) error {
 	return err
 }
 
-// newTxnOperatorUnsafe creates a new txn operator using TxnClient. Should not be called outside txn
-func (th *Txn) newTxnOperatorUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator, error) {
+// createTxnOpUnsafe creates a new txn operator using TxnClient. Should not be called outside txn
+func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator, error) {
 	var err error
 	if getGlobalPu().TxnClient == nil {
 		panic("must set txn client")
@@ -1109,29 +1158,27 @@ func (th *Txn) newTxnOperatorUnsafe(execCtx *ExecCtx) (context.Context, TxnOpera
 // createTxnCtxUnsafe creates txn ctx. Should not be called outside txn
 func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) (context.Context, error) {
 	if th.txnCtx == nil {
-		th.txnCtx, th.txnCtxCancel = context.WithTimeout(execCtx.reqCtx,
+		th.txnCtx, th.txnCtxCancel = context.WithTimeout(execCtx.connCtx,
 			getGlobalPu().SV.SessionTimeout.Duration)
 	}
-
-	reqCtx := execCtx.ses.GetRequestContext()
 	retTxnCtx := th.txnCtx
 
-	accountId, err := defines.GetAccountId(reqCtx)
+	accountId, err := defines.GetAccountId(execCtx.reqCtx)
 	if err != nil {
 		return nil, err
 	}
 	retTxnCtx = defines.AttachAccountId(retTxnCtx, accountId)
-	retTxnCtx = defines.AttachUserId(retTxnCtx, defines.GetUserId(reqCtx))
-	retTxnCtx = defines.AttachRoleId(retTxnCtx, defines.GetRoleId(reqCtx))
-	if v := reqCtx.Value(defines.NodeIDKey{}); v != nil {
+	retTxnCtx = defines.AttachUserId(retTxnCtx, defines.GetUserId(execCtx.reqCtx))
+	retTxnCtx = defines.AttachRoleId(retTxnCtx, defines.GetRoleId(execCtx.reqCtx))
+	if v := execCtx.reqCtx.Value(defines.NodeIDKey{}); v != nil {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.NodeIDKey{}, v)
 	}
-	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(reqCtx))
+	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(execCtx.reqCtx))
 	if execCtx.ses.GetTenantInfo() != nil && execCtx.ses.GetTenantInfo().User == db_holder.MOLoggerUser {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.IsMoLogger{}, true)
 	}
 
-	if storage, ok := reqCtx.Value(defines.TemporaryTN{}).(*memorystorage.Storage); ok {
+	if storage, ok := execCtx.reqCtx.Value(defines.TemporaryTN{}).(*memorystorage.Storage); ok {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, storage)
 	} else if execCtx.ses.IfInitedTempEngine() {
 		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
@@ -1139,15 +1186,35 @@ func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) (context.Context, error) {
 	return retTxnCtx, nil
 }
 
-func (th *Txn) GetTxn() (context.Context, TxnOperator, error) {
+func (th *Txn) GetTxn() (context.Context, TxnOperator) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	return th.txnCtx, th.txnOp, nil
+	defer th.inActiveTxnUnsafe()
+	return th.txnCtx, th.txnOp
 }
 
+// Commit commits the txn.
+// option bits decide the actual commit behaviour
 func (th *Txn) Commit(execCtx *ExecCtx) error {
+	var err error
 	th.mu.Lock()
 	defer th.mu.Unlock()
+	/*
+		Commit Rules:
+		1, if it is in single-statement mode:
+			it commits.
+		2, if it is in multi-statement mode:
+			if the statement is the one can be executed in the active transaction,
+				the transaction need to be committed at the end of the statement.
+	*/
+	if !bitsIsSet(th.optionBits, OPTION_BEGIN|OPTION_NOT_AUTOCOMMIT) ||
+		th.inActiveTxnUnsafe() && NeedToBeCommittedInActiveTransaction(execCtx.stmt) {
+		err = th.commitUnsafe(execCtx)
+		if err != nil {
+			return err
+		}
+	}
+	//do nothing
 	return nil
 }
 
@@ -1155,26 +1222,30 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 	_, span := trace.Start(execCtx.reqCtx, "TxnHandler.CommitTxn",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(execCtx.ses.GetTxnId(), execCtx.ses.GetStmtId(), execCtx.ses.GetSqlOfStmt()))
+	var err error
+	defer th.inActiveTxnUnsafe()
 	if !th.inActiveTxnUnsafe() || th.shareTxn {
 		return nil
 	}
 	sessionInfo := execCtx.ses.GetDebugString()
 	if th.txnOp == nil {
-		th.invalidTxnUnsafe()
+		th.invalidateTxnUnsafe()
 	}
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
 	if execCtx.ses.IfInitedTempEngine() && execCtx.ses.GetTempTableStorage() != nil {
-		th.txnCtx = context.WithValue(txnCtx, defines.TemporaryTN{}, ses.GetTempTableStorage())
+		if th.txnCtx.Value(defines.TemporaryTN{}) == nil {
+			th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
+		}
 	}
-	storage := th.GetStorage()
+	storage := th.storage
 	ctx2, cancel := context.WithTimeout(
-		txnCtx,
+		th.txnCtx,
 		storage.Hints().CommitOrRollbackTimeout,
 	)
 	defer cancel()
-	val, e := ses.GetSessionVar("mo_pk_check_by_dn")
+	val, e := execCtx.ses.GetSessionVar("mo_pk_check_by_dn")
 	if e != nil {
 		return e
 	}
@@ -1183,7 +1254,7 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 	}
 	defer func() {
 		// metric count
-		tenant := ses.GetTenantName()
+		tenant := execCtx.ses.GetTenantName()
 		incTransactionCounter(tenant)
 		if err != nil {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeCommit)
@@ -1191,32 +1262,180 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 	}()
 
 	if logutil.GetSkip1Logger().Core().Enabled(zap.DebugLevel) {
-		txnId := txnOp.Txn().DebugString()
+		txnId := th.txnOp.Txn().DebugString()
 		logDebugf(sessionInfo, "CommitTxn txnId:%s", txnId)
 		defer func() {
 			logDebugf(sessionInfo, "CommitTxn exit txnId:%s", txnId)
 		}()
 	}
-	if txnOp != nil {
-		th.ses.SetTxnId(txnOp.Txn().ID)
-		err = txnOp.Commit(ctx2)
+	if th.txnOp != nil {
+		execCtx.ses.SetTxnId(th.txnOp.Txn().ID)
+		err = th.txnOp.Commit(ctx2)
 		if err != nil {
-			th.SetTxnOperatorInvalid()
+			th.invalidateTxnUnsafe()
 		}
-		ses.updateLastCommitTS(txnOp.Txn().CommitTS)
+		execCtx.ses.updateLastCommitTS(th.txnOp.Txn().CommitTS)
 	}
-	th.SetTxnOperatorInvalid()
-	th.ses.SetTxnId(dumpUUID[:])
+	th.invalidateTxnUnsafe()
+	execCtx.ses.SetTxnId(dumpUUID[:])
 	return err
-	return nil
 }
 
+// Rollback rolls back the txn
+// the option bits decide the actual behavior
 func (th *Txn) Rollback(execCtx *ExecCtx) error {
+	var err error
+	var rollbackWholeTxn bool
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	return nil
+	rollbackWholeTxn = isErrorRollbackWholeTxn(execCtx.stmtExecErr)
+	/*
+			Rollback Rules:
+			1, if it is in single-statement mode (Case2):
+				it rollbacks.
+			2, if it is in multi-statement mode (Case1,Case3,Case4):
+		        the transaction need to be rollback at the end of the statement.
+				(every error will abort the transaction.)
+	*/
+	if !bitsIsSet(th.optionBits, OPTION_BEGIN|OPTION_NOT_AUTOCOMMIT) ||
+		th.inActiveTxnUnsafe() && NeedToBeCommittedInActiveTransaction(execCtx.stmt) ||
+		rollbackWholeTxn {
+		//Case1.1: autocommit && not_begin
+		//Case1.2: (not_autocommit || begin) && activeTxn && needToBeCommitted
+		//Case1.3: the error that should rollback the whole txn
+		err = th.rollbackUnsafe(execCtx)
+	} else {
+		//Case2: not ( autocommit && !begin ) && not ( activeTxn && needToBeCommitted )
+		//<==>  ( not_autocommit || begin ) && not ( activeTxn && needToBeCommitted )
+		//just rollback statement
+
+		//non derived statement
+		if th.txnOp != nil && !execCtx.ses.IsDerivedStmt() {
+			//incrStatement has been called
+			ok, id := th.calledIncrStmtUnsafe()
+			if ok && bytes.Equal(th.txnOp.Txn().ID, id) {
+				err = th.txnOp.GetWorkspace().RollbackLastStatement(th.txnCtx)
+				th.disableIncrStmtUnsafe()
+				if err != nil {
+					err4 := th.rollbackUnsafe(execCtx)
+					return errors.Join(err, err4)
+				}
+			}
+		}
+	}
+	return err
 }
 
 func (th *Txn) rollbackUnsafe(execCtx *ExecCtx) error {
+	_, span := trace.Start(execCtx.ses.GetRequestContext(), "TxnHandler.RollbackTxn",
+		trace.WithKind(trace.SpanKindStatement))
+	defer span.End(trace.WithStatementExtra(execCtx.ses.GetTxnId(), execCtx.ses.GetStmtId(), execCtx.ses.GetSqlOfStmt()))
+	var err error
+	defer th.inActiveTxnUnsafe()
+	if !th.inActiveTxnUnsafe() || th.shareTxn {
+		return nil
+	}
+
+	sessionInfo := execCtx.ses.GetDebugString()
+
+	if th.txnOp == nil {
+		th.invalidateTxnUnsafe()
+	}
+	if th.txnCtx == nil {
+		panic("context should not be nil")
+	}
+	if execCtx.ses.IfInitedTempEngine() && execCtx.ses.GetTempTableStorage() != nil {
+		if th.txnCtx.Value(defines.TemporaryTN{}) == nil {
+			th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
+		}
+	}
+	ctx2, cancel := context.WithTimeout(
+		th.txnCtx,
+		th.storage.Hints().CommitOrRollbackTimeout,
+	)
+	defer cancel()
+	defer func() {
+		// metric count
+		tenant := execCtx.ses.GetTenantName()
+		incTransactionCounter(tenant)
+		incTransactionErrorsCounter(tenant, metric.SQLTypeOther) // exec rollback cnt
+		if err != nil {
+			incTransactionErrorsCounter(tenant, metric.SQLTypeRollback)
+		}
+	}()
+	if logutil.GetSkip1Logger().Core().Enabled(zap.DebugLevel) {
+		txnId := th.txnOp.Txn().DebugString()
+		logDebugf(sessionInfo, "RollbackTxn txnId:%s", txnId)
+		defer func() {
+			logDebugf(sessionInfo, "RollbackTxn exit txnId:%s", txnId)
+		}()
+	}
+	if th.txnOp != nil {
+		execCtx.ses.SetTxnId(th.txnOp.Txn().ID)
+		err = th.txnOp.Rollback(ctx2)
+		if err != nil {
+			th.invalidateTxnUnsafe()
+		}
+	}
+	th.invalidateTxnUnsafe()
+	execCtx.ses.SetTxnId(dumpUUID[:])
+	return err
+}
+
+/*
+SetAutocommit sets the value of the system variable 'autocommit'.
+
+The rule is that we can not execute the statement 'set parameter = value' in
+an active transaction whichever it is started by BEGIN or in 'set autocommit = 0;'.
+*/
+func (th *Txn) SetAutocommit(execCtx *ExecCtx, old, on bool) error {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	//on -> on : do nothing
+	//off -> on : commit active txn
+	//	if commit failed, clean OPTION_AUTOCOMMIT
+	//	if commit succeeds, clean OPTION_BEGIN | OPTION_NOT_AUTOCOMMIT
+	//		and set SERVER_STATUS_AUTOCOMMIT
+	//on -> off :
+	//	clean OPTION_AUTOCOMMIT
+	//	clean SERVER_STATUS_AUTOCOMMIT
+	//	set OPTION_NOT_AUTOCOMMIT
+	//off -> off : do nothing
+	if !old && on { //off -> on
+		//activating autocommit
+		err := th.commitUnsafe(execCtx)
+		if err != nil {
+			clearBits(&th.optionBits, OPTION_AUTOCOMMIT)
+			return err
+		}
+		clearBits(&th.optionBits, OPTION_BEGIN|OPTION_NOT_AUTOCOMMIT)
+		setBits(&th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT))
+	} else if old && !on { //on -> off
+		clearBits(&th.optionBits, OPTION_AUTOCOMMIT)
+		clearBits(&th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT))
+		setBits(&th.optionBits, OPTION_NOT_AUTOCOMMIT)
+	}
 	return nil
+}
+
+func (th *Txn) setAutocommitOn() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	clearBits(&th.optionBits, OPTION_BEGIN|OPTION_NOT_AUTOCOMMIT)
+	setBits(&th.optionBits, OPTION_AUTOCOMMIT)
+	setBits(&th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT))
+}
+
+func (th *Txn) calledIncrStmtUnsafe() (bool, []byte) {
+	return th.hasCalledStartStmt, th.prevTxnId
+}
+
+func (th *Txn) disableIncrStmtUnsafe() {
+	th.hasCalledIncrStmt = false
+	th.prevIncrTxnId = nil
+}
+
+func (th *Txn) enableIncrStmtUnsafe(txnId []byte) {
+	th.hasCalledIncrStmt = true
+	th.prevIncrTxnId = txnId
 }

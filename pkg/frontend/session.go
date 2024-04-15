@@ -452,22 +452,19 @@ func (e *errInfo) length() int {
 	return len(e.codes)
 }
 
-func NewSession(proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *TxnHandler) *Session {
+func NewSession(proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *Txn) *Session {
 	//if the sharedTxnHandler exists,we use its txnCtx and txnOperator in this session.
 	//Currently, we only use the sharedTxnHandler in the background session.
 	var txnCtx context.Context
 	var txnOp TxnOperator
 	var err error
 	if sharedTxnHandler != nil {
-		if !sharedTxnHandler.IsValidTxnOperator() {
+		if !sharedTxnHandler.InActiveTxn() {
 			panic("shared txn is invalid")
 		}
-		txnCtx, txnOp, err = sharedTxnHandler.GetTxnOperator()
-		if err != nil {
-			panic(err)
-		}
+		txnCtx, txnOp = sharedTxnHandler.GetTxn()
 	}
-	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, txnCtx, txnOp)
 
 	ses := &Session{
 		feSessionImpl: feSessionImpl{
@@ -508,9 +505,9 @@ func NewSession(proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVari
 	ses.isNotBackgroundSession = isNotBackgroundSession
 	ses.sqlHelper = &SqlHelper{ses: ses}
 	ses.uuid, _ = uuid.NewV7()
-	ses.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
+	//ses.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 	ses.GetTxnCompileCtx().SetSession(ses)
-	ses.GetTxnHandler().SetSession(ses)
+	//ses.GetTxnHandler().SetSession(ses)
 	if ses.pool == nil {
 		// If no mp, we create one for session.  Use GuestMmuLimitation as cap.
 		// fixed pool size can be another param, or should be computed from cap,
@@ -551,7 +548,7 @@ func (ses *Session) Close() {
 	ses.data = nil
 	ses.ep = nil
 	if ses.txnHandler != nil {
-		ses.txnHandler.ses = nil
+		//ses.txnHandler.ses = nil
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {
@@ -786,15 +783,11 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 
 	var txnCtx context.Context
 	var txnOp TxnOperator
-	var err error
 	if ses.GetTxnHandler() != nil {
-		txnCtx, txnOp, err = ses.GetTxnHandler().GetTxnOperator()
-		if err != nil {
-			panic(err)
-		}
+		txnCtx, txnOp = ses.GetTxnHandler().GetTxn()
 	}
 
-	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, txnCtx, txnOp)
 	var callback func(interface{}, *batch.Batch) error
 	if newRawBatch {
 		callback = batchFetcher2
@@ -823,9 +816,9 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		},
 	}
 	backSes.uuid, _ = uuid.NewV7()
-	backSes.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
+	//backSes.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 	backSes.GetTxnCompileCtx().SetSession(backSes)
-	backSes.GetTxnHandler().SetSession(backSes)
+	//backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -839,7 +832,7 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
-	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, nil, nil)
 	backSes := &backSession{
 		requestCtx: ses.GetRequestContext(),
 		connectCtx: ses.GetConnectContext(),
@@ -863,7 +856,7 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 	}
 	backSes.uuid, _ = uuid.NewV7()
 	backSes.GetTxnCompileCtx().SetSession(backSes)
-	backSes.GetTxnHandler().SetSession(backSes)
+	//backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -1206,10 +1199,7 @@ func (ses *Session) GetTxnInfo() string {
 	if txnH == nil {
 		return ""
 	}
-	_, txnOp, err := txnH.GetTxnOperator()
-	if err != nil {
-		return ""
-	}
+	_, txnOp := txnH.GetTxn()
 	if txnOp == nil {
 		return ""
 	}

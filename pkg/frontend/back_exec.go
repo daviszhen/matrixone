@@ -249,6 +249,7 @@ func doComQueryInBack(requestCtx context.Context,
 		}
 
 		execCtx := ExecCtx{
+			connCtx:    backSes.GetConnectContext(),
 			reqCtx:     requestCtx,
 			stmt:       stmt,
 			isLastStmt: i >= len(cws)-1,
@@ -801,7 +802,7 @@ func (backSes *backSession) GetMysqlResultSet() *MysqlResultSet {
 	return backSes.mrs
 }
 
-func (backSes *backSession) GetTxnHandler() *TxnHandler {
+func (backSes *backSession) GetTxnHandler() *Txn {
 	return backSes.txnHandler
 }
 

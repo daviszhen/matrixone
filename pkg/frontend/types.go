@@ -298,7 +298,7 @@ type FeSession interface {
 	GetSqlOfStmt() string
 	updateLastCommitTS(ts timestamp.Timestamp)
 	GetMysqlProtocol() MysqlProtocol
-	GetTxnHandler() *TxnHandler
+	GetTxnHandler() *Txn
 	GetDatabaseName() string
 	SetDatabaseName(db string)
 	GetMysqlResultSet() *MysqlResultSet
@@ -349,6 +349,7 @@ type FeSession interface {
 }
 
 type ExecCtx struct {
+	connCtx     context.Context
 	reqCtx      context.Context
 	prepareStmt *PrepareStmt
 	runResult   *util.RunResult
@@ -366,6 +367,7 @@ type ExecCtx struct {
 	proc            *process.Process
 	proto           MysqlProtocol
 	ses             FeSession
+	stmtExecErr     error
 }
 
 // TODO: shared component among the session implmentation
@@ -375,7 +377,7 @@ type feSessionImpl struct {
 	buf           *buffer.Buffer
 	stmtProfile   process.StmtProfile
 	tenant        *TenantInfo
-	txnHandler    *TxnHandler
+	txnHandler    *Txn
 	txnCompileCtx *TxnCompilerContext
 	mrs           *MysqlResultSet
 	//it gets the result set from the pipeline and send it to the client
@@ -552,7 +554,7 @@ func (ses *feSessionImpl) SetTenantInfo(ti *TenantInfo) {
 	ses.tenant = ti
 }
 
-func (ses *feSessionImpl) GetTxnHandler() *TxnHandler {
+func (ses *feSessionImpl) GetTxnHandler() *Txn {
 	return ses.txnHandler
 }
 
