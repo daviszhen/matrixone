@@ -2493,7 +2493,7 @@ func executeStmt(requestCtx context.Context,
 	var cmpBegin time.Time
 	var ret interface{}
 
-	switch execCtx.stmt.StmtKind().HandleType() {
+	switch execCtx.stmt.StmtKind().ExecLocation() {
 	case tree.EXEC_IN_FRONTEND:
 		return execInFrontend(requestCtx, ses, execCtx)
 	case tree.EXEC_IN_ENGINE:
@@ -2577,7 +2577,7 @@ func executeStmt(requestCtx context.Context,
 	// cw.Compile may rewrite the stmt in the EXECUTE statement, we fetch the latest version
 	//need to check again.
 	execCtx.stmt = execCtx.cw.GetAst()
-	switch execCtx.stmt.StmtKind().HandleType() {
+	switch execCtx.stmt.StmtKind().ExecLocation() {
 	case tree.EXEC_IN_FRONTEND:
 		return execInFrontend(requestCtx, ses, execCtx)
 	case tree.EXEC_IN_ENGINE:
