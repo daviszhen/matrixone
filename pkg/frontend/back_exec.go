@@ -249,6 +249,7 @@ func doComQueryInBack(requestCtx context.Context,
 		}
 
 		execCtx := ExecCtx{
+			reqCtx:     requestCtx,
 			stmt:       stmt,
 			isLastStmt: i >= len(cws)-1,
 			tenant:     tenant,

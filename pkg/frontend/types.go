@@ -349,6 +349,7 @@ type FeSession interface {
 }
 
 type ExecCtx struct {
+	reqCtx      context.Context
 	prepareStmt *PrepareStmt
 	runResult   *util.RunResult
 	//stmt will be replaced by the Execute
@@ -364,6 +365,7 @@ type ExecCtx struct {
 	loadLocalWriter *io.PipeWriter
 	proc            *process.Process
 	proto           MysqlProtocol
+	ses             FeSession
 }
 
 // TODO: shared component among the session implmentation

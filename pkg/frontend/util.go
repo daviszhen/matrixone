@@ -1013,3 +1013,21 @@ func (b *strParamBinder) bindIdentStr(ident *tree.AccountIdentified) string {
 		return ""
 	}
 }
+
+func SetBits(t *uint32, bit uint32) {
+	if t == nil {
+		return
+	}
+	*t |= bit
+}
+
+func ClearBits(t *uint32, bit uint32) {
+	if t == nil {
+		return
+	}
+	*t &= ^bit
+}
+
+func BitsIsBit(t uint32, bit uint32) bool {
+	return t&bit != 0
+}
