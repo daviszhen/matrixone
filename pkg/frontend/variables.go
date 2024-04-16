@@ -3662,3 +3662,15 @@ type UserDefinedVar struct {
 	Value interface{}
 	Sql   string
 }
+
+func autocommitValue(ses FeSession) (bool, error) {
+	value, err := ses.GetSessionVar("autocommit")
+	if err != nil {
+		return false, err
+	}
+	autocommit, err := valueIsBoolTrue(value)
+	if err != nil {
+		return false, err
+	}
+	return autocommit, err
+}

@@ -15,7 +15,6 @@
 package frontend
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -241,7 +240,7 @@ func doComQueryInBack(requestCtx context.Context,
 			drop table test1;    <- has active transaction, error
 			                     <- has active transaction
 		*/
-		if backSes.GetTxnHandler().InActiveTransaction() {
+		if backSes.GetTxnHandler().InActiveTxn() {
 			err = canExecuteStatementInUncommittedTransaction(requestCtx, backSes, stmt)
 			if err != nil {
 				return err
@@ -258,8 +257,9 @@ func doComQueryInBack(requestCtx context.Context,
 			sqlOfStmt:  sqlRecord[i],
 			cw:         cw,
 			proc:       proc,
+			ses:        backSes,
 		}
-		err = executeStmtInBackWithTxn(requestCtx, backSes, &execCtx)
+		err = executeStmtWithTxn(requestCtx, backSes, &execCtx)
 		if err != nil {
 			return err
 		}
@@ -272,47 +272,63 @@ func executeStmtInBackWithTxn(requestCtx context.Context,
 	backSes *backSession,
 	execCtx *ExecCtx,
 ) (err error) {
-	// defer transaction state management.
+	//6.
 	defer func() {
 		err = finishTxnFunc(requestCtx, backSes, err, execCtx)
 	}()
 
-	// statement management
-	_, txnOp, err := backSes.GetTxnHandler().GetTxnOperator()
+	//1. start txn
+	//special BEGIN,COMMIT,ROLLBACK
+	beginStmt := false
+	switch execCtx.stmt.(type) {
+	case *tree.BeginTransaction:
+		execCtx.txnOpt.byBegin = true
+		beginStmt = true
+	case *tree.CommitTransaction:
+		execCtx.txnOpt.byCommit = true
+		return nil
+	case *tree.RollbackTransaction:
+		execCtx.txnOpt.byRollback = true
+		return nil
+	}
+
+	execCtx.txnOpt.autoCommit = true
+	err = backSes.GetTxnHandler().Create(execCtx)
 	if err != nil {
 		return err
 	}
 
-	//non derived statement
-	if txnOp != nil && !backSes.IsDerivedStmt() {
-		//startStatement has been called
-		ok, _ := backSes.GetTxnHandler().calledStartStmt()
-		if !ok {
-			txnOp.GetWorkspace().StartStatement()
-			backSes.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
-		}
+	//skip BEGIN stmt
+	if beginStmt {
+		return err
 	}
 
-	// defer Start/End Statement management, called after finishTxnFunc()
+	// statement management
+	_, txnOp := backSes.GetTxnHandler().GetTxn()
+
+	//2.
+	if !backSes.IsDerivedStmt() {
+		txnOp.GetWorkspace().StartStatement()
+	}
+
+	//3. increase statement id
+	err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
+	if err != nil {
+		return err
+	}
+
+	//4.  defer Start/End Statement management, called after finishTxnFunc()
 	defer func() {
 		// move finishTxnFunc() out to another defer so that if finishTxnFunc
 		// paniced, the following is still called.
-		var err3 error
-		_, txnOp, err3 = backSes.GetTxnHandler().GetTxnOperator()
-		if err3 != nil {
-			logError(backSes, backSes.GetDebugString(), err3.Error())
-			return
-		}
+		_, txnOp = backSes.GetTxnHandler().GetTxn()
 		//non derived statement
-		if txnOp != nil && !backSes.IsDerivedStmt() {
+		if !backSes.IsDerivedStmt() {
 			//startStatement has been called
-			ok, id := backSes.GetTxnHandler().calledStartStmt()
-			if ok && bytes.Equal(txnOp.Txn().ID, id) {
-				txnOp.GetWorkspace().EndStatement()
-			}
+			txnOp.GetWorkspace().EndStatement()
 		}
-		backSes.GetTxnHandler().disableStartStmt()
 	}()
+	//5.
 	return executeStmtInBack(requestCtx, backSes, execCtx)
 }
 
@@ -353,7 +369,7 @@ func executeStmtInBack(requestCtx context.Context,
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(requestCtx, backSes.GetOutputCallback()); err != nil {
+	if ret, err = execCtx.cw.Compile(requestCtx, execCtx, backSes.GetOutputCallback()); err != nil {
 		return
 	}
 
@@ -448,7 +464,7 @@ var NewBackgroundExec = func(
 	reqCtx context.Context,
 	upstream FeSession,
 	mp *mpool.MPool) BackgroundExec {
-	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, nil, nil)
 	backSes := &backSession{
 		requestCtx: reqCtx,
 		connectCtx: upstream.GetConnectContext(),
@@ -472,7 +488,7 @@ var NewBackgroundExec = func(
 	}
 	backSes.uuid, _ = uuid.NewV7()
 	backSes.GetTxnCompileCtx().SetSession(backSes)
-	backSes.GetTxnHandler().SetSession(backSes)
+	//backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -504,6 +520,10 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.State
 		return moerr.NewInternalError(ctx, "executeStmtInSameSession can not run non select statement in the same session")
 	}
 
+	if ses.GetTxnHandler() == nil {
+		panic("need txn handler 3")
+	}
+
 	prevDB := ses.GetDatabaseName()
 	prevOptionBits := ses.GetTxnHandler().GetOptionBits()
 	prevServerStatus := ses.GetTxnHandler().GetServerStatus()
@@ -517,11 +537,14 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.State
 	// Any response yielded during running query will be dropped by the FakeProtocol.
 	// The client will not receive any response from the FakeProtocol.
 	prevProto := ses.ReplaceProtocol(&FakeProtocol{})
+	//3. replace the derived stmt
+	prevDerivedStmt := ses.ReplaceDerivedStmt(true)
 	// inherit database
 	ses.SetDatabaseName(prevDB)
 	proc := ses.GetTxnCompileCtx().GetProcess()
 	//restore normal protocol and output callback
 	defer func() {
+		ses.ReplaceDerivedStmt(prevDerivedStmt)
 		//@todo we need to improve: make one session, one proc, one txnOperator
 		p := ses.GetTxnCompileCtx().GetProcess()
 		p.FreeVectors()
@@ -530,6 +553,10 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.State
 		ses.GetTxnHandler().SetServerStatus(prevServerStatus)
 		ses.SetOutputCallback(getDataFromPipeline)
 		ses.ReplaceProtocol(prevProto)
+		if ses.GetTxnHandler() == nil {
+			panic("need txn handler 4")
+		}
+
 	}()
 	logDebug(ses, ses.GetDebugString(), "query trace(ExecStmtInSameSession)",
 		logutil.ConnectionIdField(ses.GetConnectionID()))
@@ -644,10 +671,7 @@ func (backSes *backSession) GetTxnInfo() string {
 	if txnH == nil {
 		return ""
 	}
-	_, txnOp, err := txnH.GetTxnOperator()
-	if err != nil {
-		return ""
-	}
+	_, txnOp := txnH.GetTxn()
 	if txnOp == nil {
 		return ""
 	}
@@ -727,24 +751,12 @@ func (backSes *backSession) GetConnectionID() uint32 {
 	return 0
 }
 
-func (backSes *backSession) SetMysqlResultSet(mrs *MysqlResultSet) {
-	backSes.mrs = mrs
-}
-
 func (backSes *backSession) getQueryId(internal bool) []string {
 	return nil
 }
 
 func (backSes *backSession) CopySeqToProc(proc *process.Process) {
 
-}
-
-func (backSes *backSession) GetStmtProfile() *process.StmtProfile {
-	return &backSes.stmtProfile
-}
-
-func (backSes *backSession) GetBuffer() *buffer.Buffer {
-	return backSes.buf
 }
 
 func (backSes *backSession) GetSqlHelper() *SqlHelper {
@@ -757,10 +769,6 @@ func (backSes *backSession) GetProc() *process.Process {
 
 func (backSes *backSession) GetLastInsertID() uint64 {
 	return 0
-}
-
-func (backSes *backSession) GetMemPool() *mpool.MPool {
-	return backSes.pool
 }
 
 func (backSes *backSession) SetSql(sql string) {
@@ -786,10 +794,6 @@ func (backSes *backSession) IsBackgroundSession() bool {
 	return true
 }
 
-func (backSes *backSession) GetTxnCompileCtx() *TxnCompilerContext {
-	return backSes.txnCompileCtx
-}
-
 func (backSes *backSession) GetCmd() CommandType {
 	return COM_QUERY
 }
@@ -800,14 +804,6 @@ func (backSes *backSession) SetNewResponse(category int, affectedRows uint64, cm
 
 func (backSes *backSession) GetMysqlResultSet() *MysqlResultSet {
 	return backSes.mrs
-}
-
-func (backSes *backSession) GetTxnHandler() *Txn {
-	return backSes.txnHandler
-}
-
-func (backSes *backSession) GetMysqlProtocol() MysqlProtocol {
-	return backSes.proto
 }
 
 func (backSes *backSession) updateLastCommitTS(lastCommitTS timestamp.Timestamp) {
@@ -821,18 +817,6 @@ func (backSes *backSession) updateLastCommitTS(lastCommitTS timestamp.Timestamp)
 
 func (backSes *backSession) GetSqlOfStmt() string {
 	return ""
-}
-
-func (backSes *backSession) GetStmtId() uuid.UUID {
-	return [16]byte{}
-}
-
-func (backSes *backSession) GetTxnId() uuid.UUID {
-	return backSes.stmtProfile.GetTxnId()
-}
-
-func (backSes *backSession) SetTxnId(id []byte) {
-	backSes.stmtProfile.SetTxnId(id)
 }
 
 // GetTenantName return tenant name according to GetTenantInfo and stmt.
@@ -904,10 +888,6 @@ func (backSes *backSession) GetStorage() engine.Engine {
 	return getGlobalPu().StorageEngine
 }
 
-func (backSes *backSession) GetTenantInfo() *TenantInfo {
-	return backSes.tenant
-}
-
 func (backSes *backSession) GetAccountId() uint32 {
 	return backSes.accountId
 }
@@ -930,10 +910,6 @@ func (backSes *backSession) GetRequestContext() context.Context {
 
 func (backSes *backSession) GetTimeZone() *time.Location {
 	return backSes.timeZone
-}
-
-func (backSes *backSession) IsDerivedStmt() bool {
-	return backSes.derivedStmt
 }
 
 func (backSes *backSession) GetDatabaseName() string {

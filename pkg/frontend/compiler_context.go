@@ -100,7 +100,7 @@ func (tcc *TxnCompilerContext) GetSession() FeSession {
 	return tcc.ses
 }
 
-func (tcc *TxnCompilerContext) GetTxnHandler() *TxnHandler {
+func (tcc *TxnCompilerContext) GetTxnHandler() *Txn {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	return tcc.txnHandler
@@ -140,10 +140,7 @@ func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	var err error
 	var txnCtx context.Context
 	var txn TxnOperator
-	txnCtx, txn, err = tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return false
-	}
+	txnCtx, txn = tcc.GetTxnHandler().GetTxn()
 	//open database
 	ses := tcc.GetSession()
 	_, err = tcc.GetTxnHandler().GetStorage().Database(txnCtx, name, txn)
@@ -163,10 +160,7 @@ func (tcc *TxnCompilerContext) GetDatabaseId(dbName string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return 0, err
-	}
+	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
 	database, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
 	if err != nil {
 		return 0, err
@@ -186,10 +180,7 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	}
 
 	ses := tcc.GetSession()
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return nil, nil, err
-	}
+	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
 	account := ses.GetTenantInfo()
 	if isClusterTable(dbName, tableName) {
 		//if it is the cluster table in the general account, switch into the sys account
@@ -245,10 +236,7 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 
 func (tcc *TxnCompilerContext) getTmpRelation(_ context.Context, tableName string) (engine.Relation, error) {
 	e := tcc.ses.GetStorage()
-	txnCtx, txn, err := tcc.txnHandler.GetTxn()
-	if err != nil {
-		return nil, err
-	}
+	txnCtx, txn := tcc.txnHandler.GetTxn()
 	db, err := e.Database(txnCtx, defines.TEMPORARY_DBNAME, txn)
 	if err != nil {
 		logError(tcc.ses, tcc.ses.GetDebugString(),
@@ -279,10 +267,7 @@ func (tcc *TxnCompilerContext) ensureDatabaseIsNotEmpty(dbName string, checkSub 
 }
 
 func (tcc *TxnCompilerContext) ResolveById(tableId uint64) (*plan2.ObjectRef, *plan2.TableDef) {
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return nil, nil
-	}
+	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
 	dbName, tableName, table, err := tcc.GetTxnHandler().GetStorage().GetRelationById(txnCtx, txn, tableId)
 	if err != nil {
 		return nil, nil
@@ -754,10 +739,7 @@ func (tcc *TxnCompilerContext) SetProcess(proc *process.Process) {
 }
 
 func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta, error) {
-	txnCtx, txn, err := tcc.GetTxnHandler().GetTxn()
-	if err != nil {
-		return nil, err
-	}
+	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
 	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession(), txn)
 	if err != nil {
 		return nil, err

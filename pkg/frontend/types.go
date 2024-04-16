@@ -67,7 +67,7 @@ type ComputationWrapper interface {
 
 	GetColumns() ([]interface{}, error)
 
-	Compile(requestCtx context.Context, fill func(*batch.Batch) error) (interface{}, error)
+	Compile(requestCtx context.Context, execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error)
 
 	GetUUID() []byte
 
@@ -368,6 +368,7 @@ type ExecCtx struct {
 	proto           MysqlProtocol
 	ses             FeSession
 	stmtExecErr     error
+	txnOpt          FeTxnOption
 }
 
 // TODO: shared component among the session implmentation
@@ -424,7 +425,7 @@ func (ses *feSessionImpl) Close() {
 	ses.proto = nil
 	ses.mrs = nil
 	if ses.txnHandler != nil {
-		ses.txnHandler.ses = nil
+		//ses.txnHandler.ses = nil
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {
@@ -540,10 +541,6 @@ func (ses *feSessionImpl) GetQueryStart() time.Time {
 
 func (ses *feSessionImpl) SetSqlOfStmt(sot string) {
 	ses.stmtProfile.SetSqlOfStmt(sot)
-}
-
-func (ses *feSessionImpl) GetSqlOfStmt() string {
-	return ses.stmtProfile.GetSqlOfStmt()
 }
 
 func (ses *feSessionImpl) GetTenantInfo() *TenantInfo {

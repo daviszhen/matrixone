@@ -68,7 +68,7 @@ func (ncw *NullComputationWrapper) GetColumns() ([]interface{}, error) {
 	return []interface{}{}, nil
 }
 
-func (ncw *NullComputationWrapper) Compile(requestCtx context.Context, fill func(*batch.Batch) error) (interface{}, error) {
+func (ncw *NullComputationWrapper) Compile(requestCtx context.Context, execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
 	return nil, nil
 }
 
@@ -209,10 +209,10 @@ func (cwft *TxnComputationWrapper) GetClock() clock.Clock {
 }
 
 func (cwft *TxnComputationWrapper) GetServerStatus() uint16 {
-	return cwft.ses.GetTxnHandler().GetServerStatus()
+	return uint16(cwft.ses.GetTxnHandler().GetServerStatus())
 }
 
-func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, fill func(*batch.Batch) error) (interface{}, error) {
+func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
 	var originSQL string
 	var span trace.Span
 	requestCtx, span = trace.Start(requestCtx, "TxnComputationWrapper.Compile",
@@ -225,15 +225,12 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, fill func
 		requestCtx = context.WithValue(requestCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
 		cwft.ses.SetRequestContext(requestCtx)
 		cwft.proc.Ctx = context.WithValue(cwft.proc.Ctx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
-		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx()
+		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 	}
 
 	txnHandler := cwft.ses.GetTxnHandler()
 	var txnCtx context.Context
-	txnCtx, cwft.proc.TxnOperator, err = txnHandler.GetTxn()
-	if err != nil {
-		return nil, err
-	}
+	txnCtx, cwft.proc.TxnOperator = txnHandler.GetTxn()
 
 	txnCtx = statistic.EnsureStatsInfoCanBeFound(txnCtx, requestCtx)
 
@@ -245,21 +242,21 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, fill func
 	txnOp := cwft.proc.TxnOperator
 	cwft.ses.SetTxnId(txnOp.Txn().ID)
 	//non derived statement
-	if txnOp != nil && !cwft.ses.IsDerivedStmt() {
-		//startStatement has been called
-		ok, _ := cwft.ses.GetTxnHandler().calledStartStmt()
-		if !ok {
-			txnOp.GetWorkspace().StartStatement()
-			cwft.ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
-		}
-
-		//increase statement id
-		err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
-		if err != nil {
-			return nil, err
-		}
-		cwft.ses.GetTxnHandler().enableIncrStmt(txnOp.Txn().ID)
-	}
+	//if txnOp != nil && !cwft.ses.IsDerivedStmt() {
+	//	//startStatement has been called
+	//	ok, _ := cwft.ses.GetTxnHandler().calledStartStmt()
+	//	if !ok {
+	//		txnOp.GetWorkspace().StartStatement()
+	//		cwft.ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
+	//	}
+	//
+	//	//increase statement id
+	//	err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	cwft.ses.GetTxnHandler().enableIncrStmt(txnOp.Txn().ID)
+	//}
 
 	cacheHit := cwft.plan != nil
 	if !cacheHit {
@@ -402,10 +399,11 @@ func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, fill func
 		_ = cwft.ses.SetTempEngine(requestCtx, tempEngine)
 		cwft.compile.SetTempEngine(requestCtx, tempEngine)
 		txnHandler.SetTempEngine(tempEngine)
-		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx()
+		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 
 		// 3. init temp-db to store temporary relations
-		err = tempEngine.Create(requestCtx, defines.TEMPORARY_DBNAME, cwft.ses.GetTxnHandler().txnOperator)
+		txnCtx2, txnOp2 := cwft.ses.GetTxnHandler().GetTxn()
+		err = tempEngine.Create(txnCtx2, defines.TEMPORARY_DBNAME, txnOp2)
 		if err != nil {
 			return nil, err
 		}

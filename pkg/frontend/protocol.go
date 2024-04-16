@@ -328,21 +328,9 @@ func (mp *MysqlProtocolImpl) GetRequest(payload []byte) *Request {
 	return req
 }
 
-func (mp *MysqlProtocolImpl) getAbortTransactionErrorInfo() string {
-	ses := mp.GetSession()
-	//update error message in Case1,Case3,Case4.
-	if ses != nil && ses.GetTxnHandler().OptionBitsIsSet(OPTION_ATTACH_ABORT_TRANSACTION_ERROR) {
-		ses.GetTxnHandler().ClearOptionBits(OPTION_ATTACH_ABORT_TRANSACTION_ERROR)
-	}
-	return ""
-}
-
 func (mp *MysqlProtocolImpl) SendResponse(ctx context.Context, resp *Response) error {
 	//move here to prohibit potential recursive lock
 	var attachAbort string
-	if resp.GetCategory() == ErrorResponse {
-		attachAbort = mp.getAbortTransactionErrorInfo()
-	}
 
 	mp.m.Lock()
 	defer mp.m.Unlock()

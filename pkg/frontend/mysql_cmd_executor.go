@@ -178,8 +178,8 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	// set TransactionID
 	var txn TxnOperator
 	var err error
-	if handler := ses.GetTxnHandler(); handler.IsValidTxnOperator() {
-		_, txn, err = handler.GetTxnOperator()
+	if handler := ses.GetTxnHandler(); handler.InActiveTxn() {
+		_, txn = handler.GetTxn()
 		if err != nil {
 			return nil, err
 		}
@@ -274,9 +274,9 @@ var RecordStatementTxnID = func(ctx context.Context, fses FeSession) error {
 	var txn TxnOperator
 	var err error
 	if stm := motrace.StatementFromContext(ctx); ses != nil && stm != nil && stm.IsZeroTxnID() {
-		if handler := ses.GetTxnHandler(); handler.IsValidTxnOperator() {
+		if handler := ses.GetTxnHandler(); handler.InActiveTxn() {
 			// simplify the logic of TxnOperator. refer to https://github.com/matrixorigin/matrixone/pull/13436#pullrequestreview-1779063200
-			_, txn, err = handler.GetTxnOperator()
+			_, txn = handler.GetTxn()
 			if err != nil {
 				return err
 			}
@@ -289,8 +289,8 @@ var RecordStatementTxnID = func(ctx context.Context, fses FeSession) error {
 	// set frontend statement's txn-id
 	if upSes := ses.upstream; upSes != nil && upSes.tStmt != nil && upSes.tStmt.IsZeroTxnID() /* not record txn-id */ {
 		// background session has valid txn
-		if handler := ses.GetTxnHandler(); handler.IsValidTxnOperator() {
-			_, txn, err = handler.GetTxnOperator()
+		if handler := ses.GetTxnHandler(); handler.InActiveTxn() {
+			_, txn = handler.GetTxn()
 			if err != nil {
 				return err
 			}
@@ -482,10 +482,7 @@ func doUse(ctx context.Context, ses FeSession, db string) error {
 	var txn TxnOperator
 	var err error
 	var dbMeta engine.Database
-	txnCtx, txn, err = txnHandler.GetTxn()
-	if err != nil {
-		return err
-	}
+	txnCtx, txn = txnHandler.GetTxn()
 	//TODO: check meta data
 	if dbMeta, err = getGlobalPu().StorageEngine.Database(txnCtx, db, txn); err != nil {
 		//echo client. no such database
@@ -660,7 +657,7 @@ func handleCmdFieldList(requestCtx context.Context, ses FeSession, icfl *Interna
 	return err
 }
 
-func doSetVar(ctx context.Context, ses *Session, sv *tree.SetVar, sql string) error {
+func doSetVar(ctx context.Context, ses *Session, execCtx *ExecCtx, sv *tree.SetVar, sql string) error {
 	var err error = nil
 	var ok bool
 	setVarFunc := func(system, global bool, name string, value interface{}, sql string) error {
@@ -701,7 +698,7 @@ func doSetVar(ctx context.Context, ses *Session, sv *tree.SetVar, sql string) er
 				if err != nil {
 					return err
 				}
-				err = ses.GetTxnHandler().SetAutocommit(oldValue, newValue)
+				err = ses.GetTxnHandler().SetAutocommit(execCtx, oldValue, newValue)
 				if err != nil {
 					return err
 				}
@@ -812,8 +809,8 @@ func doSetVar(ctx context.Context, ses *Session, sv *tree.SetVar, sql string) er
 /*
 handle setvar
 */
-func handleSetVar(ctx context.Context, ses FeSession, sv *tree.SetVar, sql string) error {
-	err := doSetVar(ctx, ses.(*Session), sv, sql)
+func handleSetVar(ctx context.Context, ses FeSession, execCtx *ExecCtx, sv *tree.SetVar, sql string) error {
+	err := doSetVar(ctx, ses.(*Session), execCtx, sv, sql)
 	if err != nil {
 		return err
 	}
@@ -2423,51 +2420,92 @@ func executeStmtWithResponse(requestCtx context.Context,
 }
 
 func executeStmtWithTxn(requestCtx context.Context,
-	ses *Session,
+	ses FeSession,
 	execCtx *ExecCtx,
 ) (err error) {
+	//6. pass or commit or rollback txn
 	// defer transaction state management.
 	defer func() {
 		err = finishTxnFunc(requestCtx, ses, err, execCtx)
 	}()
 
-	// statement management
-	_, txnOp, err := ses.GetTxnHandler().GetTxnOperator()
+	//1. start txn
+	//special BEGIN,COMMIT,ROLLBACK
+	beginStmt := false
+	switch execCtx.stmt.(type) {
+	case *tree.BeginTransaction:
+		execCtx.txnOpt.byBegin = true
+		beginStmt = true
+	case *tree.CommitTransaction:
+		execCtx.txnOpt.byCommit = true
+		return nil
+	case *tree.RollbackTransaction:
+		execCtx.txnOpt.byRollback = true
+		return nil
+	}
+
+	autocommit, err := autocommitValue(ses)
 	if err != nil {
 		return err
 	}
 
+	execCtx.txnOpt.autoCommit = autocommit
+	err = ses.GetTxnHandler().Create(execCtx)
+	if err != nil {
+		return err
+	}
+
+	//skip BEGIN stmt
+	if beginStmt {
+		return err
+	}
+
+	if ses.GetTxnHandler() == nil {
+		panic("need txn handler")
+	}
+
+	//2. start statement on workspace
+	// statement management
+	_, txnOp := ses.GetTxnHandler().GetTxn()
+
 	//non derived statement
-	if txnOp != nil && !ses.IsDerivedStmt() {
-		//startStatement has been called
-		ok, _ := ses.GetTxnHandler().calledStartStmt()
-		if !ok {
-			txnOp.GetWorkspace().StartStatement()
-			ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
+	if !ses.IsDerivedStmt() {
+		txnOp.GetWorkspace().StartStatement()
+	}
+
+	//3. increase statement id
+	if !ses.IsDerivedStmt() {
+		err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
+		if err != nil {
+			return err
 		}
 	}
 
+	//4. end statement on workspace
 	// defer Start/End Statement management, called after finishTxnFunc()
 	defer func() {
+		if ses.GetTxnHandler() == nil {
+			panic("need txn handler 2")
+		}
+
 		// move finishTxnFunc() out to another defer so that if finishTxnFunc
 		// paniced, the following is still called.
-		var err3 error
-		_, txnOp, err3 = ses.GetTxnHandler().GetTxnOperator()
-		if err3 != nil {
-			logError(ses, ses.GetDebugString(), err3.Error())
-			return
-		}
+		_, txnOp = ses.GetTxnHandler().GetTxn()
 		//non derived statement
-		if txnOp != nil && !ses.IsDerivedStmt() {
-			//startStatement has been called
-			ok, id := ses.GetTxnHandler().calledStartStmt()
-			if ok && bytes.Equal(txnOp.Txn().ID, id) {
-				txnOp.GetWorkspace().EndStatement()
-			}
+		if !ses.IsDerivedStmt() {
+			txnOp.GetWorkspace().EndStatement()
 		}
-		ses.GetTxnHandler().disableStartStmt()
 	}()
-	return executeStmt(requestCtx, ses, execCtx)
+
+	//5. execute stmt within txn
+	switch sesImpl := ses.(type) {
+	case *Session:
+		return executeStmt(requestCtx, sesImpl, execCtx)
+	case *backSession:
+		return executeStmtInBack(requestCtx, sesImpl, execCtx)
+	default:
+		return moerr.NewInternalError(requestCtx, "no such session implementation")
+	}
 }
 
 func executeStmt(requestCtx context.Context,
@@ -2564,7 +2602,7 @@ func executeStmt(requestCtx context.Context,
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(requestCtx, ses.GetOutputCallback()); err != nil {
+	if ret, err = execCtx.cw.Compile(requestCtx, execCtx, ses.GetOutputCallback()); err != nil {
 		return
 	}
 
@@ -2806,7 +2844,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			drop table test1;    <- has active transaction, error
 			                     <- has active transaction
 		*/
-		if ses.GetTxnHandler().InActiveTransaction() {
+		if ses.GetTxnHandler().InActiveTxn() {
 			err = canExecuteStatementInUncommittedTransaction(requestCtx, ses, stmt)
 			if err != nil {
 				logStatementStatus(requestCtx, ses, stmt, fail, err)
@@ -2830,6 +2868,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			cw:         cw,
 			proc:       proc,
 			proto:      proto,
+			ses:        ses,
 		}
 		err = executeStmtWithResponse(requestCtx, ses, &execCtx)
 		if err != nil {
@@ -2878,17 +2917,17 @@ func checkNodeCanCache(p *plan2.Plan) bool {
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
 func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			moe, ok := e.(*moerr.Error)
-			if !ok {
-				err = moerr.ConvertPanicError(requestCtx, e)
-				resp = NewGeneralErrorResponse(COM_QUERY, ses.txnHandler.GetServerStatus(), err)
-			} else {
-				resp = NewGeneralErrorResponse(COM_QUERY, ses.txnHandler.GetServerStatus(), moe)
-			}
-		}
-	}()
+	//defer func() {
+	//	if e := recover(); e != nil {
+	//		moe, ok := e.(*moerr.Error)
+	//		if !ok {
+	//			err = moerr.ConvertPanicError(requestCtx, e)
+	//			resp = NewGeneralErrorResponse(COM_QUERY, ses.txnHandler.GetServerStatus(), err)
+	//		} else {
+	//			resp = NewGeneralErrorResponse(COM_QUERY, ses.txnHandler.GetServerStatus(), moe)
+	//		}
+	//	}
+	//}()
 
 	var span trace.Span
 	requestCtx, span = trace.Start(requestCtx, "ExecRequest",

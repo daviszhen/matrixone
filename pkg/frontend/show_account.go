@@ -161,9 +161,7 @@ func requestStorageUsage(ses *Session, accIds [][]int32) (resp any, tried bool, 
 
 	var ctx context.Context
 	var txnOperator client.TxnOperator
-	if ctx, txnOperator, err = ses.txnHandler.GetTxn(); err != nil {
-		return nil, false, err
-	}
+	ctx, txnOperator = ses.txnHandler.GetTxn()
 
 	// create a new proc for `handler`
 	proc := process.New(ctx, ses.proc.GetMPool(),
