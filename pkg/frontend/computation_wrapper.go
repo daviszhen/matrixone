@@ -90,6 +90,16 @@ func (ncw *NullComputationWrapper) GetLoadTag() bool {
 func (ncw *NullComputationWrapper) Clear() {
 
 }
+func (ncw *NullComputationWrapper) Plan() *plan.Plan {
+	return nil
+}
+func (ncw *NullComputationWrapper) SetPlan(p *plan.Plan) {
+
+}
+
+func (ncw *NullComputationWrapper) Free() {
+	ncw.Clear()
+}
 
 type TxnComputationWrapper struct {
 	stmt      tree.Statement
@@ -115,6 +125,14 @@ func InitTxnComputationWrapper(ses FeSession, stmt tree.Statement, proc *process
 	}
 }
 
+func (cwft *TxnComputationWrapper) Plan() *plan.Plan {
+	return cwft.plan
+}
+
+func (cwft *TxnComputationWrapper) SetPlan(p *plan.Plan) {
+	cwft.plan = p
+}
+
 func (cwft *TxnComputationWrapper) GetAst() tree.Statement {
 	return cwft.stmt
 }
@@ -126,11 +144,7 @@ func (cwft *TxnComputationWrapper) Free() {
 			cwft.stmt = nil
 		}
 	}
-	cwft.plan = nil
-	cwft.proc = nil
-	cwft.ses = nil
-	cwft.compile = nil
-	cwft.runResult = nil
+	cwft.Clear()
 }
 
 func (cwft *TxnComputationWrapper) Clear() {

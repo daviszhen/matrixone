@@ -1038,3 +1038,75 @@ func clearBits(t *uint32, bit uint32) {
 func bitsIsSet(t uint32, bit uint32) bool {
 	return t&bit != 0
 }
+
+//
+//// sqlToStmts parse the sql into stmts or retrieving them from the cache.
+//func sqlToStmts(ses FeSession, input *UserInput) (*CachedStmts, error) {
+//	var stmts []tree.Statement = nil
+//	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
+//		return &CachedStmts{hit: true, stmts: cached.stmts, plans: cached.plans}, nil
+//	}
+//
+//	var cmdFieldStmt *InternalCmdFieldList
+//	var err error
+//	// if the input is an option ast, we should use it directly
+//	if input.getStmt() != nil {
+//		stmts = append(stmts, input.getStmt())
+//	} else if isCmdFieldListSql(input.getSql()) {
+//		cmdFieldStmt, err = parseCmdFieldList(ses.GetRequestContext(), input.getSql())
+//		if err != nil {
+//			return nil, err
+//		}
+//		stmts = append(stmts, cmdFieldStmt)
+//	} else {
+//		var v interface{}
+//		var origin interface{}
+//		v, err = ses.GetGlobalVar("lower_case_table_names")
+//		if err != nil {
+//			v = int64(1)
+//		}
+//		origin, err = ses.GetGlobalVar("keep_user_target_list_in_result")
+//		if err != nil {
+//			origin = int64(0)
+//		}
+//		stmts, err = parsers.Parse(ses.GetRequestContext(), dialect.MYSQL, input.getSql(), v.(int64), origin.(int64))
+//		if err != nil {
+//			return nil, err
+//		}
+//	}
+//	return &CachedStmts{hit: false, stmts: stmts}, nil
+//}
+//
+//// checkAllPlansOfSqlChangedOrNot decide the plan of every statement are changed or not.
+//// if the plan is changed, it returns nil, else returns plan array
+//func checkAllPlansOfSqlChangedOrNot(execCtx *ExecCtx) error {
+//	if !execCtx.cachedStmts.hit {
+//		return nil
+//	}
+//	if execCtx.cachedStmts.checked {
+//		return nil
+//	}
+//	if len(execCtx.cachedStmts.stmts) != len(execCtx.stmtsOfSql) {
+//		return moerr.NewInternalError(execCtx.reqCtx, "cached stamts is not equal to the generated stmts of sql")
+//	}
+//
+//	modify := false
+//	for i, _ := range execCtx.cachedStmts.stmts {
+//		plan0 := execCtx.cachedStmts.plans[i]
+//		if plan0 == nil {
+//			modify = true
+//			break
+//		}
+//		if checkModify(plan0, execCtx.ses) {
+//			modify = true
+//			break
+//		}
+//		execCtx.cachedStmts.checkedPlans = append(execCtx.cachedStmts.checkedPlans, plan0)
+//	}
+//	if modify {
+//		execCtx.cachedStmts.checkedPlans = nil
+//	}
+//	execCtx.cachedStmts.checked = true
+//
+//	return nil
+//}

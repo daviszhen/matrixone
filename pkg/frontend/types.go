@@ -77,6 +77,9 @@ type ComputationWrapper interface {
 
 	GetServerStatus() uint16
 	Clear()
+	Plan() *plan.Plan
+	SetPlan(*plan.Plan)
+	Free()
 }
 
 type ColumnInfo interface {
@@ -346,6 +349,7 @@ type FeSession interface {
 	DisableTrace() bool
 	Close()
 	Clear()
+	getCachedPlan(sql string) *cachedPlan
 }
 
 type ExecCtx struct {
@@ -369,6 +373,7 @@ type ExecCtx struct {
 	ses             FeSession
 	stmtExecErr     error
 	txnOpt          FeTxnOption
+	cws             []ComputationWrapper
 }
 
 // TODO: shared component among the session implmentation
@@ -699,4 +704,17 @@ func (ses *Session) GetDebugString() string {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	return ses.debugStr
+}
+
+type CachedStmts struct {
+	//hit means stmts and plans already hit in plan cache
+	hit bool
+	//checked means plans already checked changed
+	checked bool
+	//stmts got from plan cache
+	stmts []tree.Statement
+	//plans got from plan cache
+	plans []*plan.Plan
+	//if one of plans is changed, the checkedPlans is nil
+	checkedPlans []*plan.Plan
 }

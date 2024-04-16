@@ -2020,7 +2020,7 @@ func buildPlan(requestCtx context.Context, ses FeSession, ctx plan2.CompilerCont
 	return ret, err
 }
 
-func checkModify(plan2 *plan.Plan, proc *process.Process, ses *Session) bool {
+func checkModify(plan2 *plan.Plan, ses FeSession) bool {
 	if plan2 == nil {
 		return true
 	}
@@ -2092,7 +2092,7 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 				modify = true
 				break
 			}
-			if checkModify(tcw.plan, proc, ses) {
+			if checkModify(tcw.plan, ses) {
 				modify = true
 				break
 			}
@@ -2138,6 +2138,53 @@ var GetComputationWrapper = func(db string, input *UserInput, user string, eng e
 		cw = append(cw, InitTxnComputationWrapper(ses, stmt, proc))
 	}
 	return cw, nil
+}
+
+var GetComputationWrapper2 = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
+	var cws []ComputationWrapper = nil
+	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
+		for i, stmt := range cached.stmts {
+			tcw := InitTxnComputationWrapper(ses, stmt, proc)
+			tcw.plan = cached.plans[i]
+			cws = append(cws, tcw)
+		}
+
+		return cws, nil
+	}
+
+	var stmts []tree.Statement = nil
+	var cmdFieldStmt *InternalCmdFieldList
+	var err error
+	// if the input is an option ast, we should use it directly
+	if input.getStmt() != nil {
+		stmts = append(stmts, input.getStmt())
+	} else if isCmdFieldListSql(input.getSql()) {
+		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, input.getSql())
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, cmdFieldStmt)
+	} else {
+		var v interface{}
+		var origin interface{}
+		v, err = ses.GetGlobalVar("lower_case_table_names")
+		if err != nil {
+			v = int64(1)
+		}
+		origin, err = ses.GetGlobalVar("keep_user_target_list_in_result")
+		if err != nil {
+			origin = int64(0)
+		}
+		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, input.getSql(), v.(int64), origin.(int64))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, stmt := range stmts {
+		cws = append(cws, InitTxnComputationWrapper(ses, stmt, proc))
+	}
+	return cws, nil
 }
 
 func incTransactionCounter(tenant string) {
@@ -2423,10 +2470,12 @@ func executeStmtWithTxn(requestCtx context.Context,
 	ses FeSession,
 	execCtx *ExecCtx,
 ) (err error) {
+	var autocommit bool
 	if !ses.IsDerivedStmt() {
 		//derived stmt shares the same txn with ancestor.
 		//it only executes select statements.
-		//6. pass or commit or rollback txn
+
+		//7. pass or commit or rollback txn
 		// defer transaction state management.
 		defer func() {
 			err = finishTxnFunc(requestCtx, ses, err, execCtx)
@@ -2447,7 +2496,7 @@ func executeStmtWithTxn(requestCtx context.Context,
 			return nil
 		}
 
-		autocommit, err := autocommitValue(ses)
+		autocommit, err = autocommitValue(ses)
 		if err != nil {
 			return err
 		}
@@ -2493,7 +2542,19 @@ func executeStmtWithTxn(requestCtx context.Context,
 		}()
 	}
 
-	//5. execute stmt within txn
+	//5. check plan within txn
+	if execCtx.cw.Plan() != nil {
+		if checkModify(execCtx.cw.Plan(), ses) {
+			execCtx.cw.SetPlan(nil)
+			//plan changed
+			//clear all cached plan
+			for _, cw := range execCtx.cws {
+				cw.SetPlan(nil)
+			}
+		}
+	}
+
+	//6. execute stmt within txn
 	switch sesImpl := ses.(type) {
 	case *Session:
 		return executeStmt(requestCtx, sesImpl, execCtx)
@@ -2743,7 +2804,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 	statsInfo := statistic.StatsInfo{ParseStartTime: beginInstant}
 	requestCtx = statistic.ContextWithStatsInfo(requestCtx, &statsInfo)
 
-	cws, err := GetComputationWrapper(ses.GetDatabaseName(),
+	cws, err := GetComputationWrapper2(ses.GetDatabaseName(),
 		input,
 		ses.GetUserName(),
 		getGlobalPu().StorageEngine,
@@ -2780,10 +2841,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 	defer func() {
 		if !Cached {
 			for i := 0; i < len(cws); i++ {
-				if cwft, ok := cws[i].(*TxnComputationWrapper); ok {
-					cwft.Free()
-				}
-				cws[i].Clear()
+				cws[i].Free()
 			}
 		}
 	}()
@@ -2865,6 +2923,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			proc:       proc,
 			proto:      proto,
 			ses:        ses,
+			cws:        cws,
 		}
 		err = executeStmtWithResponse(requestCtx, ses, &execCtx)
 		if err != nil {
