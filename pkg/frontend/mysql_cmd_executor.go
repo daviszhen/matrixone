@@ -2423,79 +2423,75 @@ func executeStmtWithTxn(requestCtx context.Context,
 	ses FeSession,
 	execCtx *ExecCtx,
 ) (err error) {
-	//6. pass or commit or rollback txn
-	// defer transaction state management.
-	defer func() {
-		err = finishTxnFunc(requestCtx, ses, err, execCtx)
-	}()
-
-	//1. start txn
-	//special BEGIN,COMMIT,ROLLBACK
-	beginStmt := false
-	switch execCtx.stmt.(type) {
-	case *tree.BeginTransaction:
-		execCtx.txnOpt.byBegin = true
-		beginStmt = true
-	case *tree.CommitTransaction:
-		execCtx.txnOpt.byCommit = true
-		return nil
-	case *tree.RollbackTransaction:
-		execCtx.txnOpt.byRollback = true
-		return nil
-	}
-
-	autocommit, err := autocommitValue(ses)
-	if err != nil {
-		return err
-	}
-
-	execCtx.txnOpt.autoCommit = autocommit
-	err = ses.GetTxnHandler().Create(execCtx)
-	if err != nil {
-		return err
-	}
-
-	//skip BEGIN stmt
-	if beginStmt {
-		return err
-	}
-
-	if ses.GetTxnHandler() == nil {
-		panic("need txn handler")
-	}
-
-	//2. start statement on workspace
-	// statement management
-	_, txnOp := ses.GetTxnHandler().GetTxn()
-
-	//non derived statement
 	if !ses.IsDerivedStmt() {
+		//derived stmt shares the same txn with ancestor.
+		//it only executes select statements.
+		//6. pass or commit or rollback txn
+		// defer transaction state management.
+		defer func() {
+			err = finishTxnFunc(requestCtx, ses, err, execCtx)
+		}()
+
+		//1. start txn
+		//special BEGIN,COMMIT,ROLLBACK
+		beginStmt := false
+		switch execCtx.stmt.(type) {
+		case *tree.BeginTransaction:
+			execCtx.txnOpt.byBegin = true
+			beginStmt = true
+		case *tree.CommitTransaction:
+			execCtx.txnOpt.byCommit = true
+			return nil
+		case *tree.RollbackTransaction:
+			execCtx.txnOpt.byRollback = true
+			return nil
+		}
+
+		autocommit, err := autocommitValue(ses)
+		if err != nil {
+			return err
+		}
+
+		execCtx.txnOpt.autoCommit = autocommit
+		err = ses.GetTxnHandler().Create(execCtx)
+		if err != nil {
+			return err
+		}
+
+		//skip BEGIN stmt
+		if beginStmt {
+			return err
+		}
+
+		if ses.GetTxnHandler() == nil {
+			panic("need txn handler")
+		}
+
+		//2. start statement on workspace
+		// statement management
+		_, txnOp := ses.GetTxnHandler().GetTxn()
+
 		txnOp.GetWorkspace().StartStatement()
-	}
 
-	//3. increase statement id
-	if !ses.IsDerivedStmt() {
+		//3. increase statement id
 		err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
 		if err != nil {
 			return err
 		}
-	}
 
-	//4. end statement on workspace
-	// defer Start/End Statement management, called after finishTxnFunc()
-	defer func() {
-		if ses.GetTxnHandler() == nil {
-			panic("need txn handler 2")
-		}
+		//4. end statement on workspace
+		// defer Start/End Statement management, called after finishTxnFunc()
+		defer func() {
+			if ses.GetTxnHandler() == nil {
+				panic("need txn handler 2")
+			}
 
-		// move finishTxnFunc() out to another defer so that if finishTxnFunc
-		// paniced, the following is still called.
-		_, txnOp = ses.GetTxnHandler().GetTxn()
-		//non derived statement
-		if !ses.IsDerivedStmt() {
+			// move finishTxnFunc() out to another defer so that if finishTxnFunc
+			// paniced, the following is still called.
+			_, txnOp = ses.GetTxnHandler().GetTxn()
 			txnOp.GetWorkspace().EndStatement()
-		}
-	}()
+		}()
+	}
 
 	//5. execute stmt within txn
 	switch sesImpl := ses.(type) {

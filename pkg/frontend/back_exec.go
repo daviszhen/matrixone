@@ -17,6 +17,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/compile"
@@ -815,10 +816,6 @@ func (backSes *backSession) updateLastCommitTS(lastCommitTS timestamp.Timestamp)
 	}
 }
 
-func (backSes *backSession) GetSqlOfStmt() string {
-	return ""
-}
-
 // GetTenantName return tenant name according to GetTenantInfo and stmt.
 //
 // With stmt = nil, should be only called in TxnHandler.NewTxn, TxnHandler.CommitTxn, TxnHandler.RollbackTxn
@@ -870,6 +867,10 @@ func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, 
 }
 
 func (backSes *backSession) GetSessionVar(name string) (interface{}, error) {
+	switch strings.ToLower(name) {
+	case "autocommit":
+		return true, nil
+	}
 	return nil, nil
 }
 

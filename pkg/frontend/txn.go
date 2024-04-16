@@ -1035,8 +1035,6 @@ func (th *Txn) Create(execCtx *ExecCtx) error {
 // if there is a txn existed, commit it before creating a new one.
 func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
 	var err error
-	var txnCtx context.Context
-	var txnOp TxnOperator
 	defer th.inActiveTxnUnsafe()
 	if th.shareTxn {
 		return moerr.NewInternalError(execCtx.reqCtx, "NewTxn: the share txn is not allowed to create new txn")
@@ -1063,32 +1061,32 @@ func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
 			incTransactionErrorsCounter(tenant, metric.SQLTypeBegin)
 		}
 	}()
-	txnCtx, txnOp, err = th.createTxnOpUnsafe(execCtx)
+	err = th.createTxnOpUnsafe(execCtx)
 	if err != nil {
 		return err
 	}
-	if txnCtx == nil {
+	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
 	storage := th.storage
-	err = storage.New(txnCtx, txnOp)
+	err = storage.New(th.txnCtx, th.txnOp)
 	if err != nil {
 		execCtx.ses.SetTxnId(dumpUUID[:])
 	} else {
-		execCtx.ses.SetTxnId(txnOp.Txn().ID)
+		execCtx.ses.SetTxnId(th.txnOp.Txn().ID)
 	}
 	return err
 }
 
 // createTxnOpUnsafe creates a new txn operator using TxnClient. Should not be called outside txn
-func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator, error) {
+func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 	var err error
 	if getGlobalPu().TxnClient == nil {
 		panic("must set txn client")
 	}
 
 	if th.shareTxn {
-		return nil, nil, moerr.NewInternalError(execCtx.reqCtx, "NewTxnOperator: the share txn is not allowed to create new txn")
+		return moerr.NewInternalError(execCtx.reqCtx, "NewTxnOperator: the share txn is not allowed to create new txn")
 	}
 
 	var opts []client.TxnOption
@@ -1099,11 +1097,11 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator
 		}
 	}
 
-	txnCtx, err := th.createTxnCtxUnsafe(execCtx)
+	err = th.createTxnCtxUnsafe(execCtx)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-	if txnCtx == nil {
+	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
 
@@ -1137,7 +1135,7 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator
 	} else {
 		varVal, err := execCtx.ses.GetSessionVar("disable_txn_trace")
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		if gsv, ok := GSysVariables.GetDefinitionOfSysVar("disable_txn_trace"); ok {
 			if svbt, ok2 := gsv.GetType().(SystemVariableBoolType); ok2 {
@@ -1149,55 +1147,54 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) (context.Context, TxnOperator
 	}
 
 	th.txnOp, err = getGlobalPu().TxnClient.New(
-		txnCtx,
+		th.txnCtx,
 		execCtx.ses.getLastCommitTS(),
 		opts...)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 	if th.txnOp == nil {
-		return nil, nil, moerr.NewInternalError(execCtx.reqCtx, "NewTxnOperator: txnClient new a null txn")
+		return moerr.NewInternalError(execCtx.reqCtx, "NewTxnOperator: txnClient new a null txn")
 	}
-	return txnCtx, th.txnOp, err
+	return err
 }
 
 // createTxnCtxUnsafe creates txn ctx. Should not be called outside txn
-func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) (context.Context, error) {
+func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) error {
 	if th.txnCtx == nil {
 		th.txnCtx, th.txnCtxCancel = context.WithTimeout(execCtx.connCtx,
 			getGlobalPu().SV.SessionTimeout.Duration)
 	}
-	retTxnCtx := th.txnCtx
 
 	accountId, err := defines.GetAccountId(execCtx.reqCtx)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	retTxnCtx = defines.AttachAccountId(retTxnCtx, accountId)
-	retTxnCtx = defines.AttachUserId(retTxnCtx, defines.GetUserId(execCtx.reqCtx))
-	retTxnCtx = defines.AttachRoleId(retTxnCtx, defines.GetRoleId(execCtx.reqCtx))
+	th.txnCtx = defines.AttachAccountId(th.txnCtx, accountId)
+	th.txnCtx = defines.AttachUserId(th.txnCtx, defines.GetUserId(execCtx.reqCtx))
+	th.txnCtx = defines.AttachRoleId(th.txnCtx, defines.GetRoleId(execCtx.reqCtx))
 	if v := execCtx.reqCtx.Value(defines.NodeIDKey{}); v != nil {
-		retTxnCtx = context.WithValue(retTxnCtx, defines.NodeIDKey{}, v)
+		th.txnCtx = context.WithValue(th.txnCtx, defines.NodeIDKey{}, v)
 	}
-	retTxnCtx = trace.ContextWithSpan(retTxnCtx, trace.SpanFromContext(execCtx.reqCtx))
+	th.txnCtx = trace.ContextWithSpan(th.txnCtx, trace.SpanFromContext(execCtx.reqCtx))
 	if execCtx.ses.GetTenantInfo() != nil && execCtx.ses.GetTenantInfo().User == db_holder.MOLoggerUser {
-		retTxnCtx = context.WithValue(retTxnCtx, defines.IsMoLogger{}, true)
+		th.txnCtx = context.WithValue(th.txnCtx, defines.IsMoLogger{}, true)
 	}
 
 	if storage, ok := execCtx.reqCtx.Value(defines.TemporaryTN{}).(*memorystorage.Storage); ok {
-		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, storage)
+		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, storage)
 	} else if execCtx.ses.IfInitedTempEngine() {
-		retTxnCtx = context.WithValue(retTxnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
+		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
 	}
-	return retTxnCtx, nil
+	return nil
 }
 
 func (th *Txn) GetTxn() (context.Context, TxnOperator) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	if !th.inActiveTxnUnsafe() {
-		panic("invalid txn")
-	}
+	//if !th.inActiveTxnUnsafe() {
+	//	panic("invalid txn")
+	//}
 	return th.txnCtx, th.txnOp
 }
 
@@ -1534,11 +1531,11 @@ func (th *Txn) AttachTempStorageToTxnCtx(execCtx *ExecCtx, inited bool, temp *me
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	if inited {
-		ctx, err := th.createTxnCtxUnsafe(execCtx)
+		err := th.createTxnCtxUnsafe(execCtx)
 		if err != nil {
 			return err
 		}
-		th.txnCtx = context.WithValue(ctx, defines.TemporaryTN{}, temp)
+		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, temp)
 	}
 	return nil
 }

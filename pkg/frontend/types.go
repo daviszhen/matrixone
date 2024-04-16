@@ -543,6 +543,10 @@ func (ses *feSessionImpl) SetSqlOfStmt(sot string) {
 	ses.stmtProfile.SetSqlOfStmt(sot)
 }
 
+func (ses *feSessionImpl) GetSqlOfStmt() string {
+	return ses.stmtProfile.GetSqlOfStmt()
+}
+
 func (ses *feSessionImpl) GetTenantInfo() *TenantInfo {
 	return ses.tenant
 }
