@@ -262,7 +262,7 @@ func WildcardMatch(pattern, target string) bool {
 }
 
 // getExprValue executes the expression and returns the value.
-func getExprValue(e tree.Expr, ses *Session) (interface{}, error) {
+func getExprValue(e tree.Expr, ses *Session, execCtx *ExecCtx) (interface{}, error) {
 	/*
 		CORNER CASE:
 			SET character_set_results = utf8; // e = tree.UnresolvedName{'utf8'}.
@@ -306,7 +306,7 @@ func getExprValue(e tree.Expr, ses *Session) (interface{}, error) {
 
 	//run the statement in the same session
 	ses.ClearResultBatches()
-	err = executeStmtInSameSession(ctx, ses, compositedSelect)
+	err = executeStmtInSameSession(ctx, ses, execCtx, compositedSelect)
 	if err != nil {
 		return nil, err
 	}

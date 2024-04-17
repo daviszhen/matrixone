@@ -27,6 +27,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
+	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
@@ -67,7 +68,7 @@ type ComputationWrapper interface {
 
 	GetColumns() ([]interface{}, error)
 
-	Compile(requestCtx context.Context, execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error)
+	Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error)
 
 	GetUUID() []byte
 
@@ -374,6 +375,17 @@ type ExecCtx struct {
 	stmtExecErr     error
 	txnOpt          FeTxnOption
 	cws             []ComputationWrapper
+	attach          *attachInfo
+}
+
+type attachInfo struct {
+	accountId  uint32
+	userId     uint32
+	roleId     uint32
+	nodeId     any
+	span       trace.Span
+	isMoLogger bool
+	tempDN     *memorystorage.Storage
 }
 
 // TODO: shared component among the session implmentation

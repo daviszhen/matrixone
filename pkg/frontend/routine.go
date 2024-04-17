@@ -224,11 +224,23 @@ func (rt *Routine) reportSystemStatus() (r bool) {
 }
 
 func (rt *Routine) handleRequest(req *Request) error {
-	var ses *Session
 	var routineCtx context.Context
 	var err error
 	var resp *Response
 	var quit bool
+
+	ses := rt.getSession()
+
+	attach := attachInfo{}
+	execCtx := ExecCtx{
+		connCtx: rt.getCancelRoutineCtx(),
+		attach:  &attach,
+		ses:     ses,
+	}
+
+	//create txnCtx first.
+	//other ctx inherits the txnCtx
+	ses.GetTxnHandler().CreateTxnCtx(&execCtx)
 
 	v2.StartHandleRequestCounter.Inc()
 	defer func() {
@@ -257,7 +269,6 @@ func (rt *Routine) handleRequest(req *Request) error {
 	parameters := rt.getParameters()
 	cancelRequestCtx, cancelRequestFunc := context.WithTimeout(routineCtx, parameters.SessionTimeout.Duration)
 	rt.setCancelRequestFunc(cancelRequestFunc)
-	ses = rt.getSession()
 	ses.UpdateDebugString()
 
 	if rt.needPrintSessionInfo() {
@@ -276,7 +287,8 @@ func (rt *Routine) handleRequest(req *Request) error {
 		metric.ConnectionCounter(ses.GetTenantInfo().GetTenant()).Inc()
 	})
 
-	if resp, err = ExecRequest(tenantCtx, ses, req); err != nil {
+	execCtx.reqCtx = tenantCtx
+	if resp, err = ExecRequest(ses, &execCtx, req); err != nil {
 		if !skipClientQuit(err.Error()) {
 			logError(ses, ses.GetDebugString(),
 				"Failed to execute request",

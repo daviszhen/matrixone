@@ -842,7 +842,7 @@ func (th *TxnHandler) setAutocommitOn() {
 }
 
 // get errors during the transaction. rollback the transaction
-func rollbackTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx *ExecCtx) error {
+func rollbackTxnFunc(ses FeSession, execErr error, execCtx *ExecCtx) error {
 	incStatementErrorsCounter(execCtx.tenant, execCtx.stmt)
 	/*
 		Cases    | set Autocommit = 1/0 | BEGIN statement |
@@ -861,16 +861,15 @@ func rollbackTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execC
 	execCtx.stmtExecErr = execErr
 	txnErr := ses.GetTxnHandler().Rollback(execCtx)
 	if txnErr != nil {
-		logStatementStatus(reqCtx, ses, execCtx.stmt, fail, txnErr)
+		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, txnErr)
 		return txnErr
 	}
-	logStatementStatus(reqCtx, ses, execCtx.stmt, fail, execErr)
+	logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, execErr)
 	return execErr
 }
 
 // execution succeeds during the transaction. commit the transaction
-func commitTxnFunc(requestCtx context.Context,
-	ses FeSession,
+func commitTxnFunc(ses FeSession,
 	execCtx *ExecCtx) (retErr error) {
 	// Call a defer function -- if TxnCommitSingleStatement paniced, we
 	// want to catch it and convert it to an error.
@@ -883,13 +882,13 @@ func commitTxnFunc(requestCtx context.Context,
 	//load data handle txn failure internally
 	retErr = ses.GetTxnHandler().Commit(execCtx)
 	if retErr != nil {
-		logStatementStatus(requestCtx, ses, execCtx.stmt, fail, retErr)
+		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, retErr)
 	}
 	return
 }
 
 // finish the transaction
-func finishTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
+func finishTxnFunc(ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
 	// First recover all panics.   If paniced, we will abort.
 	//if r := recover(); r != nil {
 	//	recoverErr := moerr.ConvertPanicError(reqCtx, r)
@@ -897,7 +896,7 @@ func finishTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx
 	//}
 
 	if execErr == nil {
-		err = commitTxnFunc(reqCtx, ses, execCtx)
+		err = commitTxnFunc(ses, execCtx)
 		if err == nil {
 			return err
 		}
@@ -905,7 +904,7 @@ func finishTxnFunc(reqCtx context.Context, ses FeSession, execErr error, execCtx
 		execErr = err
 	}
 
-	return rollbackTxnFunc(reqCtx, ses, execErr, execCtx)
+	return rollbackTxnFunc(ses, execErr, execCtx)
 }
 
 type FeTxnOption struct {
@@ -934,8 +933,12 @@ type Txn struct {
 	// the lifetime of txnCtx is longer than the requestCtx.
 	// the timeout of txnCtx is from the FrontendParameters.SessionTimeout with
 	// default 24 hours.
-	txnCtx             context.Context
-	txnCtxCancel       context.CancelFunc
+	txnCtx       context.Context
+	txnCtxCancel context.CancelFunc
+
+	// every request has a reqCtx inherits from txnCtx
+	reqCtx             context.Context
+	reqCtxCancel       context.CancelFunc
 	shareTxn           bool
 	mu                 sync.Mutex
 	hasCalledStartStmt bool
@@ -958,6 +961,56 @@ func InitTxn(storage engine.Engine, txnCtx context.Context, txnOp TxnOperator) *
 		shareTxn:     txnCtx != nil && txnOp != nil,
 		serverStatus: defaultServerStatus,
 		optionBits:   defaultOptionBits,
+	}
+}
+
+// CreateTxnCtx always return a valid txnCtx.
+// if there is none, it creates one.
+// if there is one, it returns previous one.
+func (th *Txn) CreateTxnCtx(execCtx *ExecCtx) {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	th.createTxnCtxUnsafe(execCtx)
+}
+
+// GetTxnCtx should be called after the CreateTxnCtx
+func (th *Txn) GetTxnCtx() context.Context {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.txnCtx
+}
+
+func (th *Txn) CancelReqCtx() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	if th.reqCtxCancel != nil {
+		th.reqCtxCancel()
+	}
+}
+
+func (th *Txn) GetReqCtx() context.Context {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.reqCtx
+}
+
+func (th *Txn) CreateReqCtx(execCtx *ExecCtx) {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	th.reqCtx = defines.AttachAccountId(th.reqCtx, execCtx.attach.accountId)
+	th.reqCtx = defines.AttachUserId(th.reqCtx, execCtx.attach.userId)
+	th.reqCtx = defines.AttachRoleId(th.reqCtx, execCtx.attach.roleId)
+
+	th.reqCtx = context.WithValue(th.reqCtx, defines.NodeIDKey{}, execCtx.attach.nodeId)
+	if execCtx.attach.span != nil {
+		th.reqCtx = trace.ContextWithSpan(th.reqCtx, execCtx.attach.span)
+	} else {
+		th.reqCtx = trace.ContextWithSpan(th.reqCtx, trace.NoopSpan{})
+	}
+
+	th.reqCtx = context.WithValue(th.reqCtx, defines.IsMoLogger{}, true)
+	if execCtx.attach.tempDN != nil {
+		th.reqCtx = context.WithValue(th.reqCtx, defines.TemporaryTN{}, execCtx.attach.tempDN)
 	}
 }
 
@@ -1096,11 +1149,7 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 			opts = v.([]client.TxnOption)
 		}
 	}
-
-	err = th.createTxnCtxUnsafe(execCtx)
-	if err != nil {
-		return err
-	}
+	th.createTxnCtxUnsafe(execCtx)
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
@@ -1160,33 +1209,11 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 }
 
 // createTxnCtxUnsafe creates txn ctx. Should not be called outside txn
-func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) error {
+func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) {
 	if th.txnCtx == nil {
 		th.txnCtx, th.txnCtxCancel = context.WithTimeout(execCtx.connCtx,
 			getGlobalPu().SV.SessionTimeout.Duration)
 	}
-
-	accountId, err := defines.GetAccountId(execCtx.reqCtx)
-	if err != nil {
-		return err
-	}
-	th.txnCtx = defines.AttachAccountId(th.txnCtx, accountId)
-	th.txnCtx = defines.AttachUserId(th.txnCtx, defines.GetUserId(execCtx.reqCtx))
-	th.txnCtx = defines.AttachRoleId(th.txnCtx, defines.GetRoleId(execCtx.reqCtx))
-	if v := execCtx.reqCtx.Value(defines.NodeIDKey{}); v != nil {
-		th.txnCtx = context.WithValue(th.txnCtx, defines.NodeIDKey{}, v)
-	}
-	th.txnCtx = trace.ContextWithSpan(th.txnCtx, trace.SpanFromContext(execCtx.reqCtx))
-	if execCtx.ses.GetTenantInfo() != nil && execCtx.ses.GetTenantInfo().User == db_holder.MOLoggerUser {
-		th.txnCtx = context.WithValue(th.txnCtx, defines.IsMoLogger{}, true)
-	}
-
-	if storage, ok := execCtx.reqCtx.Value(defines.TemporaryTN{}).(*memorystorage.Storage); ok {
-		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, storage)
-	} else if execCtx.ses.IfInitedTempEngine() {
-		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
-	}
-	return nil
 }
 
 func (th *Txn) GetTxn() (context.Context, TxnOperator) {
@@ -1531,10 +1558,7 @@ func (th *Txn) AttachTempStorageToTxnCtx(execCtx *ExecCtx, inited bool, temp *me
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	if inited {
-		err := th.createTxnCtxUnsafe(execCtx)
-		if err != nil {
-			return err
-		}
+		th.createTxnCtxUnsafe(execCtx)
 		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, temp)
 	}
 	return nil

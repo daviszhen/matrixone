@@ -68,7 +68,7 @@ func (ncw *NullComputationWrapper) GetColumns() ([]interface{}, error) {
 	return []interface{}{}, nil
 }
 
-func (ncw *NullComputationWrapper) Compile(requestCtx context.Context, execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
+func (ncw *NullComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
 	return nil, nil
 }
 
@@ -226,18 +226,18 @@ func (cwft *TxnComputationWrapper) GetServerStatus() uint16 {
 	return uint16(cwft.ses.GetTxnHandler().GetServerStatus())
 }
 
-func (cwft *TxnComputationWrapper) Compile(requestCtx context.Context, execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
+func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
 	var originSQL string
 	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "TxnComputationWrapper.Compile",
+	execCtx.reqCtx, span = trace.Start(execCtx.reqCtx, "TxnComputationWrapper.Compile",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(cwft.ses.GetTxnId(), cwft.ses.GetStmtId(), cwft.ses.GetSqlOfStmt()))
 
 	var err error
-	defer RecordStatementTxnID(requestCtx, cwft.ses)
+	defer RecordStatementTxnID(execCtx.reqCtx, cwft.ses)
 	if cwft.ses.IfInitedTempEngine() {
-		requestCtx = context.WithValue(requestCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
-		cwft.ses.SetRequestContext(requestCtx)
+		execCtx.reqCtx = context.WithValue(execCtx.reqCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
+		cwft.ses.SetRequestContext(execCtx.reqCtx)
 		cwft.proc.Ctx = context.WithValue(cwft.proc.Ctx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 	}

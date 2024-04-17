@@ -15,7 +15,6 @@
 package frontend
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -25,8 +24,7 @@ import (
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 )
 
-func executeResultRowStmtInBack(requestCtx context.Context,
-	backSes *backSession,
+func executeResultRowStmtInBack(backSes *backSession,
 	execCtx *ExecCtx) (err error) {
 	var columns []interface{}
 	mrs := backSes.GetMysqlResultSet()

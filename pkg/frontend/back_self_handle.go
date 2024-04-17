@@ -15,14 +15,11 @@
 package frontend
 
 import (
-	"context"
-
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
-func execInFrontendInBack(requestCtx context.Context,
-	backSes *backSession,
+func execInFrontendInBack(backSes *backSession,
 	execCtx *ExecCtx) (err error) {
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
@@ -42,22 +39,22 @@ func execInFrontendInBack(requestCtx context.Context,
 		//	return
 		//}
 	case *tree.Use:
-		err = handleChangeDB(requestCtx, backSes, st.Name.Compare())
+		err = handleChangeDB(execCtx.reqCtx, backSes, st.Name.Compare())
 		if err != nil {
 			return
 		}
 	case *tree.CreateDatabase:
-		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
+		err = inputNameIsInvalid(execCtx.reqCtx, string(st.Name))
 		if err != nil {
 			return
 		}
 		if st.SubscriptionOption != nil && backSes.tenant != nil && !backSes.tenant.IsAdminRole() {
-			err = moerr.NewInternalError(execCtx.proc.Ctx, "only admin can create subscription")
+			err = moerr.NewInternalError(execCtx.reqCtx, "only admin can create subscription")
 			return
 		}
 		st.Sql = execCtx.sqlOfStmt
 	case *tree.DropDatabase:
-		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
+		err = inputNameIsInvalid(execCtx.reqCtx, string(st.Name))
 		if err != nil {
 			return
 		}
@@ -68,31 +65,31 @@ func execInFrontendInBack(requestCtx context.Context,
 	case *tree.Grant:
 		switch st.Typ {
 		case tree.GrantTypeRole:
-			if err = handleGrantRole(requestCtx, backSes, &st.GrantRole); err != nil {
+			if err = handleGrantRole(execCtx.reqCtx, backSes, &st.GrantRole); err != nil {
 				return
 			}
 		case tree.GrantTypePrivilege:
-			if err = handleGrantPrivilege(requestCtx, backSes, &st.GrantPrivilege); err != nil {
+			if err = handleGrantPrivilege(execCtx.reqCtx, backSes, &st.GrantPrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.Revoke:
 		switch st.Typ {
 		case tree.RevokeTypeRole:
-			if err = handleRevokeRole(requestCtx, backSes, &st.RevokeRole); err != nil {
+			if err = handleRevokeRole(execCtx.reqCtx, backSes, &st.RevokeRole); err != nil {
 				return
 			}
 		case tree.RevokeTypePrivilege:
-			if err = handleRevokePrivilege(requestCtx, backSes, &st.RevokePrivilege); err != nil {
+			if err = handleRevokePrivilege(execCtx.reqCtx, backSes, &st.RevokePrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.EmptyStmt:
-		if err = handleEmptyStmt(requestCtx, backSes, st); err != nil {
+		if err = handleEmptyStmt(execCtx.reqCtx, backSes, st); err != nil {
 			return
 		}
 	default:
-		return moerr.NewInternalError(requestCtx, "backExec does not support %s", execCtx.sqlOfStmt)
+		return moerr.NewInternalError(execCtx.reqCtx, "backExec does not support %s", execCtx.sqlOfStmt)
 	}
 	return
 }

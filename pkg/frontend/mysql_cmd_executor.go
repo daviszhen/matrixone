@@ -715,7 +715,7 @@ func doSetVar(ctx context.Context, ses *Session, execCtx *ExecCtx, sv *tree.SetV
 		name := assign.Name
 		var value interface{}
 
-		value, err = getExprValue(assign.Value, ses)
+		value, err = getExprValue(assign.Value, ses, execCtx)
 		if err != nil {
 			return err
 		}
@@ -1051,7 +1051,7 @@ func constructCollationBatch(ses *Session, rows [][]interface{}) (*batch.Batch, 
 	return bat, nil
 }
 
-func handleAnalyzeStmt(requestCtx context.Context, ses *Session, stmt *tree.AnalyzeStmt) error {
+func handleAnalyzeStmt(ses *Session, execCtx *ExecCtx, stmt *tree.AnalyzeStmt) error {
 	// rewrite analyzeStmt to `select approx_count_distinct(col), .. from tbl`
 	// IMO, this approach is simple and future-proof
 	// Although this rewriting processing could have been handled in rewrite module,
@@ -1075,7 +1075,7 @@ func handleAnalyzeStmt(requestCtx context.Context, ses *Session, stmt *tree.Anal
 		//restore the inside statement
 		ses.ReplaceDerivedStmt(prevInsideStmt)
 	}()
-	return doComQuery(requestCtx, ses, &UserInput{sql: sql})
+	return doComQuery(ses, execCtx, &UserInput{sql: sql})
 }
 
 func doExplainStmt(ses *Session, stmt *tree.ExplainStmt) error {
@@ -2424,12 +2424,11 @@ func processLoadLocal(ctx context.Context, ses FeSession, param *tree.ExternPara
 	return
 }
 
-func executeStmtWithResponse(requestCtx context.Context,
-	ses *Session,
+func executeStmtWithResponse(ses *Session,
 	execCtx *ExecCtx,
 ) (err error) {
 	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "executeStmtWithResponse",
+	execCtx.reqCtx, span = trace.Start(execCtx.reqCtx, "executeStmtWithResponse",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(ses.GetTxnId(), ses.GetStmtId(), ses.GetSqlOfStmt()))
 
@@ -2442,7 +2441,7 @@ func executeStmtWithResponse(requestCtx context.Context,
 	execCtx.proto.DisableAutoFlush()
 	defer execCtx.proto.EnableAutoFlush()
 
-	err = executeStmtWithTxn(requestCtx, ses, execCtx)
+	err = executeStmtWithTxn(ses, execCtx)
 	if err != nil {
 		return err
 	}
@@ -2452,12 +2451,12 @@ func executeStmtWithResponse(requestCtx context.Context,
 	if ses.createAsSelectSql != "" {
 		sql := ses.createAsSelectSql
 		ses.createAsSelectSql = ""
-		if err = doComQuery(requestCtx, ses, &UserInput{sql: sql}); err != nil {
+		if err = doComQuery(ses, execCtx, &UserInput{sql: sql}); err != nil {
 			return err
 		}
 	}
 
-	err = respClientWhenSuccess(requestCtx, ses, execCtx)
+	err = respClientWhenSuccess(ses, execCtx)
 	if err != nil {
 		return err
 	}
@@ -2466,8 +2465,7 @@ func executeStmtWithResponse(requestCtx context.Context,
 	return
 }
 
-func executeStmtWithTxn(requestCtx context.Context,
-	ses FeSession,
+func executeStmtWithTxn(ses FeSession,
 	execCtx *ExecCtx,
 ) (err error) {
 	var autocommit bool
@@ -2478,7 +2476,7 @@ func executeStmtWithTxn(requestCtx context.Context,
 		//7. pass or commit or rollback txn
 		// defer transaction state management.
 		defer func() {
-			err = finishTxnFunc(requestCtx, ses, err, execCtx)
+			err = finishTxnFunc(ses, err, execCtx)
 		}()
 
 		//1. start txn
@@ -2520,10 +2518,13 @@ func executeStmtWithTxn(requestCtx context.Context,
 		// statement management
 		_, txnOp := ses.GetTxnHandler().GetTxn()
 
+		//2.1 create reqCtx
+		ses.GetTxnHandler().CreateReqCtx(execCtx)
+
 		txnOp.GetWorkspace().StartStatement()
 
 		//3. increase statement id
-		err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
+		err = txnOp.GetWorkspace().IncrStatementID(execCtx.reqCtx, false)
 		if err != nil {
 			return err
 		}
@@ -2557,16 +2558,15 @@ func executeStmtWithTxn(requestCtx context.Context,
 	//6. execute stmt within txn
 	switch sesImpl := ses.(type) {
 	case *Session:
-		return executeStmt(requestCtx, sesImpl, execCtx)
+		return executeStmt(sesImpl, execCtx)
 	case *backSession:
-		return executeStmtInBack(requestCtx, sesImpl, execCtx)
+		return executeStmtInBack(sesImpl, execCtx)
 	default:
-		return moerr.NewInternalError(requestCtx, "no such session implementation")
+		return moerr.NewInternalError(execCtx.reqCtx, "no such session implementation")
 	}
 }
 
-func executeStmt(requestCtx context.Context,
-	ses *Session,
+func executeStmt(ses *Session,
 	execCtx *ExecCtx,
 ) (err error) {
 	if txw, ok := execCtx.cw.(*TxnComputationWrapper); ok {
@@ -2576,7 +2576,7 @@ func executeStmt(requestCtx context.Context,
 	// record goroutine info when ddl stmt run timeout
 	switch execCtx.stmt.(type) {
 	case *tree.CreateTable, *tree.DropTable, *tree.CreateDatabase, *tree.DropDatabase:
-		_, span := trace.Start(requestCtx, "executeStmtHung",
+		_, span := trace.Start(execCtx.reqCtx, "executeStmtHung",
 			trace.WithHungThreshold(time.Minute), // be careful with this options
 			trace.WithProfileGoroutine(),
 			trace.WithProfileTraceSecs(10*time.Second),
@@ -2590,7 +2590,7 @@ func executeStmt(requestCtx context.Context,
 
 	switch execCtx.stmt.StmtKind().ExecLocation() {
 	case tree.EXEC_IN_FRONTEND:
-		return execInFrontend(requestCtx, ses, execCtx)
+		return execInFrontend(ses, execCtx)
 	case tree.EXEC_IN_ENGINE:
 		//in the computation engine
 	}
@@ -2599,14 +2599,14 @@ func executeStmt(requestCtx context.Context,
 	case *tree.Select:
 		if st.Ep != nil {
 			if getGlobalPu().SV.DisableSelectInto {
-				err = moerr.NewSyntaxError(requestCtx, "Unsupport select statement")
+				err = moerr.NewSyntaxError(execCtx.reqCtx, "Unsupport select statement")
 				return
 			}
 			ses.InitExportConfig(st.Ep)
 			defer func() {
 				ses.ClearExportParam()
 			}()
-			err = doCheckFilePath(requestCtx, ses, st.Ep)
+			err = doCheckFilePath(execCtx.reqCtx, ses, st.Ep)
 			if err != nil {
 				return
 			}
@@ -2653,13 +2653,13 @@ func executeStmt(requestCtx context.Context,
 	defer func() {
 		// Serialize the execution plan as json
 		if cwft, ok := execCtx.cw.(*TxnComputationWrapper); ok {
-			_ = cwft.RecordExecPlan(requestCtx)
+			_ = cwft.RecordExecPlan(execCtx.reqCtx)
 		}
 	}()
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(requestCtx, execCtx, ses.GetOutputCallback()); err != nil {
+	if ret, err = execCtx.cw.Compile(execCtx, ses.GetOutputCallback()); err != nil {
 		return
 	}
 
@@ -2674,7 +2674,7 @@ func executeStmt(requestCtx context.Context,
 	execCtx.stmt = execCtx.cw.GetAst()
 	switch execCtx.stmt.StmtKind().ExecLocation() {
 	case tree.EXEC_IN_FRONTEND:
-		return execInFrontend(requestCtx, ses, execCtx)
+		return execInFrontend(ses, execCtx)
 	case tree.EXEC_IN_ENGINE:
 
 	}
@@ -2690,12 +2690,12 @@ func executeStmt(requestCtx context.Context,
 	StmtKind := execCtx.stmt.StmtKind().OutputType()
 	switch StmtKind {
 	case tree.OUTPUT_RESULT_ROW:
-		err = executeResultRowStmt(requestCtx, ses, execCtx)
+		err = executeResultRowStmt(ses, execCtx)
 		if err != nil {
 			return err
 		}
 	case tree.OUTPUT_STATUS:
-		err = executeStatusStmt(requestCtx, ses, execCtx)
+		err = executeStatusStmt(ses, execCtx)
 		if err != nil {
 			return err
 		}
@@ -2706,7 +2706,7 @@ func executeStmt(requestCtx context.Context,
 			isExecute = true
 		}
 		if !isExecute {
-			return moerr.NewInternalError(requestCtx, "need set result type for %s", execCtx.sqlOfStmt)
+			return moerr.NewInternalError(execCtx.reqCtx, "need set result type for %s", execCtx.sqlOfStmt)
 		}
 	}
 
@@ -2714,16 +2714,16 @@ func executeStmt(requestCtx context.Context,
 }
 
 // execute query
-func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (retErr error) {
+func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error) {
 	// set the batch buf for stream scan
 	var inMemStreamScan []*kafka.Message
 
-	if batchValue, ok := requestCtx.Value(defines.SourceScanResKey{}).([]*kafka.Message); ok {
+	if batchValue, ok := execCtx.reqCtx.Value(defines.SourceScanResKey{}).([]*kafka.Message); ok {
 		inMemStreamScan = batchValue
 	}
 
 	beginInstant := time.Now()
-	requestCtx = appendStatementAt(requestCtx, beginInstant)
+	execCtx.reqCtx = appendStatementAt(execCtx.reqCtx, beginInstant)
 	input.genSqlSourceType(ses)
 	ses.SetShowStmtType(NotShowStatement)
 	proto := ses.GetMysqlProtocol()
@@ -2734,7 +2734,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 	userNameOnly := rootName
 
 	proc := process.New(
-		requestCtx,
+		execCtx.reqCtx,
 		ses.GetMemPool(),
 		getGlobalPu().TxnClient,
 		nil,
@@ -2783,16 +2783,16 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 		userNameOnly = ses.GetTenantInfo().GetUser()
 	} else {
 		var accountId uint32
-		accountId, retErr = defines.GetAccountId(requestCtx)
+		accountId, retErr = defines.GetAccountId(execCtx.reqCtx)
 		if retErr != nil {
 			return retErr
 		}
 		proc.SessionInfo.AccountId = accountId
-		proc.SessionInfo.UserId = defines.GetUserId(requestCtx)
-		proc.SessionInfo.RoleId = defines.GetRoleId(requestCtx)
+		proc.SessionInfo.UserId = defines.GetUserId(execCtx.reqCtx)
+		proc.SessionInfo.RoleId = defines.GetRoleId(execCtx.reqCtx)
 	}
 	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "doComQuery",
+	execCtx.reqCtx, span = trace.Start(execCtx.reqCtx, "doComQuery",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End()
 
@@ -2802,7 +2802,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 	ses.proc.SessionInfo = proc.SessionInfo
 
 	statsInfo := statistic.StatsInfo{ParseStartTime: beginInstant}
-	requestCtx = statistic.ContextWithStatsInfo(requestCtx, &statsInfo)
+	execCtx.reqCtx = statistic.ContextWithStatsInfo(execCtx.reqCtx, &statsInfo)
 
 	cws, err := GetComputationWrapper2(ses.GetDatabaseName(),
 		input,
@@ -2815,21 +2815,21 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 	if err != nil {
 		statsInfo.ParseDuration = ParseDuration
 		var err2 error
-		requestCtx, err2 = RecordParseErrorStatement(requestCtx, ses, proc, beginInstant, parsers.HandleSqlForRecord(input.getSql()), input.getSqlSourceTypes(), err)
+		execCtx.reqCtx, err2 = RecordParseErrorStatement(execCtx.reqCtx, ses, proc, beginInstant, parsers.HandleSqlForRecord(input.getSql()), input.getSqlSourceTypes(), err)
 		if err2 != nil {
 			return err2
 		}
 		retErr = err
 		if _, ok := err.(*moerr.Error); !ok {
-			retErr = moerr.NewParseError(requestCtx, err.Error())
+			retErr = moerr.NewParseError(execCtx.reqCtx, err.Error())
 		}
-		logStatementStringStatus(requestCtx, ses, input.getSql(), fail, retErr)
+		logStatementStringStatus(execCtx.reqCtx, ses, input.getSql(), fail, retErr)
 		return retErr
 	}
 
 	singleStatement := len(cws) == 1
 	if ses.GetCmd() == COM_STMT_PREPARE && !singleStatement {
-		return moerr.NewNotSupported(requestCtx, "prepare multi statements")
+		return moerr.NewNotSupported(execCtx.reqCtx, "prepare multi statements")
 	}
 
 	defer func() {
@@ -2866,7 +2866,7 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 		stmt := cw.GetAst()
 		sqlType := input.getSqlSourceType(i)
 		var err2 error
-		requestCtx, err2 = RecordStatement(requestCtx, ses, proc, cw, beginInstant, sqlRecord[i], sqlType, singleStatement)
+		execCtx.reqCtx, err2 = RecordStatement(execCtx.reqCtx, ses, proc, cw, beginInstant, sqlRecord[i], sqlType, singleStatement)
 		if err2 != nil {
 			return err2
 		}
@@ -2878,9 +2878,9 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 		tenant := ses.GetTenantNameWithStmt(stmt)
 		//skip PREPARE statement here
 		if ses.GetTenantInfo() != nil && !IsPrepareStatement(stmt) {
-			err = authenticateUserCanExecuteStatement(requestCtx, ses, stmt)
+			err = authenticateUserCanExecuteStatement(execCtx.reqCtx, ses, stmt)
 			if err != nil {
-				logStatementStatus(requestCtx, ses, stmt, fail, err)
+				logStatementStatus(execCtx.reqCtx, ses, stmt, fail, err)
 				return err
 			}
 		}
@@ -2899,9 +2899,9 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 			                     <- has active transaction
 		*/
 		if ses.GetTxnHandler().InActiveTxn() {
-			err = canExecuteStatementInUncommittedTransaction(requestCtx, ses, stmt)
+			err = canExecuteStatementInUncommittedTransaction(execCtx.reqCtx, ses, stmt)
 			if err != nil {
-				logStatementStatus(requestCtx, ses, stmt, fail, err)
+				logStatementStatus(execCtx.reqCtx, ses, stmt, fail, err)
 				return err
 			}
 		}
@@ -2911,21 +2911,29 @@ func doComQuery(requestCtx context.Context, ses *Session, input *UserInput) (ret
 		if ses.proc != nil {
 			ses.proc.UnixTime = proc.UnixTime
 		}
-		execCtx := ExecCtx{
-			connCtx:    ses.GetConnectContext(),
-			reqCtx:     requestCtx,
-			stmt:       stmt,
-			isLastStmt: i >= len(cws)-1,
-			tenant:     tenant,
-			userName:   userNameOnly,
-			sqlOfStmt:  sqlRecord[i],
-			cw:         cw,
-			proc:       proc,
-			proto:      proto,
-			ses:        ses,
-			cws:        cws,
-		}
-		err = executeStmtWithResponse(requestCtx, ses, &execCtx)
+		//execCtx := ExecCtx{
+		//	stmt:       stmt,
+		//	isLastStmt: i >= len(cws)-1,
+		//	tenant:     tenant,
+		//	userName:   userNameOnly,
+		//	sqlOfStmt:  sqlRecord[i],
+		//	cw:         cw,
+		//	proc:       proc,
+		//	proto:      proto,
+		//	ses:        ses,
+		//	cws:        cws,
+		//}
+		execCtx.stmt = stmt
+		execCtx.isLastStmt = i >= len(cws)-1
+		execCtx.tenant = tenant
+		execCtx.userName = userNameOnly
+		execCtx.sqlOfStmt = sqlRecord[i]
+		execCtx.cw = cw
+		execCtx.proc = proc
+		execCtx.ses = ses
+		execCtx.cws = cws
+
+		err = executeStmtWithResponse(ses, execCtx)
 		if err != nil {
 			return err
 		}
@@ -2971,7 +2979,7 @@ func checkNodeCanCache(p *plan2.Plan) bool {
 }
 
 // ExecRequest the server execute the commands from the client following the mysql's routine
-func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *Response, err error) {
+func ExecRequest(ses *Session, execCtx *ExecCtx, req *Request) (resp *Response, err error) {
 	//defer func() {
 	//	if e := recover(); e != nil {
 	//		moe, ok := e.(*moerr.Error)
@@ -2985,7 +2993,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 	//}()
 
 	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "ExecRequest",
+	execCtx.reqCtx, span = trace.Start(execCtx.reqCtx, "ExecRequest",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End()
 
@@ -2999,7 +3007,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		var query = string(req.GetData().([]byte))
 		ses.addSqlCount(1)
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(SubStringFromBegin(query, int(getGlobalPu().SV.LengthOfQueryPrinted))))
-		err = doComQuery(requestCtx, ses, &UserInput{sql: query})
+		err = doComQuery(ses, execCtx, &UserInput{sql: query})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_QUERY, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3008,7 +3016,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		var dbname = string(req.GetData().([]byte))
 		ses.addSqlCount(1)
 		query := "use `" + dbname + "`"
-		err = doComQuery(requestCtx, ses, &UserInput{sql: query})
+		err = doComQuery(ses, execCtx, &UserInput{sql: query})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_INIT_DB, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3018,7 +3026,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		var payload = string(req.GetData().([]byte))
 		ses.addSqlCount(1)
 		query := makeCmdFieldListSql(payload)
-		err = doComQuery(requestCtx, ses, &UserInput{sql: query})
+		err = doComQuery(ses, execCtx, &UserInput{sql: query})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_FIELD_LIST, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3040,7 +3048,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		sql = fmt.Sprintf("prepare %s from %s", newStmtName, sql)
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
 
-		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
+		err = doComQuery(ses, execCtx, &UserInput{sql: sql})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_PREPARE, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3050,11 +3058,11 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		ses.SetCmd(COM_STMT_EXECUTE)
 		data := req.GetData().([]byte)
 		var prepareStmt *PrepareStmt
-		sql, prepareStmt, err = parseStmtExecute(requestCtx, ses, data)
+		sql, prepareStmt, err = parseStmtExecute(execCtx.reqCtx, ses, data)
 		if err != nil {
 			return NewGeneralErrorResponse(COM_STMT_EXECUTE, ses.GetTxnHandler().GetServerStatus(), err), nil
 		}
-		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
+		err = doComQuery(ses, execCtx, &UserInput{sql: sql})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_EXECUTE, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3069,7 +3077,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 	case COM_STMT_SEND_LONG_DATA:
 		ses.SetCmd(COM_STMT_SEND_LONG_DATA)
 		data := req.GetData().([]byte)
-		err = parseStmtSendLongData(requestCtx, ses, data)
+		err = parseStmtSendLongData(execCtx.reqCtx, ses, data)
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_SEND_LONG_DATA, ses.GetTxnHandler().GetServerStatus(), err)
 			return resp, nil
@@ -3085,7 +3093,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		sql = fmt.Sprintf("deallocate prepare %s", stmtName)
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
 
-		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
+		err = doComQuery(ses, execCtx, &UserInput{sql: sql})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_CLOSE, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3099,7 +3107,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 		stmtName := getPrepareStmtName(stmtID)
 		sql = fmt.Sprintf("reset prepare %s", stmtName)
 		logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
-		err = doComQuery(requestCtx, ses, &UserInput{sql: sql})
+		err = doComQuery(ses, execCtx, &UserInput{sql: sql})
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_STMT_RESET, ses.GetTxnHandler().GetServerStatus(), err)
 		}
@@ -3107,7 +3115,7 @@ func ExecRequest(requestCtx context.Context, ses *Session, req *Request) (resp *
 
 	case COM_SET_OPTION:
 		data := req.GetData().([]byte)
-		err := handleSetOption(requestCtx, ses, data)
+		err := handleSetOption(execCtx.reqCtx, ses, data)
 		if err != nil {
 			resp = NewGeneralErrorResponse(COM_SET_OPTION, ses.GetTxnHandler().GetServerStatus(), err)
 		}

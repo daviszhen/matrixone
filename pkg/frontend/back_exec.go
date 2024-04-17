@@ -97,7 +97,12 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 			}
 		}
 	}
-	return doComQueryInBack(ctx, back.backSes, &UserInput{sql: sql})
+	execCtx := ExecCtx{
+		connCtx: back.backSes.connectCtx,
+		reqCtx:  ctx,
+		ses:     back.backSes,
+	}
+	return doComQueryInBack(back.backSes, &execCtx, &UserInput{sql: sql})
 }
 
 func (back *backExec) ExecStmt(ctx context.Context, statement tree.Statement) error {
@@ -130,15 +135,14 @@ func (back *backExec) Clear() {
 }
 
 // execute query
-func doComQueryInBack(requestCtx context.Context,
-	backSes *backSession,
+func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 	input *UserInput) (retErr error) {
 	backSes.SetSql(input.getSql())
 	//the ses.GetUserName returns the user_name with the account_name.
 	//here,we only need the user_name.
 	userNameOnly := rootName
 	proc := process.New(
-		requestCtx,
+		execCtx.reqCtx,
 		backSes.pool,
 		getGlobalPu().TxnClient,
 		nil,
@@ -178,16 +182,16 @@ func doComQueryInBack(requestCtx context.Context,
 		userNameOnly = backSes.tenant.GetUser()
 	} else {
 		var accountId uint32
-		accountId, retErr = defines.GetAccountId(requestCtx)
+		accountId, retErr = defines.GetAccountId(execCtx.reqCtx)
 		if retErr != nil {
 			return retErr
 		}
 		proc.SessionInfo.AccountId = accountId
-		proc.SessionInfo.UserId = defines.GetUserId(requestCtx)
-		proc.SessionInfo.RoleId = defines.GetRoleId(requestCtx)
+		proc.SessionInfo.UserId = defines.GetUserId(execCtx.reqCtx)
+		proc.SessionInfo.RoleId = defines.GetRoleId(execCtx.reqCtx)
 	}
 	var span trace.Span
-	requestCtx, span = trace.Start(requestCtx, "backExec.doComQueryInBack",
+	execCtx.reqCtx, span = trace.Start(execCtx.reqCtx, "backExec.doComQueryInBack",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End()
 
@@ -203,7 +207,7 @@ func doComQueryInBack(requestCtx context.Context,
 	if err != nil {
 		retErr = err
 		if _, ok := err.(*moerr.Error); !ok {
-			retErr = moerr.NewParseError(requestCtx, err.Error())
+			retErr = moerr.NewParseError(execCtx.reqCtx, err.Error())
 		}
 		return retErr
 	}
@@ -239,26 +243,35 @@ func doComQueryInBack(requestCtx context.Context,
 			                     <- has active transaction
 		*/
 		if backSes.GetTxnHandler().InActiveTxn() {
-			err = canExecuteStatementInUncommittedTransaction(requestCtx, backSes, stmt)
+			err = canExecuteStatementInUncommittedTransaction(execCtx.reqCtx, backSes, stmt)
 			if err != nil {
 				return err
 			}
 		}
 
-		execCtx := ExecCtx{
-			connCtx:    backSes.GetConnectContext(),
-			reqCtx:     requestCtx,
-			stmt:       stmt,
-			isLastStmt: i >= len(cws)-1,
-			tenant:     tenant,
-			userName:   userNameOnly,
-			sqlOfStmt:  sqlRecord[i],
-			cw:         cw,
-			proc:       proc,
-			ses:        backSes,
-			cws:        cws,
-		}
-		err = executeStmtWithTxn(requestCtx, backSes, &execCtx)
+		//execCtx := ExecCtx{
+		//	connCtx:    backSes.GetConnectContext(),
+		//	reqCtx:     requestCtx,
+		//	stmt:       stmt,
+		//	isLastStmt: i >= len(cws)-1,
+		//	tenant:     tenant,
+		//	userName:   userNameOnly,
+		//	sqlOfStmt:  sqlRecord[i],
+		//	cw:         cw,
+		//	proc:       proc,
+		//	ses:        backSes,
+		//	cws:        cws,
+		//}
+		execCtx.stmt = stmt
+		execCtx.isLastStmt = i >= len(cws)-1
+		execCtx.tenant = tenant
+		execCtx.userName = userNameOnly
+		execCtx.sqlOfStmt = sqlRecord[i]
+		execCtx.cw = cw
+		execCtx.proc = proc
+		execCtx.ses = backSes
+		execCtx.cws = cws
+		err = executeStmtWithTxn(backSes, execCtx)
 		if err != nil {
 			return err
 		}
@@ -267,72 +280,72 @@ func doComQueryInBack(requestCtx context.Context,
 	return nil
 }
 
-func executeStmtInBackWithTxn(requestCtx context.Context,
-	backSes *backSession,
-	execCtx *ExecCtx,
-) (err error) {
-	//6.
-	defer func() {
-		err = finishTxnFunc(requestCtx, backSes, err, execCtx)
-	}()
+//
+//func executeStmtInBackWithTxn(requestCtx context.Context,
+//	backSes *backSession,
+//	execCtx *ExecCtx,
+//) (err error) {
+//	//6.
+//	defer func() {
+//		err = finishTxnFunc(requestCtx, backSes, err, execCtx)
+//	}()
+//
+//	//1. start txn
+//	//special BEGIN,COMMIT,ROLLBACK
+//	beginStmt := false
+//	switch execCtx.stmt.(type) {
+//	case *tree.BeginTransaction:
+//		execCtx.txnOpt.byBegin = true
+//		beginStmt = true
+//	case *tree.CommitTransaction:
+//		execCtx.txnOpt.byCommit = true
+//		return nil
+//	case *tree.RollbackTransaction:
+//		execCtx.txnOpt.byRollback = true
+//		return nil
+//	}
+//
+//	execCtx.txnOpt.autoCommit = true
+//	err = backSes.GetTxnHandler().Create(execCtx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	//skip BEGIN stmt
+//	if beginStmt {
+//		return err
+//	}
+//
+//	// statement management
+//	_, txnOp := backSes.GetTxnHandler().GetTxn()
+//
+//	//2.
+//	if !backSes.IsDerivedStmt() {
+//		txnOp.GetWorkspace().StartStatement()
+//	}
+//
+//	//3. increase statement id
+//	err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
+//	if err != nil {
+//		return err
+//	}
+//
+//	//4.  defer Start/End Statement management, called after finishTxnFunc()
+//	defer func() {
+//		// move finishTxnFunc() out to another defer so that if finishTxnFunc
+//		// paniced, the following is still called.
+//		_, txnOp = backSes.GetTxnHandler().GetTxn()
+//		//non derived statement
+//		if !backSes.IsDerivedStmt() {
+//			//startStatement has been called
+//			txnOp.GetWorkspace().EndStatement()
+//		}
+//	}()
+//	//5.
+//	return executeStmtInBack(requestCtx, backSes, execCtx)
+//}
 
-	//1. start txn
-	//special BEGIN,COMMIT,ROLLBACK
-	beginStmt := false
-	switch execCtx.stmt.(type) {
-	case *tree.BeginTransaction:
-		execCtx.txnOpt.byBegin = true
-		beginStmt = true
-	case *tree.CommitTransaction:
-		execCtx.txnOpt.byCommit = true
-		return nil
-	case *tree.RollbackTransaction:
-		execCtx.txnOpt.byRollback = true
-		return nil
-	}
-
-	execCtx.txnOpt.autoCommit = true
-	err = backSes.GetTxnHandler().Create(execCtx)
-	if err != nil {
-		return err
-	}
-
-	//skip BEGIN stmt
-	if beginStmt {
-		return err
-	}
-
-	// statement management
-	_, txnOp := backSes.GetTxnHandler().GetTxn()
-
-	//2.
-	if !backSes.IsDerivedStmt() {
-		txnOp.GetWorkspace().StartStatement()
-	}
-
-	//3. increase statement id
-	err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
-	if err != nil {
-		return err
-	}
-
-	//4.  defer Start/End Statement management, called after finishTxnFunc()
-	defer func() {
-		// move finishTxnFunc() out to another defer so that if finishTxnFunc
-		// paniced, the following is still called.
-		_, txnOp = backSes.GetTxnHandler().GetTxn()
-		//non derived statement
-		if !backSes.IsDerivedStmt() {
-			//startStatement has been called
-			txnOp.GetWorkspace().EndStatement()
-		}
-	}()
-	//5.
-	return executeStmtInBack(requestCtx, backSes, execCtx)
-}
-
-func executeStmtInBack(requestCtx context.Context,
-	backSes *backSession,
+func executeStmtInBack(backSes *backSession,
 	execCtx *ExecCtx,
 ) (err error) {
 	var cmpBegin time.Time
@@ -340,13 +353,13 @@ func executeStmtInBack(requestCtx context.Context,
 
 	switch execCtx.stmt.StmtKind().ExecLocation() {
 	case tree.EXEC_IN_FRONTEND:
-		return execInFrontendInBack(requestCtx, backSes, execCtx)
+		return execInFrontendInBack(backSes, execCtx)
 	case tree.EXEC_IN_ENGINE:
 	}
 
 	switch st := execCtx.stmt.(type) {
 	case *tree.CreateDatabase:
-		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
+		err = inputNameIsInvalid(execCtx.reqCtx, string(st.Name))
 		if err != nil {
 			return
 		}
@@ -356,7 +369,7 @@ func executeStmtInBack(requestCtx context.Context,
 		}
 		st.Sql = execCtx.sqlOfStmt
 	case *tree.DropDatabase:
-		err = inputNameIsInvalid(execCtx.proc.Ctx, string(st.Name))
+		err = inputNameIsInvalid(execCtx.reqCtx, string(st.Name))
 		if err != nil {
 			return
 		}
@@ -368,7 +381,7 @@ func executeStmtInBack(requestCtx context.Context,
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(requestCtx, execCtx, backSes.GetOutputCallback()); err != nil {
+	if ret, err = execCtx.cw.Compile(execCtx, backSes.GetOutputCallback()); err != nil {
 		return
 	}
 
@@ -383,7 +396,7 @@ func executeStmtInBack(requestCtx context.Context,
 	execCtx.stmt = execCtx.cw.GetAst()
 	switch execCtx.stmt.StmtKind().ExecLocation() {
 	case tree.EXEC_IN_FRONTEND:
-		return execInFrontendInBack(requestCtx, backSes, execCtx)
+		return execInFrontendInBack(backSes, execCtx)
 	case tree.EXEC_IN_ENGINE:
 
 	}
@@ -398,12 +411,12 @@ func executeStmtInBack(requestCtx context.Context,
 	StmtKind := execCtx.stmt.StmtKind().OutputType()
 	switch StmtKind {
 	case tree.OUTPUT_RESULT_ROW:
-		err = executeResultRowStmtInBack(requestCtx, backSes, execCtx)
+		err = executeResultRowStmtInBack(backSes, execCtx)
 		if err != nil {
 			return err
 		}
 	case tree.OUTPUT_STATUS:
-		err = executeStatusStmtInBack(requestCtx, backSes, execCtx)
+		err = executeStatusStmtInBack(backSes, execCtx)
 		if err != nil {
 			return err
 		}
@@ -414,7 +427,7 @@ func executeStmtInBack(requestCtx context.Context,
 			isExecute = true
 		}
 		if !isExecute {
-			return moerr.NewInternalError(requestCtx, "need set result type for %s", execCtx.sqlOfStmt)
+			return moerr.NewInternalError(execCtx.reqCtx, "need set result type for %s", execCtx.sqlOfStmt)
 		}
 	}
 
@@ -512,7 +525,7 @@ func executeSQLInBackgroundSession(reqCtx context.Context, upstream *Session, mp
 // executeStmtInSameSession executes the statement in the same session.
 // To be clear, only for the select statement derived from the set_var statement
 // in an independent transaction
-func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.Statement) error {
+func executeStmtInSameSession(ctx context.Context, ses *Session, execCtx *ExecCtx, stmt tree.Statement) error {
 	switch stmt.(type) {
 	case *tree.Select, *tree.ParenSelect:
 	default:
@@ -560,7 +573,8 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, stmt tree.State
 	logDebug(ses, ses.GetDebugString(), "query trace(ExecStmtInSameSession)",
 		logutil.ConnectionIdField(ses.GetConnectionID()))
 	//3. execute the statement
-	return doComQuery(ctx, ses, &UserInput{stmt: stmt})
+
+	return doComQuery(ses, execCtx, &UserInput{stmt: stmt})
 }
 
 // fakeDataSetFetcher2 gets the result set from the pipeline and save it in the session.
