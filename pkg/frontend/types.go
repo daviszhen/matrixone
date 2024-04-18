@@ -27,7 +27,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/config"
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
-	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
@@ -276,7 +275,7 @@ var _ FeSession = &Session{}
 var _ FeSession = &backSession{}
 
 type FeSession interface {
-	GetRequestContext() context.Context
+	//GetRequestContext() context.Context
 	GetTimeZone() *time.Location
 	GetStatsCache() *plan2.StatsCache
 	GetUserName() string
@@ -326,7 +325,7 @@ type FeSession interface {
 	getQueryId(internal bool) []string
 	SetMysqlResultSet(mrs *MysqlResultSet)
 	GetConnectionID() uint32
-	SetRequestContext(ctx context.Context)
+	//SetRequestContext(ctx context.Context)
 	IsDerivedStmt() bool
 	SetAccountId(uint32)
 	SetPlan(plan *plan.Plan)
@@ -354,7 +353,6 @@ type FeSession interface {
 }
 
 type ExecCtx struct {
-	connCtx     context.Context
 	reqCtx      context.Context
 	prepareStmt *PrepareStmt
 	runResult   *util.RunResult
@@ -375,17 +373,6 @@ type ExecCtx struct {
 	stmtExecErr     error
 	txnOpt          FeTxnOption
 	cws             []ComputationWrapper
-	attach          *attachInfo
-}
-
-type attachInfo struct {
-	accountId  uint32
-	userId     uint32
-	roleId     uint32
-	nodeId     any
-	span       trace.Span
-	isMoLogger bool
-	tempDN     *memorystorage.Storage
 }
 
 // TODO: shared component among the session implmentation

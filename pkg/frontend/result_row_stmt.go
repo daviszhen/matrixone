@@ -64,7 +64,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 			/*
 				mysql COM_QUERY response: send the column definition per column
 			*/
-			err = execCtx.proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+			err = execCtx.proto.SendColumnDefinitionPacket(execCtx.reqCtx, mysqlc, int(cmd))
 			if err != nil {
 				return
 			}
@@ -96,7 +96,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 
 	case *tree.ExplainAnalyze:
 		explainColName := "QUERY PLAN"
-		columns, err = GetExplainColumns(requestCtx, explainColName)
+		columns, err = GetExplainColumns(execCtx.reqCtx, explainColName)
 		if err != nil {
 			logError(ses, ses.GetDebugString(),
 				"Failed to get columns from ExplainColumns handler",
@@ -121,7 +121,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 			/*
 				mysql COM_QUERY response: send the column definition per column
 			*/
-			err = execCtx.proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+			err = execCtx.proto.SendColumnDefinitionPacket(execCtx.reqCtx, mysqlc, int(cmd))
 			if err != nil {
 				return
 			}
@@ -177,7 +177,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 			/*
 				mysql COM_QUERY response: send the column definition per column
 			*/
-			err = execCtx.proto.SendColumnDefinitionPacket(requestCtx, mysqlc, int(cmd))
+			err = execCtx.proto.SendColumnDefinitionPacket(execCtx.reqCtx, mysqlc, int(cmd))
 			if err != nil {
 				return
 			}

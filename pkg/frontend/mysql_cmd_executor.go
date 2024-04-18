@@ -2518,9 +2518,6 @@ func executeStmtWithTxn(ses FeSession,
 		// statement management
 		_, txnOp := ses.GetTxnHandler().GetTxn()
 
-		//2.1 create reqCtx
-		ses.GetTxnHandler().CreateReqCtx(execCtx)
-
 		txnOp.GetWorkspace().StartStatement()
 
 		//3. increase statement id
@@ -3122,7 +3119,7 @@ func ExecRequest(ses *Session, execCtx *ExecCtx, req *Request) (resp *Response, 
 		return NewGeneralOkResponse(COM_SET_OPTION, ses.GetTxnHandler().GetServerStatus()), nil
 
 	default:
-		resp = NewGeneralErrorResponse(req.GetCmd(), ses.GetTxnHandler().GetServerStatus(), moerr.NewInternalError(requestCtx, "unsupported command. 0x%x", req.GetCmd()))
+		resp = NewGeneralErrorResponse(req.GetCmd(), ses.GetTxnHandler().GetServerStatus(), moerr.NewInternalError(execCtx.reqCtx, "unsupported command. 0x%x", req.GetCmd()))
 	}
 	return resp, nil
 }

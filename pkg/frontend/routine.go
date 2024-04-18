@@ -231,16 +231,13 @@ func (rt *Routine) handleRequest(req *Request) error {
 
 	ses := rt.getSession()
 
-	attach := attachInfo{}
-	execCtx := ExecCtx{
-		connCtx: rt.getCancelRoutineCtx(),
-		attach:  &attach,
-		ses:     ses,
-	}
-
 	//create txnCtx first.
 	//other ctx inherits the txnCtx
-	ses.GetTxnHandler().CreateTxnCtx(&execCtx)
+	ses.GetTxnHandler().CreateTxnCtx()
+
+	execCtx := ExecCtx{
+		ses: ses,
+	}
 
 	v2.StartHandleRequestCounter.Inc()
 	defer func() {
@@ -249,7 +246,8 @@ func (rt *Routine) handleRequest(req *Request) error {
 
 	reqBegin := time.Now()
 	var span trace.Span
-	routineCtx, span = trace.Start(rt.getCancelRoutineCtx(), "Routine.handleRequest",
+	//all offspring related to the request inherit the txnCtx
+	routineCtx, span = trace.Start(ses.GetTxnHandler().GetTxnCtx(), "Routine.handleRequest",
 		trace.WithHungThreshold(30*time.Minute),
 		trace.WithProfileGoroutine(),
 		trace.WithProfileSystemStatus(func() ([]byte, error) {

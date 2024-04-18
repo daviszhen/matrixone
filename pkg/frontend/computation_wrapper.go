@@ -197,7 +197,7 @@ func (cwft *TxnComputationWrapper) GetColumns() ([]interface{}, error) {
 		c.SetOrgTable(col.TblName)
 		c.SetAutoIncr(col.Typ.AutoIncr)
 		c.SetSchema(col.DbName)
-		err = convertEngineTypeToMysqlType(cwft.ses.GetRequestContext(), types.T(col.Typ.Id), c)
+		err = convertEngineTypeToMysqlType(cwft.ses.GetTxnHandler().GetTxnCtx(), types.T(col.Typ.Id), c)
 		if err != nil {
 			return nil, err
 		}
@@ -242,11 +242,11 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 	}
 
-	txnHandler := cwft.ses.GetTxnHandler()
-	var txnCtx context.Context
-	txnCtx, cwft.proc.TxnOperator = txnHandler.GetTxn()
-
-	txnCtx = statistic.EnsureStatsInfoCanBeFound(txnCtx, requestCtx)
+	//txnHandler := cwft.ses.GetTxnHandler()
+	//var txnCtx context.Context
+	//txnCtx, cwft.proc.TxnOperator = txnHandler.GetTxn()
+	//
+	//txnCtx = statistic.EnsureStatsInfoCanBeFound(txnCtx, requestCtx)
 
 	// Increase the statement ID and update snapshot TS before build plan, because the
 	// snapshot TS is used when build plan.
@@ -274,15 +274,15 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 
 	cacheHit := cwft.plan != nil
 	if !cacheHit {
-		cwft.plan, err = buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
+		cwft.plan, err = buildPlan(execCtx.reqCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 	} else if cwft.ses != nil && cwft.ses.GetTenantInfo() != nil && !cwft.ses.IsBackgroundSession() {
 		var accId uint32
-		accId, err = defines.GetAccountId(requestCtx)
+		accId, err = defines.GetAccountId(execCtx.reqCtx)
 		if err != nil {
 			return nil, err
 		}
 		cwft.ses.SetAccountId(accId)
-		err = authenticateCanExecuteStatementAndPlan(requestCtx, cwft.ses.(*Session), cwft.stmt, cwft.plan)
+		err = authenticateCanExecuteStatementAndPlan(execCtx.reqCtx, cwft.ses.(*Session), cwft.stmt, cwft.plan)
 	}
 	if err != nil {
 		return nil, err
@@ -290,7 +290,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 	if !cwft.ses.IsBackgroundSession() {
 		cwft.ses.SetPlan(cwft.plan)
 		if ids := isResultQuery(cwft.plan); ids != nil {
-			if err = checkPrivilege(ids, requestCtx, cwft.ses.(*Session)); err != nil {
+			if err = checkPrivilege(ids, execCtx.reqCtx, cwft.ses.(*Session)); err != nil {
 				return nil, err
 			}
 		}
@@ -298,7 +298,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 
 	if _, ok := cwft.stmt.(*tree.Execute); ok {
 		executePlan := cwft.plan.GetDcl().GetExecute()
-		plan, stmt, sql, err := replacePlan(requestCtx, cwft.ses.(*Session), cwft, executePlan)
+		plan, stmt, sql, err := replacePlan(execCtx.reqCtx, cwft.ses.(*Session), cwft, executePlan)
 		if err != nil {
 			return nil, err
 		}
@@ -332,7 +332,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 	if len(getGlobalPu().ClusterNodes) > 0 {
 		addr = getGlobalPu().ClusterNodes[0].Addr
 	}
-	cwft.proc.Ctx = txnCtx
+	cwft.proc.Ctx = execCtx.reqCtx
 	cwft.proc.FileService = getGlobalPu().FileService
 
 	var tenant string
@@ -341,7 +341,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		tenant = tInfo.GetTenant()
 	}
 
-	stats := statistic.StatsInfoFromContext(requestCtx)
+	stats := statistic.StatsInfoFromContext(execCtx.reqCtx)
 	stats.CompileStart()
 	defer stats.CompileEnd()
 	cwft.compile = compile.NewCompile(
@@ -350,13 +350,13 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		cwft.ses.GetSql(),
 		tenant,
 		cwft.ses.GetUserName(),
-		txnCtx,
+		execCtx.reqCtx,
 		cwft.ses.GetStorage(),
 		cwft.proc,
 		cwft.stmt,
 		cwft.ses.GetIsInternal(),
 		deepcopy.Copy(cwft.ses.getCNLabels()).(map[string]string),
-		getStatementStartAt(requestCtx),
+		getStatementStartAt(execCtx.reqCtx),
 	)
 	defer func() {
 		if err != nil {
@@ -364,7 +364,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		}
 	}()
 	cwft.compile.SetBuildPlanFunc(func() (*plan2.Plan, error) {
-		plan, err := buildPlan(requestCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
+		plan, err := buildPlan(execCtx.reqCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
 		if err != nil {
 			return nil, err
 		}
@@ -377,7 +377,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 	if _, ok := cwft.stmt.(*tree.ExplainAnalyze); ok {
 		fill = func(bat *batch.Batch) error { return nil }
 	}
-	err = cwft.compile.Compile(txnCtx, cwft.plan, fill)
+	err = cwft.compile.Compile(execCtx.reqCtx, cwft.plan, fill)
 	if err != nil {
 		return nil, err
 	}
@@ -391,11 +391,11 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		}
 
 		// temporary storage is passed through Ctx
-		requestCtx = context.WithValue(requestCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
+		execCtx.reqCtx = context.WithValue(execCtx.reqCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
 
 		// 1. init memory-non-dist engine
 		tempEngine := memoryengine.New(
-			requestCtx,
+			execCtx.reqCtx,
 			memoryengine.NewDefaultShardPolicy(
 				mpool.MustNewZeroNoFixed(),
 			),
@@ -410,9 +410,9 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		)
 
 		// 2. bind the temporary engine to the session and txnHandler
-		_ = cwft.ses.SetTempEngine(requestCtx, tempEngine)
-		cwft.compile.SetTempEngine(requestCtx, tempEngine)
-		txnHandler.SetTempEngine(tempEngine)
+		_ = cwft.ses.SetTempEngine(execCtx.reqCtx, tempEngine)
+		cwft.compile.SetTempEngine(execCtx.reqCtx, tempEngine)
+		cwft.ses.GetTxnHandler().SetTempEngine(tempEngine)
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 
 		// 3. init temp-db to store temporary relations

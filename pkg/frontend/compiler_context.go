@@ -60,7 +60,7 @@ type TxnCompilerContext struct {
 var _ plan2.CompilerContext = &TxnCompilerContext{}
 
 func (tcc *TxnCompilerContext) ReplacePlan(execPlan *plan.Execute) (*plan.Plan, tree.Statement, error) {
-	p, st, _, err := replacePlan(tcc.ses.GetRequestContext(), tcc.ses.(*Session), tcc.tcw, execPlan)
+	p, st, _, err := replacePlan(tcc.txnHandler.GetTxnCtx(), tcc.ses.(*Session), tcc.tcw, execPlan)
 	return p, st, err
 }
 
@@ -133,7 +133,7 @@ func (tcc *TxnCompilerContext) GetAccountId() (uint32, error) {
 }
 
 func (tcc *TxnCompilerContext) GetContext() context.Context {
-	return tcc.ses.GetRequestContext()
+	return tcc.txnHandler.GetTxnCtx()
 }
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
@@ -338,7 +338,7 @@ func (tcc *TxnCompilerContext) ResolveUdf(name string, args []*plan.Expr) (udf *
 		v2.TxnStatementResolveUdfDurationHistogram.Observe(time.Since(start).Seconds())
 	}()
 	ses := tcc.GetSession()
-	ctx := ses.GetRequestContext()
+	ctx := tcc.GetTxnHandler().GetTxnCtx()
 
 	err = inputNameIsInvalid(ctx, name)
 	if err != nil {
@@ -485,8 +485,7 @@ func (tcc *TxnCompilerContext) ResolveUdf(name string, args []*plan.Expr) (udf *
 }
 
 func (tcc *TxnCompilerContext) ResolveVariable(varName string, isSystemVar, isGlobalVar bool) (interface{}, error) {
-	ses := tcc.GetSession()
-	ctx := ses.GetRequestContext()
+	ctx := tcc.GetTxnHandler().GetTxnCtx()
 
 	if ctx.Value(defines.InSp{}) != nil && ctx.Value(defines.InSp{}).(bool) {
 		tmpScope := ctx.Value(defines.VarScopeKey{}).(*[]map[string]interface{})
@@ -527,7 +526,7 @@ func (tcc *TxnCompilerContext) ResolveAccountIds(accountNames []string) (account
 	}
 
 	ses := tcc.GetSession()
-	ctx := ses.GetRequestContext()
+	ctx := tcc.GetTxnHandler().GetTxnCtx()
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 

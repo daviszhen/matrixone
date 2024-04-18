@@ -126,7 +126,7 @@ type Session struct {
 	prepareStmts map[string]*PrepareStmt
 	lastStmtId   uint32
 
-	requestCtx context.Context
+	//requestCtx context.Context
 	connectCtx context.Context
 
 	priv *privilege
@@ -452,7 +452,7 @@ func (e *errInfo) length() int {
 	return len(e.codes)
 }
 
-func NewSession(proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *Txn) *Session {
+func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *Txn) *Session {
 	//if the sharedTxnHandler exists,we use its txnCtx and txnOperator in this session.
 	//Currently, we only use the sharedTxnHandler in the background session.
 	var txnCtx context.Context
@@ -464,7 +464,7 @@ func NewSession(proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVari
 		}
 		txnCtx, txnOp = sharedTxnHandler.GetTxn()
 	}
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, connCtx, txnCtx, txnOp)
 
 	ses := &Session{
 		feSessionImpl: feSessionImpl{
@@ -787,7 +787,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		txnCtx, txnOp = ses.GetTxnHandler().GetTxn()
 	}
 
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetConnectContext(), txnCtx, txnOp)
 	var callback func(interface{}, *batch.Batch) error
 	if newRawBatch {
 		callback = batchFetcher2
@@ -795,7 +795,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		callback = fakeDataSetFetcher2
 	}
 	backSes := &backSession{
-		requestCtx: ctx,
+		//requestCtx: ctx,
 		connectCtx: ses.connectCtx,
 		feSessionImpl: feSessionImpl{
 			pool:           ses.pool,
@@ -832,9 +832,9 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetConnectContext(), nil, nil)
 	backSes := &backSession{
-		requestCtx: ses.GetRequestContext(),
+		//requestCtx: ses.GetRequestContext(),
 		connectCtx: ses.GetConnectContext(),
 		feSessionImpl: feSessionImpl{
 			pool:           ses.GetMemPool(),
@@ -962,20 +962,20 @@ func (ses *Session) GetLastInsertID() uint64 {
 	return ses.lastInsertID
 }
 
-func (ses *Session) SetRequestContext(reqCtx context.Context) {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	ses.requestCtx = reqCtx
-}
+//func (ses *Session) SetRequestContext(reqCtx context.Context) {
+//	ses.mu.Lock()
+//	defer ses.mu.Unlock()
+//	ses.requestCtx = reqCtx
+//}
 
-func (ses *Session) GetRequestContext() context.Context {
-	if ses == nil {
-		panic("nil session")
-	}
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	return ses.requestCtx
-}
+//func (ses *Session) GetRequestContext() context.Context {
+//	if ses == nil {
+//		panic("nil session")
+//	}
+//	ses.mu.Lock()
+//	defer ses.mu.Unlock()
+//	return ses.requestCtx
+//}
 
 func (ses *Session) SetConnectContext(conn context.Context) {
 	ses.mu.Lock()

@@ -149,7 +149,11 @@ func (ie *internalExecutor) Exec(ctx context.Context, sql string, opts ie.Sessio
 	if sql == "" {
 		return
 	}
-	return doComQuery(ctx, sess, &UserInput{sql: sql})
+	execCtx := ExecCtx{
+		reqCtx: ctx,
+		ses:    sess,
+	}
+	return doComQuery(sess, &execCtx, &UserInput{sql: sql})
 }
 
 func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.SessionOverrideOptions) ie.InternalExecResult {
@@ -159,7 +163,11 @@ func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.Sessi
 	defer sess.Close()
 	ie.proto.stashResult = true
 	logutil.Info("internalExecutor new session", trace.ContextField(ctx), zap.String("session uuid", sess.uuid.String()))
-	err := doComQuery(ctx, sess, &UserInput{sql: sql})
+	execCtx := ExecCtx{
+		reqCtx: ctx,
+		ses:    sess,
+	}
+	err := doComQuery(sess, &execCtx, &UserInput{sql: sql})
 	res := ie.proto.swapOutResult()
 	res.err = err
 	return res
@@ -180,7 +188,7 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 		logutil.Fatalf("internalExecutor cannot create mpool in newCmdSession")
 		panic(err)
 	}
-	sess := NewSession(ie.proto, mp, GSysVariables, true, nil)
+	sess := NewSession(ctx, ie.proto, mp, GSysVariables, true, nil)
 	sess.SetRequestContext(ctx)
 	sess.SetConnectContext(ctx)
 	sess.disableTrace = true

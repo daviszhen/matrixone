@@ -249,14 +249,14 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	routine := NewRoutine(rm.getCtx(), pro, getGlobalPu().SV, rs)
 	v2.CreatedRoutineCounter.Inc()
 
-	// XXX MPOOL pass in a nil mpool.
-	// XXX MPOOL can choose to use a Mid sized mpool, if, we know
-	// this mpool will be deleted.  Maybe in the following Closed method.
-	ses := NewSession(routine.getProtocol(), nil, GSysVariables, true, nil)
 	cancelCtx := routine.getCancelRoutineCtx()
 	if rm.baseService != nil {
 		cancelCtx = context.WithValue(cancelCtx, defines.NodeIDKey{}, rm.baseService.ID())
 	}
+	// XXX MPOOL pass in a nil mpool.
+	// XXX MPOOL can choose to use a Mid sized mpool, if, we know
+	// this mpool will be deleted.  Maybe in the following Closed method.
+	ses := NewSession(cancelCtx, routine.getProtocol(), nil, GSysVariables, true, nil)
 	ses.SetRequestContext(cancelCtx)
 	ses.SetConnectContext(cancelCtx)
 	ses.SetFromRealUser(true)

@@ -59,9 +59,10 @@ func (back *backExec) Close() {
 
 func (back *backExec) Exec(ctx context.Context, sql string) error {
 	if ctx == nil {
-		ctx = back.backSes.GetRequestContext()
+		//ctx = back.backSes.GetRequestContext()
+		ctx = back.backSes.GetTxnHandler().GetTxnCtx()
 	} else {
-		back.backSes.SetRequestContext(ctx)
+		//back.backSes.SetRequestContext(ctx)
 	}
 	_, err := defines.GetAccountId(ctx)
 	if err != nil {
@@ -70,7 +71,7 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 
 	// For determine this is a background sql.
 	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	back.backSes.requestCtx = ctx
+	//back.backSes.requestCtx = ctx
 	//logutil.Debugf("-->bh:%s", sql)
 	v, err := back.backSes.GetGlobalVar("lower_case_table_names")
 	if err != nil {
@@ -98,9 +99,8 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 		}
 	}
 	execCtx := ExecCtx{
-		connCtx: back.backSes.connectCtx,
-		reqCtx:  ctx,
-		ses:     back.backSes,
+		reqCtx: ctx,
+		ses:    back.backSes,
 	}
 	return doComQueryInBack(back.backSes, &execCtx, &UserInput{sql: sql})
 }
@@ -476,9 +476,9 @@ var NewBackgroundExec = func(
 	reqCtx context.Context,
 	upstream FeSession,
 	mp *mpool.MPool) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, upstream.GetConnectContext(), nil, nil)
 	backSes := &backSession{
-		requestCtx: reqCtx,
+		//requestCtx: reqCtx,
 		connectCtx: upstream.GetConnectContext(),
 		feSessionImpl: feSessionImpl{
 			pool:           mp,
@@ -652,7 +652,7 @@ func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) 
 
 type backSession struct {
 	feSessionImpl
-	requestCtx context.Context
+	//requestCtx context.Context
 	connectCtx context.Context
 }
 
@@ -662,7 +662,7 @@ func (backSes *backSession) getCachedPlan(sql string) *cachedPlan {
 
 func (backSes *backSession) Close() {
 	backSes.feSessionImpl.Close()
-	backSes.requestCtx = nil
+	//backSes.requestCtx = nil
 	backSes.connectCtx = nil
 }
 
@@ -760,9 +760,9 @@ func (backSes *backSession) GetRawBatchBackgroundExec(ctx context.Context) Backg
 	panic("implement me")
 }
 
-func (backSes *backSession) SetRequestContext(ctx context.Context) {
-	backSes.requestCtx = ctx
-}
+//func (backSes *backSession) SetRequestContext(ctx context.Context) {
+//	//backSes.requestCtx = ctx
+//}
 
 func (backSes *backSession) GetConnectionID() uint32 {
 	return 0
@@ -804,7 +804,7 @@ func (backSes *backSession) CountPayload(i int) {
 }
 
 func (backSes *backSession) GetPrepareStmt(name string) (*PrepareStmt, error) {
-	return nil, moerr.NewInternalError(backSes.requestCtx, "do not support prepare in background exec")
+	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support prepare in background exec")
 }
 
 func (backSes *backSession) IsBackgroundSession() bool {
@@ -879,7 +879,7 @@ func (backSes *backSession) GetConnectContext() context.Context {
 }
 
 func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error) {
-	return nil, nil, moerr.NewInternalError(backSes.requestCtx, "do not support user defined var in background exec")
+	return nil, nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support user defined var in background exec")
 }
 
 func (backSes *backSession) GetSessionVar(name string) (interface{}, error) {
@@ -891,7 +891,7 @@ func (backSes *backSession) GetSessionVar(name string) (interface{}, error) {
 }
 
 func (backSes *backSession) getGlobalSystemVariableValue(name string) (interface{}, error) {
-	return nil, moerr.NewInternalError(backSes.requestCtx, "do not support system variable in background exec")
+	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support system variable in background exec")
 }
 
 func (backSes *backSession) GetBackgroundExec(ctx context.Context) BackgroundExec {
@@ -921,9 +921,9 @@ func (backSes *backSession) GetStatsCache() *plan2.StatsCache {
 	return nil
 }
 
-func (backSes *backSession) GetRequestContext() context.Context {
-	return backSes.requestCtx
-}
+//func (backSes *backSession) GetRequestContext() context.Context {
+//	return backSes.requestCtx
+//}
 
 func (backSes *backSession) GetTimeZone() *time.Location {
 	return backSes.timeZone
@@ -942,11 +942,11 @@ func (backSes *backSession) GetGlobalVar(name string) (interface{}, error) {
 	if def, val, ok := backSes.gSysVars.GetGlobalSysVar(name); ok {
 		if def.GetScope() == ScopeSession {
 			//empty
-			return nil, moerr.NewInternalError(backSes.requestCtx, errorSystemVariableSessionEmpty())
+			return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), errorSystemVariableSessionEmpty())
 		}
 		return val, nil
 	}
-	return nil, moerr.NewInternalError(backSes.requestCtx, errorSystemVariableDoesNotExist())
+	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), errorSystemVariableDoesNotExist())
 }
 
 func (backSes *backSession) SetMysqlResultSetOfBackgroundTask(mrs *MysqlResultSet) {
@@ -992,7 +992,7 @@ func (sh *SqlHelper) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta,
 func (sh *SqlHelper) ExecSql(sql string) (ret []interface{}, err error) {
 	var erArray []ExecResult
 
-	ctx := sh.ses.GetRequestContext()
+	ctx := sh.ses.GetTxnHandler().GetTxnCtx()
 	/*
 		if we run the transaction statement (BEGIN, ect) here , it creates an independent transaction.
 		if we do not run the transaction statement (BEGIN, ect) here, it runs the sql in the share transaction

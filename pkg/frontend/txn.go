@@ -927,6 +927,11 @@ type Txn struct {
 	storage engine.Engine
 	txnOp   TxnOperator
 
+	//connCtx is the ancestor of the txnCtx.
+	//it is initialized at the Txn object created and
+	//exists always.
+	connCtx context.Context
+
 	// it is for the transaction and different from the requestCtx.
 	// it is created before the transaction is started and
 	// released after the transaction is commit or rollback.
@@ -936,9 +941,6 @@ type Txn struct {
 	txnCtx       context.Context
 	txnCtxCancel context.CancelFunc
 
-	// every request has a reqCtx inherits from txnCtx
-	reqCtx             context.Context
-	reqCtxCancel       context.CancelFunc
 	shareTxn           bool
 	mu                 sync.Mutex
 	hasCalledStartStmt bool
@@ -953,9 +955,10 @@ type Txn struct {
 	optionBits uint32
 }
 
-func InitTxn(storage engine.Engine, txnCtx context.Context, txnOp TxnOperator) *Txn {
+func InitTxn(storage engine.Engine, connCtx context.Context, txnCtx context.Context, txnOp TxnOperator) *Txn {
 	return &Txn{
 		storage:      &engine.EntireEngine{Engine: storage},
+		connCtx:      connCtx,
 		txnCtx:       txnCtx,
 		txnOp:        txnOp,
 		shareTxn:     txnCtx != nil && txnOp != nil,
@@ -967,10 +970,10 @@ func InitTxn(storage engine.Engine, txnCtx context.Context, txnOp TxnOperator) *
 // CreateTxnCtx always return a valid txnCtx.
 // if there is none, it creates one.
 // if there is one, it returns previous one.
-func (th *Txn) CreateTxnCtx(execCtx *ExecCtx) {
+func (th *Txn) CreateTxnCtx() {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	th.createTxnCtxUnsafe(execCtx)
+	th.createTxnCtxUnsafe()
 }
 
 // GetTxnCtx should be called after the CreateTxnCtx
@@ -978,40 +981,6 @@ func (th *Txn) GetTxnCtx() context.Context {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.txnCtx
-}
-
-func (th *Txn) CancelReqCtx() {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	if th.reqCtxCancel != nil {
-		th.reqCtxCancel()
-	}
-}
-
-func (th *Txn) GetReqCtx() context.Context {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	return th.reqCtx
-}
-
-func (th *Txn) CreateReqCtx(execCtx *ExecCtx) {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	th.reqCtx = defines.AttachAccountId(th.reqCtx, execCtx.attach.accountId)
-	th.reqCtx = defines.AttachUserId(th.reqCtx, execCtx.attach.userId)
-	th.reqCtx = defines.AttachRoleId(th.reqCtx, execCtx.attach.roleId)
-
-	th.reqCtx = context.WithValue(th.reqCtx, defines.NodeIDKey{}, execCtx.attach.nodeId)
-	if execCtx.attach.span != nil {
-		th.reqCtx = trace.ContextWithSpan(th.reqCtx, execCtx.attach.span)
-	} else {
-		th.reqCtx = trace.ContextWithSpan(th.reqCtx, trace.NoopSpan{})
-	}
-
-	th.reqCtx = context.WithValue(th.reqCtx, defines.IsMoLogger{}, true)
-	if execCtx.attach.tempDN != nil {
-		th.reqCtx = context.WithValue(th.reqCtx, defines.TemporaryTN{}, execCtx.attach.tempDN)
-	}
 }
 
 func (th *Txn) invalidateTxnUnsafe() {
@@ -1034,9 +1003,10 @@ func (th *Txn) InActiveTxn() bool {
 // inActiveTxnUnsafe can not be used outside the Txn.
 // refresh server status also
 func (th *Txn) inActiveTxnUnsafe() bool {
-	if th.txnOp == nil && th.txnCtx != nil {
-		panic("txnOp == nil and txnCtx != nil")
-	} else if th.txnOp != nil && th.txnCtx == nil {
+	//if th.txnOp == nil && th.txnCtx != nil {
+	//	panic("txnOp == nil and txnCtx != nil")
+	//}
+	if th.txnOp != nil && th.txnCtx == nil {
 		panic("txnOp != nil and txnCtx == nil")
 	}
 	ret := th.txnOp != nil && th.txnCtx != nil
@@ -1149,7 +1119,7 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 			opts = v.([]client.TxnOption)
 		}
 	}
-	th.createTxnCtxUnsafe(execCtx)
+	th.createTxnCtxUnsafe()
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
@@ -1209,10 +1179,9 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 }
 
 // createTxnCtxUnsafe creates txn ctx. Should not be called outside txn
-func (th *Txn) createTxnCtxUnsafe(execCtx *ExecCtx) {
+func (th *Txn) createTxnCtxUnsafe() {
 	if th.txnCtx == nil {
-		th.txnCtx, th.txnCtxCancel = context.WithTimeout(execCtx.connCtx,
-			getGlobalPu().SV.SessionTimeout.Duration)
+		th.txnCtx, th.txnCtxCancel = context.WithTimeout(th.connCtx, getGlobalPu().SV.SessionTimeout.Duration)
 	}
 }
 
@@ -1558,7 +1527,7 @@ func (th *Txn) AttachTempStorageToTxnCtx(execCtx *ExecCtx, inited bool, temp *me
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	if inited {
-		th.createTxnCtxUnsafe(execCtx)
+		th.createTxnCtxUnsafe()
 		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, temp)
 	}
 	return nil
