@@ -43,7 +43,7 @@ type outputQueue struct {
 func NewOutputQueue(ctx context.Context, ses *Session, columnCount int, mrs *MysqlResultSet, ep *ExportConfig) *outputQueue {
 	const countOfResultSet = 1
 	if ctx == nil {
-		ctx = ses.GetRequestContext()
+		ctx = ses.GetTxnHandler().GetTxnCtx()
 	}
 	if mrs == nil {
 		//Create a new temporary result set per pipeline thread.
@@ -247,7 +247,7 @@ func extractRowFromVector(ses FeSession, vec *vector.Vector, i int, row []interf
 		logError(ses, ses.GetDebugString(),
 			"Failed to extract row from vector, unsupported type",
 			zap.Int("typeID", int(vec.GetType().Oid)))
-		return moerr.NewInternalError(ses.GetRequestContext(), "extractRowFromVector : unsupported type %d", vec.GetType().Oid)
+		return moerr.NewInternalError(ses.GetTxnHandler().GetTxnCtx(), "extractRowFromVector : unsupported type %d", vec.GetType().Oid)
 	}
 	return nil
 }

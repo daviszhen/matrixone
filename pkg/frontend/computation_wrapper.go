@@ -237,7 +237,6 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 	defer RecordStatementTxnID(execCtx.reqCtx, cwft.ses)
 	if cwft.ses.IfInitedTempEngine() {
 		execCtx.reqCtx = context.WithValue(execCtx.reqCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
-		cwft.ses.SetRequestContext(execCtx.reqCtx)
 		cwft.proc.Ctx = context.WithValue(cwft.proc.Ctx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 	}
@@ -253,8 +252,8 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 	// NB: In internal executor, we should also do the same action, which is increasing
 	// statement ID and updating snapshot TS.
 	// See `func (exec *txnExecutor) Exec(sql string)` for details.
-	txnOp := cwft.proc.TxnOperator
-	cwft.ses.SetTxnId(txnOp.Txn().ID)
+	//txnOp := cwft.proc.TxnOperator
+	//cwft.ses.SetTxnId(txnOp.Txn().ID)
 	//non derived statement
 	//if txnOp != nil && !cwft.ses.IsDerivedStmt() {
 	//	//startStatement has been called
@@ -468,7 +467,7 @@ func getStatementStartAt(ctx context.Context) time.Time {
 func replacePlan(requestCtx context.Context, ses *Session, cwft *TxnComputationWrapper, execPlan *plan.Execute) (*plan.Plan, tree.Statement, string, error) {
 	originSQL := ""
 	stmtName := execPlan.GetName()
-	prepareStmt, err := ses.GetPrepareStmt(stmtName)
+	prepareStmt, err := ses.GetPrepareStmt(requestCtx, stmtName)
 	if err != nil {
 		return nil, nil, originSQL, err
 	}

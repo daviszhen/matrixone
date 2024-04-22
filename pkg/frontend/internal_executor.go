@@ -189,7 +189,6 @@ func (ie *internalExecutor) newCmdSession(ctx context.Context, opts ie.SessionOv
 		panic(err)
 	}
 	sess := NewSession(ctx, ie.proto, mp, GSysVariables, true, nil)
-	sess.SetRequestContext(ctx)
 	sess.SetConnectContext(ctx)
 	sess.disableTrace = true
 

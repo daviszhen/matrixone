@@ -257,7 +257,6 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 	// XXX MPOOL can choose to use a Mid sized mpool, if, we know
 	// this mpool will be deleted.  Maybe in the following Closed method.
 	ses := NewSession(cancelCtx, routine.getProtocol(), nil, GSysVariables, true, nil)
-	ses.SetRequestContext(cancelCtx)
 	ses.SetConnectContext(cancelCtx)
 	ses.SetFromRealUser(true)
 	ses.setRoutineManager(rm)
@@ -565,12 +564,12 @@ func (rm *RoutineManager) KillRoutineConnections() {
 	rm.cleanKillQueue()
 }
 
-func (rm *RoutineManager) MigrateConnectionTo(req *query.MigrateConnToRequest) error {
+func (rm *RoutineManager) MigrateConnectionTo(ctx context.Context, req *query.MigrateConnToRequest) error {
 	routine := rm.getRoutineByConnID(req.ConnID)
 	if routine == nil {
-		return moerr.NewInternalError(rm.ctx, "cannot get routine to migrate connection %d", req.ConnID)
+		return moerr.NewInternalError(ctx, "cannot get routine to migrate connection %d", req.ConnID)
 	}
-	return routine.migrateConnectionTo(req)
+	return routine.migrateConnectionTo(ctx, req)
 }
 
 func (rm *RoutineManager) MigrateConnectionFrom(req *query.MigrateConnFromRequest, resp *query.MigrateConnFromResponse) error {

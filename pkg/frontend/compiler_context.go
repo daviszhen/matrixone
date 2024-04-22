@@ -499,9 +499,9 @@ func (tcc *TxnCompilerContext) ResolveVariable(varName string, isSystemVar, isGl
 
 	if isSystemVar {
 		if isGlobalVar {
-			return tcc.GetSession().getGlobalSystemVariableValue(varName)
+			return tcc.GetSession().getGlobalSystemVariableValue(ctx, varName)
 		} else {
-			return tcc.GetSession().GetSessionVar(varName)
+			return tcc.GetSession().GetSessionVar(ctx, varName)
 		}
 	} else {
 		_, val, err := tcc.GetSession().GetUserDefinedVar(varName)

@@ -18,9 +18,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 )
 
-func execInFrontend(ses *Session,
-	execCtx *ExecCtx,
-) (err error) {
+func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
 	case *tree.BeginTransaction:
@@ -43,20 +41,20 @@ func execInFrontend(ses *Session,
 
 		ses.InvalidatePrivilegeCache()
 		//switch role
-		err = handleSwitchRole(execCtx.reqCtx, ses, st)
+		err = handleSwitchRole(ses, execCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.Use:
 
 		var v interface{}
-		v, err = ses.GetGlobalVar("lower_case_table_names")
+		v, err = ses.GetGlobalVar(execCtx.reqCtx, "lower_case_table_names")
 		if err != nil {
 			return
 		}
 		st.Name.SetConfig(v.(int64))
 		//use database
-		err = handleChangeDB(execCtx.reqCtx, ses, st.Name.Compare())
+		err = handleChangeDB(ses, execCtx, st.Name.Compare())
 		if err != nil {
 			return
 		}
@@ -67,13 +65,13 @@ func execInFrontend(ses *Session,
 	case *tree.MoDump:
 
 		//dump
-		err = handleDump(execCtx.reqCtx, ses, st)
+		err = handleDump(ses, execCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.PrepareStmt:
 
-		execCtx.prepareStmt, err = handlePrepareStmt(execCtx.reqCtx, ses, st, execCtx.sqlOfStmt)
+		execCtx.prepareStmt, err = handlePrepareStmt(ses, execCtx, st)
 		if err != nil {
 			return
 		}
@@ -84,7 +82,7 @@ func execInFrontend(ses *Session,
 		}
 	case *tree.PrepareString:
 
-		execCtx.prepareStmt, err = handlePrepareString(execCtx.reqCtx, ses, st)
+		execCtx.prepareStmt, err = handlePrepareString(ses, execCtx, st)
 		if err != nil {
 			return
 		}
@@ -130,31 +128,31 @@ func execInFrontend(ses *Session,
 		}
 	case *tree.Deallocate:
 
-		err = handleDeallocate(execCtx.reqCtx, ses, st)
+		err = handleDeallocate(ses, execCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.Reset:
 
-		err = handleReset(execCtx.reqCtx, ses, st)
+		err = handleReset(ses, execCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.SetVar:
 
-		err = handleSetVar(execCtx.reqCtx, ses, execCtx, st, execCtx.sqlOfStmt)
+		err = handleSetVar(ses, execCtx, st, execCtx.sqlOfStmt)
 		if err != nil {
 			return
 		}
 	case *tree.ShowVariables:
 
-		err = handleShowVariables(ses, st, execCtx.proc, execCtx.isLastStmt)
+		err = handleShowVariables(ses, execCtx, st)
 		if err != nil {
 			return
 		}
 	case *tree.ShowErrors, *tree.ShowWarnings:
 
-		err = handleShowErrors(ses, execCtx.isLastStmt)
+		err = handleShowErrors(ses)
 		if err != nil {
 			return
 		}
@@ -165,107 +163,107 @@ func execInFrontend(ses *Session,
 		}
 	case *tree.ExplainStmt:
 
-		if err = handleExplainStmt(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleExplainStmt(ses, execCtx, st); err != nil {
 			return
 		}
 	case *InternalCmdFieldList:
 
-		if err = handleCmdFieldList(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCmdFieldList(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CreatePublication:
 
-		if err = handleCreatePublication(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreatePublication(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterPublication:
 
-		if err = handleAlterPublication(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleAlterPublication(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropPublication:
 
-		if err = handleDropPublication(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleDropPublication(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.ShowSubscriptions:
 
-		if err = handleShowSubscriptions(execCtx.reqCtx, ses, st, execCtx.isLastStmt); err != nil {
+		if err = handleShowSubscriptions(ses, execCtx, st, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.CreateStage:
 
-		if err = handleCreateStage(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreateStage(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropStage:
 
-		if err = handleDropStage(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleDropStage(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterStage:
 
-		if err = handleAlterStage(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleAlterStage(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateAccount:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleCreateAccount(execCtx.reqCtx, ses, st, execCtx.proc); err != nil {
+		if err = handleCreateAccount(ses, execCtx, st, execCtx.proc); err != nil {
 			return
 		}
 	case *tree.DropAccount:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleDropAccount(execCtx.reqCtx, ses, st, execCtx.proc); err != nil {
+		if err = handleDropAccount(ses, execCtx, st, execCtx.proc); err != nil {
 			return
 		}
 	case *tree.AlterAccount:
 		ses.InvalidatePrivilegeCache()
 
-		if err = handleAlterAccount(execCtx.reqCtx, ses, st, execCtx.proc); err != nil {
+		if err = handleAlterAccount(ses, execCtx, st, execCtx.proc); err != nil {
 			return
 		}
 	case *tree.AlterDataBaseConfig:
 		ses.InvalidatePrivilegeCache()
 
 		if st.IsAccountLevel {
-			if err = handleAlterAccountConfig(execCtx.reqCtx, ses, st); err != nil {
+			if err = handleAlterAccountConfig(ses, execCtx, st); err != nil {
 				return
 			}
 		} else {
-			if err = handleAlterDataBaseConfig(execCtx.reqCtx, ses, st); err != nil {
+			if err = handleAlterDataBaseConfig(ses, execCtx, st); err != nil {
 				return
 			}
 		}
 	case *tree.CreateUser:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleCreateUser(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreateUser(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropUser:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleDropUser(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleDropUser(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.AlterUser: //TODO
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleAlterUser(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleAlterUser(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateRole:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleCreateRole(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreateRole(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropRole:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleDropRole(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleDropRole(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateFunction:
@@ -273,27 +271,27 @@ func execInFrontend(ses *Session,
 		if err = st.Valid(); err != nil {
 			return err
 		}
-		if err = handleCreateFunction(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreateFunction(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropFunction:
 
-		if err = handleDropFunction(execCtx.reqCtx, ses, st, execCtx.proc); err != nil {
+		if err = handleDropFunction(ses, execCtx, st, execCtx.proc); err != nil {
 			return
 		}
 	case *tree.CreateProcedure:
 
-		if err = handleCreateProcedure(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreateProcedure(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropProcedure:
 
-		if err = handleDropProcedure(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleDropProcedure(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CallStmt:
 
-		if err = handleCallProcedure(execCtx.reqCtx, ses, st, execCtx.proc); err != nil {
+		if err = handleCallProcedure(ses, execCtx, st, execCtx.proc); err != nil {
 			return
 		}
 	case *tree.Grant:
@@ -301,11 +299,11 @@ func execInFrontend(ses *Session,
 		ses.InvalidatePrivilegeCache()
 		switch st.Typ {
 		case tree.GrantTypeRole:
-			if err = handleGrantRole(execCtx.reqCtx, ses, &st.GrantRole); err != nil {
+			if err = handleGrantRole(ses, execCtx, &st.GrantRole); err != nil {
 				return
 			}
 		case tree.GrantTypePrivilege:
-			if err = handleGrantPrivilege(execCtx.reqCtx, ses, &st.GrantPrivilege); err != nil {
+			if err = handleGrantPrivilege(ses, execCtx, &st.GrantPrivilege); err != nil {
 				return
 			}
 		}
@@ -314,33 +312,33 @@ func execInFrontend(ses *Session,
 		ses.InvalidatePrivilegeCache()
 		switch st.Typ {
 		case tree.RevokeTypeRole:
-			if err = handleRevokeRole(execCtx.reqCtx, ses, &st.RevokeRole); err != nil {
+			if err = handleRevokeRole(ses, execCtx, &st.RevokeRole); err != nil {
 				return
 			}
 		case tree.RevokeTypePrivilege:
-			if err = handleRevokePrivilege(execCtx.reqCtx, ses, &st.RevokePrivilege); err != nil {
+			if err = handleRevokePrivilege(ses, execCtx, &st.RevokePrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.Kill:
 
 		ses.InvalidatePrivilegeCache()
-		if err = handleKill(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleKill(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.ShowAccounts:
 
-		if err = handleShowAccounts(execCtx.reqCtx, ses, st, execCtx.isLastStmt); err != nil {
+		if err = handleShowAccounts(ses, execCtx, st, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.ShowCollation:
 
-		if err = handleShowCollation(ses, st, execCtx.proc, execCtx.isLastStmt); err != nil {
+		if err = handleShowCollation(ses, execCtx, st, execCtx.proc, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.ShowBackendServers:
 
-		if err = handleShowBackendServers(execCtx.reqCtx, ses, execCtx.isLastStmt); err != nil {
+		if err = handleShowBackendServers(ses, execCtx, execCtx.isLastStmt); err != nil {
 			return
 		}
 	case *tree.SetTransaction:
@@ -352,27 +350,27 @@ func execInFrontend(ses *Session,
 
 	case *tree.BackupStart:
 
-		if err = handleStartBackup(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleStartBackup(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.EmptyStmt:
 
-		if err = handleEmptyStmt(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleEmptyStmt(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateSnapShot:
 		//TODO: invalidate privilege cache
-		if err = handleCreateSnapshot(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleCreateSnapshot(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.DropSnapShot:
 		//TODO: invalidate privilege cache
-		if err = handleDropSnapshot(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleDropSnapshot(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.UpgradeStatement:
 		//TODO: invalidate privilege cache
-		if err = handleExecUpgrade(execCtx.reqCtx, ses, st); err != nil {
+		if err = handleExecUpgrade(ses, execCtx, st); err != nil {
 			return
 		}
 	}

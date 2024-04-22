@@ -279,7 +279,6 @@ func (rt *Routine) handleRequest(req *Request) error {
 		nodeCtx = context.WithValue(cancelRequestCtx, defines.NodeIDKey{}, ses.getRoutineManager().baseService.ID())
 	}
 	tenantCtx := defines.AttachAccount(nodeCtx, tenant.GetTenantID(), tenant.GetUserID(), tenant.GetDefaultRoleID())
-	ses.SetRequestContext(tenantCtx)
 
 	rt.increaseCount(func() {
 		metric.ConnectionCounter(ses.GetTenantInfo().GetTenant()).Inc()
@@ -440,11 +439,11 @@ func (rt *Routine) cleanup() {
 	})
 }
 
-func (rt *Routine) migrateConnectionTo(req *query.MigrateConnToRequest) error {
+func (rt *Routine) migrateConnectionTo(ctx context.Context, req *query.MigrateConnToRequest) error {
 	var err error
 	rt.migrateOnce.Do(func() {
 		ses := rt.getSession()
-		err = ses.Migrate(req)
+		err = ses.Migrate(ctx, req)
 	})
 	return err
 }

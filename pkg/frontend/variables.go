@@ -931,7 +931,7 @@ type SystemVariable struct {
 
 	Default interface{}
 
-	UpdateSessVar func(*Session, map[string]interface{}, string, interface{}) error
+	UpdateSessVar func(context.Context, *Session, map[string]interface{}, string, interface{}) error
 }
 
 func (sv SystemVariable) GetName() string {
@@ -3574,7 +3574,7 @@ var gSysVarsDefs = map[string]SystemVariable{
 	},
 }
 
-func updateTimeZone(sess *Session, vars map[string]interface{}, name string, val interface{}) error {
+func updateTimeZone(ctx context.Context, sess *Session, vars map[string]interface{}, name string, val interface{}) error {
 	tzStr := val.(string)
 	tzStr = strings.TrimSpace(strings.ToLower(tzStr))
 	if tzStr == "system" {
@@ -3582,50 +3582,50 @@ func updateTimeZone(sess *Session, vars map[string]interface{}, name string, val
 		sess.SetTimeZone(time.Local)
 	} else if len(tzStr) > 0 && (tzStr[0] == '-' || tzStr[0] == '+') {
 		if len(tzStr) != 5 && len(tzStr) != 6 {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 		}
 
 		minIdx := 3
 		if tzStr[1] < '0' || tzStr[1] > '9' {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 		}
 		hour := int(tzStr[1] - '0')
 		if tzStr[2] != ':' {
 			if tzStr[2] < '0' || tzStr[2] > '9' {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 			}
 			hour = hour*10 + int(tzStr[2]-'0')
 			minIdx = 4
 			if tzStr[3] != ':' {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 			}
 		}
 
 		if minIdx != len(tzStr)-2 {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 		}
 		if tzStr[minIdx] < '0' || tzStr[minIdx] > '9' {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 		}
 		minute := int(tzStr[minIdx]-'0') * 10
 		if tzStr[minIdx+1] < '0' || tzStr[minIdx+1] > '9' {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 		}
 		minute += int(tzStr[minIdx+1] - '0')
 		if minute >= 60 {
-			return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+			return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 		}
 
 		minute += hour * 60
 
 		if tzStr[0] == '-' {
 			if minute >= 14*60 {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 			}
 			sess.SetTimeZone(time.FixedZone("FixedZone", -minute*60))
 		} else {
 			if minute > 14*60 {
-				return moerr.NewWrongDatetimeSpec(sess.requestCtx, tzStr)
+				return moerr.NewWrongDatetimeSpec(ctx, tzStr)
 			}
 			sess.SetTimeZone(time.FixedZone("FixedZone", minute*60))
 		}
@@ -3663,8 +3663,8 @@ type UserDefinedVar struct {
 	Sql   string
 }
 
-func autocommitValue(ses FeSession) (bool, error) {
-	value, err := ses.GetSessionVar("autocommit")
+func autocommitValue(ctx context.Context, ses FeSession) (bool, error) {
+	value, err := ses.GetSessionVar(ctx, "autocommit")
 	if err != nil {
 		return false, err
 	}

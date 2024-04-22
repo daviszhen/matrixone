@@ -1189,7 +1189,7 @@ func (mp *MysqlProtocolImpl) authenticateUser(ctx context.Context, authResponse 
 	ses := mp.GetSession()
 	if !mp.SV.SkipCheckUser {
 		logDebugf(mp.getDebugStringUnsafe(), "authenticate user 1")
-		psw, err = ses.AuthenticateUser(mp.GetUserName(), mp.GetDatabaseName(), mp.authResponse, mp.GetSalt(), mp.checkPassword)
+		psw, err = ses.AuthenticateUser(ctx, mp.GetUserName(), mp.GetDatabaseName(), mp.authResponse, mp.GetSalt(), mp.checkPassword)
 		if err != nil {
 			return err
 		}
@@ -1198,7 +1198,7 @@ func (mp *MysqlProtocolImpl) authenticateUser(ctx context.Context, authResponse 
 		//TO Check password
 		if mp.checkPassword(psw, mp.GetSalt(), authResponse) {
 			logDebugf(mp.getDebugStringUnsafe(), "check password succeeded")
-			ses.InitGlobalSystemVariables()
+			ses.InitGlobalSystemVariables(ctx)
 		} else {
 			return moerr.NewInternalError(ctx, "check password failed")
 		}
@@ -1989,7 +1989,7 @@ func (mp *MysqlProtocolImpl) sendColumns(ctx context.Context, mrs *MysqlResultSe
 func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResultSet, rowIdx uint64) ([]byte, error) {
 	data = mp.append(data, defines.OKHeader) // append OkHeader
 
-	ctx := mp.ses.GetRequestContext()
+	ctx := mp.ses.GetTxnHandler().GetTxnCtx()
 
 	// get null buffer
 	buffer := mp.binaryNullBuffer[:0]
@@ -2024,7 +2024,7 @@ func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResul
 		}
 		mysqlColumn, ok := column.(*MysqlColumn)
 		if !ok {
-			return nil, moerr.NewInternalError(mp.ses.requestCtx, "sendColumn need MysqlColumn")
+			return nil, moerr.NewInternalError(ctx, "sendColumn need MysqlColumn")
 		}
 
 		switch mysqlColumn.ColumnType() {
@@ -2162,7 +2162,7 @@ func (mp *MysqlProtocolImpl) makeResultSetBinaryRow(data []byte, mrs *MysqlResul
 
 // the server convert every row of the result set into the format that mysql protocol needs
 func (mp *MysqlProtocolImpl) makeResultSetTextRow(data []byte, mrs *MysqlResultSet, r uint64) ([]byte, error) {
-	ctx := mp.ses.GetRequestContext()
+	ctx := mp.ses.GetTxnHandler().GetTxnCtx()
 	for i := uint64(0); i < mrs.GetColumnCount(); i++ {
 		column, err := mrs.GetColumn(ctx, i)
 		if err != nil {
@@ -2461,7 +2461,7 @@ func (mp *MysqlProtocolImpl) fillPacket(elems ...byte) error {
 		curLen = int(MaxPayloadSize) - hasDataLen
 		curLen = Min(curLen, n-i)
 		if curLen < 0 {
-			return moerr.NewInternalError(mp.ses.requestCtx, "needLen %d < 0. hasDataLen %d n - i %d", curLen, hasDataLen, n-i)
+			return moerr.NewInternalError(mp.ses.GetTxnHandler().GetTxnCtx(), "needLen %d < 0. hasDataLen %d n - i %d", curLen, hasDataLen, n-i)
 		}
 		outbuf.Grow(curLen)
 		buf = outbuf.RawBuf()
@@ -2497,7 +2497,7 @@ func (mp *MysqlProtocolImpl) closePacket(appendZeroPacket bool) error {
 	outbuf := mp.tcpConn.OutBuf()
 	payLoadLen := outbuf.GetWriteIndex() - beginWriteIndex(outbuf, mp.beginOffset) - 4
 	if payLoadLen < 0 || payLoadLen > int(MaxPayloadSize) {
-		return moerr.NewInternalError(mp.ses.requestCtx, "invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
+		return moerr.NewInternalError(mp.ses.GetTxnHandler().GetTxnCtx(), "invalid payload len :%d curWriteIdx %d beginWriteIdx %d ",
 			payLoadLen, outbuf.GetWriteIndex(), beginWriteIndex(outbuf, mp.beginOffset))
 	}
 

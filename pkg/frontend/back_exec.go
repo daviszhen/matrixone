@@ -17,6 +17,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -71,9 +72,8 @@ func (back *backExec) Exec(ctx context.Context, sql string) error {
 
 	// For determine this is a background sql.
 	ctx = context.WithValue(ctx, defines.BgKey{}, true)
-	//back.backSes.requestCtx = ctx
 	//logutil.Debugf("-->bh:%s", sql)
-	v, err := back.backSes.GetGlobalVar("lower_case_table_names")
+	v, err := back.backSes.GetGlobalVar(ctx, "lower_case_table_names")
 	if err != nil {
 		return err
 	}
@@ -137,6 +137,12 @@ func (back *backExec) Clear() {
 // execute query
 func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 	input *UserInput) (retErr error) {
+	fmt.Fprintln(os.Stderr, "doComQueryInBack", input.getSql())
+	defer func() {
+		if retErr != nil {
+			fmt.Fprintln(os.Stderr, "doComQueryInBack", retErr)
+		}
+	}()
 	backSes.SetSql(input.getSql())
 	//the ses.GetUserName returns the user_name with the account_name.
 	//here,we only need the user_name.
@@ -198,7 +204,7 @@ func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 	proc.SessionInfo.User = userNameOnly
 	backSes.txnCompileCtx.SetProcess(proc)
 
-	cws, err := GetComputationWrapperInBack(backSes.proto.GetDatabaseName(),
+	cws, err := GetComputationWrapperInBack(execCtx, backSes.proto.GetDatabaseName(),
 		input,
 		backSes.proto.GetUserName(),
 		getGlobalPu().StorageEngine,
@@ -434,7 +440,7 @@ func executeStmtInBack(backSes *backSession,
 	return
 }
 
-var GetComputationWrapperInBack = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses FeSession) ([]ComputationWrapper, error) {
+var GetComputationWrapperInBack = func(exeCtx *ExecCtx, db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses FeSession) ([]ComputationWrapper, error) {
 	var cw []ComputationWrapper = nil
 
 	var stmts []tree.Statement = nil
@@ -444,7 +450,7 @@ var GetComputationWrapperInBack = func(db string, input *UserInput, user string,
 	if input.getStmt() != nil {
 		stmts = append(stmts, input.getStmt())
 	} else if isCmdFieldListSql(input.getSql()) {
-		cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, input.getSql())
+		cmdFieldStmt, err = parseCmdFieldList(exeCtx.reqCtx, input.getSql())
 		if err != nil {
 			return nil, err
 		}
@@ -452,15 +458,15 @@ var GetComputationWrapperInBack = func(db string, input *UserInput, user string,
 	} else {
 		var v interface{}
 		var origin interface{}
-		v, err = ses.GetGlobalVar("lower_case_table_names")
+		v, err = ses.GetGlobalVar(exeCtx.reqCtx, "lower_case_table_names")
 		if err != nil {
 			v = int64(1)
 		}
-		origin, err = ses.GetGlobalVar("keep_user_target_list_in_result")
+		origin, err = ses.GetGlobalVar(exeCtx.reqCtx, "keep_user_target_list_in_result")
 		if err != nil {
 			origin = int64(0)
 		}
-		stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, input.getSql(), v.(int64), origin.(int64))
+		stmts, err = parsers.Parse(exeCtx.reqCtx, dialect.MYSQL, input.getSql(), v.(int64), origin.(int64))
 		if err != nil {
 			return nil, err
 		}
@@ -803,7 +809,7 @@ func (backSes *backSession) CountPayload(i int) {
 
 }
 
-func (backSes *backSession) GetPrepareStmt(name string) (*PrepareStmt, error) {
+func (backSes *backSession) GetPrepareStmt(ctx context.Context, name string) (*PrepareStmt, error) {
 	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support prepare in background exec")
 }
 
@@ -882,7 +888,7 @@ func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, 
 	return nil, nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support user defined var in background exec")
 }
 
-func (backSes *backSession) GetSessionVar(name string) (interface{}, error) {
+func (backSes *backSession) GetSessionVar(ctx context.Context, name string) (interface{}, error) {
 	switch strings.ToLower(name) {
 	case "autocommit":
 		return true, nil
@@ -890,8 +896,8 @@ func (backSes *backSession) GetSessionVar(name string) (interface{}, error) {
 	return nil, nil
 }
 
-func (backSes *backSession) getGlobalSystemVariableValue(name string) (interface{}, error) {
-	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support system variable in background exec")
+func (backSes *backSession) getGlobalSystemVariableValue(ctx context.Context, name string) (interface{}, error) {
+	return nil, moerr.NewInternalError(ctx, "do not support system variable in background exec")
 }
 
 func (backSes *backSession) GetBackgroundExec(ctx context.Context) BackgroundExec {
@@ -938,15 +944,15 @@ func (backSes *backSession) SetDatabaseName(s string) {
 	backSes.GetTxnCompileCtx().SetDatabase(s)
 }
 
-func (backSes *backSession) GetGlobalVar(name string) (interface{}, error) {
+func (backSes *backSession) GetGlobalVar(ctx context.Context, name string) (interface{}, error) {
 	if def, val, ok := backSes.gSysVars.GetGlobalSysVar(name); ok {
 		if def.GetScope() == ScopeSession {
 			//empty
-			return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), errorSystemVariableSessionEmpty())
+			return nil, moerr.NewInternalError(ctx, errorSystemVariableSessionEmpty())
 		}
 		return val, nil
 	}
-	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), errorSystemVariableDoesNotExist())
+	return nil, moerr.NewInternalError(ctx, errorSystemVariableDoesNotExist())
 }
 
 func (backSes *backSession) SetMysqlResultSetOfBackgroundTask(mrs *MysqlResultSet) {

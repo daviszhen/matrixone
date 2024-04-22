@@ -285,8 +285,8 @@ type FeSession interface {
 	GetStorage() engine.Engine
 	GetBackgroundExec(ctx context.Context) BackgroundExec
 	GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec
-	getGlobalSystemVariableValue(name string) (interface{}, error)
-	GetSessionVar(name string) (interface{}, error)
+	getGlobalSystemVariableValue(ctx context.Context, name string) (interface{}, error)
+	GetSessionVar(ctx context.Context, name string) (interface{}, error)
 	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
 	GetConnectContext() context.Context
 	IfInitedTempEngine() bool
@@ -305,12 +305,12 @@ type FeSession interface {
 	GetDatabaseName() string
 	SetDatabaseName(db string)
 	GetMysqlResultSet() *MysqlResultSet
-	GetGlobalVar(name string) (interface{}, error)
+	GetGlobalVar(ctx context.Context, name string) (interface{}, error)
 	SetNewResponse(category int, affectedRows uint64, cmd int, d interface{}, isLastStmt bool) *Response
 	GetTxnCompileCtx() *TxnCompilerContext
 	GetCmd() CommandType
 	IsBackgroundSession() bool
-	GetPrepareStmt(name string) (*PrepareStmt, error)
+	GetPrepareStmt(ctx context.Context, name string) (*PrepareStmt, error)
 	CountPayload(i int)
 	RemovePrepareStmt(name string)
 	SetShowStmtType(statement ShowStatementType)

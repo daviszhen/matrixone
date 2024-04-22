@@ -302,22 +302,26 @@ func getExprValue(e tree.Expr, ses *Session, execCtx *ExecCtx) (interface{}, err
 	}
 
 	//2.run the select
-	ctx := ses.GetRequestContext()
 
 	//run the statement in the same session
 	ses.ClearResultBatches()
-	err = executeStmtInSameSession(ctx, ses, execCtx, compositedSelect)
+	//!!!different ExecCtx
+	newExecCtx := ExecCtx{
+		reqCtx: execCtx.reqCtx,
+		ses:    ses,
+	}
+	err = executeStmtInSameSession(newExecCtx.reqCtx, ses, &newExecCtx, compositedSelect)
 	if err != nil {
 		return nil, err
 	}
 
 	batches := ses.GetResultBatches()
 	if len(batches) == 0 {
-		return nil, moerr.NewInternalError(ctx, "the expr %s does not generate a value", e.String())
+		return nil, moerr.NewInternalError(execCtx.reqCtx, "the expr %s does not generate a value", e.String())
 	}
 
 	if batches[0].VectorCount() > 1 {
-		return nil, moerr.NewInternalError(ctx, "the expr %s generates multi columns value", e.String())
+		return nil, moerr.NewInternalError(execCtx.reqCtx, "the expr %s generates multi columns value", e.String())
 	}
 
 	//evaluate the count of rows, the count of columns
@@ -329,7 +333,7 @@ func getExprValue(e tree.Expr, ses *Session, execCtx *ExecCtx) (interface{}, err
 		}
 		count += b.RowCount()
 		if count > 1 {
-			return nil, moerr.NewInternalError(ctx, "the expr %s generates multi rows value", e.String())
+			return nil, moerr.NewInternalError(execCtx.reqCtx, "the expr %s generates multi rows value", e.String())
 		}
 		if resultVec == nil && b.GetVector(0).Length() != 0 {
 			resultVec = b.GetVector(0)
@@ -337,7 +341,7 @@ func getExprValue(e tree.Expr, ses *Session, execCtx *ExecCtx) (interface{}, err
 	}
 
 	if resultVec == nil {
-		return nil, moerr.NewInternalError(ctx, "the expr %s does not generate a value", e.String())
+		return nil, moerr.NewInternalError(execCtx.reqCtx, "the expr %s does not generate a value", e.String())
 	}
 
 	// for the decimal type, we need the type of expr
@@ -449,7 +453,7 @@ func getValueFromVector(vec *vector.Vector, ses *Session, expr *plan2.Expr) (int
 	case types.T_enum:
 		return vector.MustFixedCol[types.Enum](vec)[0], nil
 	default:
-		return nil, moerr.NewInvalidArg(ses.GetRequestContext(), "variable type", vec.GetType().Oid.String())
+		return nil, moerr.NewInvalidArg(ses.GetTxnHandler().GetTxnCtx(), "variable type", vec.GetType().Oid.String())
 	}
 }
 
@@ -733,7 +737,7 @@ const (
 // execute.... // prepare stmt1 from .... ; set var1 = val1 ; set var2 = val2 ;
 // Format 2: COM_STMT_EXECUTE
 // execute.... // prepare stmt1 from .... ; param0 ; param1 ...
-func makeExecuteSql(ses *Session, stmt tree.Statement) string {
+func makeExecuteSql(ctx context.Context, ses *Session, stmt tree.Statement) string {
 	if ses == nil || stmt == nil {
 		return ""
 	}
@@ -743,7 +747,7 @@ func makeExecuteSql(ses *Session, stmt tree.Statement) string {
 	switch t := stmt.(type) {
 	case *tree.Execute:
 		name := string(t.Name)
-		prepareStmt, err := ses.GetPrepareStmt(name)
+		prepareStmt, err := ses.GetPrepareStmt(ctx, name)
 		if err != nil || prepareStmt == nil {
 			break
 		}

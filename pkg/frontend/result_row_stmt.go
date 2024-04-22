@@ -204,7 +204,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 
 		switch ses.GetShowStmtType() {
 		case ShowTableStatus:
-			if err = handleShowTableStatus(ses, statement.(*tree.ShowTableStatus), execCtx.proc); err != nil {
+			if err = handleShowTableStatus(ses, execCtx, statement.(*tree.ShowTableStatus)); err != nil {
 				return
 			}
 		}
@@ -280,7 +280,7 @@ func respPrebuildResultRow(ses *Session,
 	execCtx *ExecCtx) (err error) {
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, execCtx.isLastStmt)
-	if err := execCtx.proto.SendResponse(ses.GetRequestContext(), resp); err != nil {
+	if err := execCtx.proto.SendResponse(execCtx.reqCtx, resp); err != nil {
 		return moerr.NewInternalError(execCtx.reqCtx, "routine send response failed, error: %v ", err)
 	}
 	return err

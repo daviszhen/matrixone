@@ -564,7 +564,6 @@ func (ses *Session) Close() {
 		stmt.Close()
 	}
 	ses.prepareStmts = nil
-	ses.requestCtx = nil
 	ses.connectCtx = nil
 	ses.allResultSet = nil
 	ses.tenant = nil
@@ -1016,12 +1015,12 @@ func (ses *Session) GetTenantName() string {
 	return ses.GetTenantNameWithStmt(nil)
 }
 
-func (ses *Session) SetPrepareStmt(name string, prepareStmt *PrepareStmt) error {
+func (ses *Session) SetPrepareStmt(ctx context.Context, name string, prepareStmt *PrepareStmt) error {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	if stmt, ok := ses.prepareStmts[name]; !ok {
 		if len(ses.prepareStmts) >= MaxPrepareNumberInOneSession {
-			return moerr.NewInvalidState(ses.requestCtx, "too many prepared statement, max %d", MaxPrepareNumberInOneSession)
+			return moerr.NewInvalidState(ctx, "too many prepared statement, max %d", MaxPrepareNumberInOneSession)
 		}
 	} else {
 		stmt.Close()
@@ -1039,13 +1038,13 @@ func (ses *Session) SetPrepareStmt(name string, prepareStmt *PrepareStmt) error 
 	return nil
 }
 
-func (ses *Session) GetPrepareStmt(name string) (*PrepareStmt, error) {
+func (ses *Session) GetPrepareStmt(ctx context.Context, name string) (*PrepareStmt, error) {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	if prepareStmt, ok := ses.prepareStmts[name]; ok {
 		return prepareStmt, nil
 	}
-	return nil, moerr.NewInvalidState(ses.requestCtx, "prepared statement '%s' does not exist", name)
+	return nil, moerr.NewInvalidState(ctx, "prepared statement '%s' does not exist", name)
 }
 
 func (ses *Session) GetPrepareStmts() []*PrepareStmt {
@@ -1087,72 +1086,72 @@ func (ses *Session) GetSysVars() map[string]interface{} {
 
 // SetGlobalVar sets the value of system variable in global.
 // used by SET GLOBAL
-func (ses *Session) SetGlobalVar(name string, value interface{}) error {
-	return ses.GetGlobalSysVars().SetGlobalSysVar(ses.GetRequestContext(), name, value)
+func (ses *Session) SetGlobalVar(ctx context.Context, name string, value interface{}) error {
+	return ses.GetGlobalSysVars().SetGlobalSysVar(ctx, name, value)
 }
 
 // GetGlobalVar gets this value of the system variable in global
-func (ses *Session) GetGlobalVar(name string) (interface{}, error) {
+func (ses *Session) GetGlobalVar(ctx context.Context, name string) (interface{}, error) {
 	gSysVars := ses.GetGlobalSysVars()
 	if def, val, ok := gSysVars.GetGlobalSysVar(name); ok {
 		if def.GetScope() == ScopeSession {
 			//empty
-			return nil, moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableSessionEmpty())
+			return nil, moerr.NewInternalError(ctx, errorSystemVariableSessionEmpty())
 		}
 		return val, nil
 	}
-	return nil, moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableDoesNotExist())
+	return nil, moerr.NewInternalError(ctx, errorSystemVariableDoesNotExist())
 }
 
 // SetSessionVar sets the value of system variable in session
-func (ses *Session) SetSessionVar(name string, value interface{}) error {
+func (ses *Session) SetSessionVar(ctx context.Context, name string, value interface{}) error {
 	gSysVars := ses.GetGlobalSysVars()
 	if def, _, ok := gSysVars.GetGlobalSysVar(name); ok {
 		if def.GetScope() == ScopeGlobal {
-			return moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableIsGlobal())
+			return moerr.NewInternalError(ctx, errorSystemVariableIsGlobal())
 		}
 		//scope session & both
 		if !def.GetDynamic() {
-			return moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableIsReadOnly())
+			return moerr.NewInternalError(ctx, errorSystemVariableIsReadOnly())
 		}
 
 		cv, err := def.GetType().Convert(value)
 		if err != nil {
-			errutil.ReportError(ses.GetRequestContext(), err)
+			errutil.ReportError(ctx, err)
 			return err
 		}
 
 		if def.UpdateSessVar == nil {
 			ses.SetSysVar(def.GetName(), cv)
 		} else {
-			return def.UpdateSessVar(ses, ses.GetSysVars(), def.GetName(), cv)
+			return def.UpdateSessVar(ctx, ses, ses.GetSysVars(), def.GetName(), cv)
 		}
 	} else {
-		return moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableDoesNotExist())
+		return moerr.NewInternalError(ctx, errorSystemVariableDoesNotExist())
 	}
 	return nil
 }
 
 // InitSetSessionVar sets the value of system variable in session when start a connection
-func (ses *Session) InitSetSessionVar(name string, value interface{}) error {
+func (ses *Session) InitSetSessionVar(ctx context.Context, name string, value interface{}) error {
 	gSysVars := ses.GetGlobalSysVars()
 	if def, _, ok := gSysVars.GetGlobalSysVar(name); ok {
 		cv, err := def.GetType().Convert(value)
 		if err != nil {
-			errutil.ReportError(ses.GetRequestContext(), moerr.NewInternalError(context.Background(), "init variable fail: variable %s convert to the system variable type %s failed, bad value %v", name, def.GetType().String(), value))
+			errutil.ReportError(ctx, moerr.NewInternalError(context.Background(), "init variable fail: variable %s convert to the system variable type %s failed, bad value %v", name, def.GetType().String(), value))
 		}
 
 		if def.UpdateSessVar == nil {
 			ses.SetSysVar(def.GetName(), cv)
 		} else {
-			return def.UpdateSessVar(ses, ses.GetSysVars(), def.GetName(), cv)
+			return def.UpdateSessVar(ctx, ses, ses.GetSysVars(), def.GetName(), cv)
 		}
 	}
 	return nil
 }
 
 // GetSessionVar gets this value of the system variable in session
-func (ses *Session) GetSessionVar(name string) (interface{}, error) {
+func (ses *Session) GetSessionVar(ctx context.Context, name string) (interface{}, error) {
 	gSysVars := ses.GetGlobalSysVars()
 	if def, gVal, ok := gSysVars.GetGlobalSysVar(name); ok {
 		ciname := strings.ToLower(name)
@@ -1161,7 +1160,7 @@ func (ses *Session) GetSessionVar(name string) (interface{}, error) {
 		}
 		return ses.GetSysVar(ciname), nil
 	} else {
-		return nil, moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableDoesNotExist())
+		return nil, moerr.NewInternalError(ctx, errorSystemVariableDoesNotExist())
 	}
 }
 
@@ -1229,7 +1228,6 @@ func (ses *Session) SetTempEngine(ctx context.Context, te engine.Engine) error {
 	defer ses.mu.Unlock()
 	ee := ses.storage.(*engine.EntireEngine)
 	ee.TempEngine = te
-	ses.requestCtx = ctx
 	return nil
 }
 
@@ -1272,7 +1270,7 @@ func (ses *Session) skipAuthForSpecialUser() bool {
 }
 
 // AuthenticateUser Verify the user's password, and if the login information contains the database name, verify if the database exists
-func (ses *Session) AuthenticateUser(userInput string, dbName string, authResponse []byte, salt []byte, checkPassword func(pwd, salt, auth []byte) bool) ([]byte, error) {
+func (ses *Session) AuthenticateUser(ctx context.Context, userInput string, dbName string, authResponse []byte, salt []byte, checkPassword func(pwd []byte, salt []byte, auth []byte) bool) ([]byte, error) {
 	var defaultRoleID int64
 	var defaultRole string
 	var tenant *TenantInfo
@@ -1288,7 +1286,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	var specialAccount *TenantInfo
 
 	//Get tenant info
-	tenant, err = GetTenantInfo(ses.GetRequestContext(), userInput)
+	tenant, err = GetTenantInfo(ctx, userInput)
 	if err != nil {
 		return nil, err
 	}
@@ -1312,7 +1310,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 
 	//step1 : check tenant exists or not in SYS tenant context
 	ses.timestampMap[TSCheckTenantStart] = time.Now()
-	sysTenantCtx := defines.AttachAccount(ses.GetRequestContext(), uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
+	sysTenantCtx := defines.AttachAccount(ctx, uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
 	sqlForCheckTenant, err := getSqlForCheckTenant(sysTenantCtx, tenant.GetTenant())
 	if err != nil {
 		return nil, err
@@ -1363,7 +1361,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	//step3 : get the password of the user
 
 	ses.timestampMap[TSCheckUserStart] = time.Now()
-	tenantCtx := defines.AttachAccountId(ses.GetRequestContext(), uint32(tenantID))
+	tenantCtx := defines.AttachAccountId(ctx, uint32(tenantID))
 
 	logDebugf(sessionInfo, "check user of %s exists", tenant)
 	//Get the password of the user in an independent session
@@ -1481,7 +1479,7 @@ func (ses *Session) AuthenticateUser(userInput string, dbName string, authRespon
 	// TO Check password
 	if checkPassword(psw, salt, authResponse) {
 		logDebugf(sessionInfo, "check password succeeded")
-		ses.InitGlobalSystemVariables()
+		ses.InitGlobalSystemVariables(tenantCtx)
 	} else {
 		return nil, moerr.NewInternalError(tenantCtx, "check password failed")
 	}
@@ -1519,7 +1517,7 @@ func (ses *Session) UpgradeTenant(ctx context.Context, tenantName string, retryC
 	return ses.rm.baseService.UpgradeTenant(ctx, tenantName, retryCount, isALLAccount)
 }
 
-func (ses *Session) InitGlobalSystemVariables() error {
+func (ses *Session) InitGlobalSystemVariables(ctx context.Context) error {
 	var err error
 	var rsset []ExecResult
 	ses.timestampMap[TSInitGlobalSysVarStart] = time.Now()
@@ -1531,7 +1529,7 @@ func (ses *Session) InitGlobalSystemVariables() error {
 	tenantInfo := ses.GetTenantInfo()
 	// if is system account
 	if tenantInfo.IsSysTenant() {
-		sysTenantCtx := defines.AttachAccount(ses.GetRequestContext(), uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
+		sysTenantCtx := defines.AttachAccount(ctx, uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
 
 		// get system variable from mo_mysql_compatibility mode
 		sqlForGetVariables := getSystemVariablesWithAccount(sysAccountID)
@@ -1574,12 +1572,12 @@ func (ses *Session) InitGlobalSystemVariables() error {
 					}
 					val, err := sv.GetType().ConvertFromString(variable_value)
 					if err != nil {
-						errutil.ReportError(ses.GetRequestContext(), moerr.NewInternalError(context.Background(), "init variable fail: variable %s convert from string value to the system variable type %s failed, bad value %s", variable_name, sv.Type.String(), variable_value))
+						errutil.ReportError(sysTenantCtx, moerr.NewInternalError(context.Background(), "init variable fail: variable %s convert from string value to the system variable type %s failed, bad value %s", variable_name, sv.Type.String(), variable_value))
 						return err
 					}
-					err = ses.InitSetSessionVar(variable_name, val)
+					err = ses.InitSetSessionVar(sysTenantCtx, variable_name, val)
 					if err != nil {
-						errutil.ReportError(ses.GetRequestContext(), moerr.NewInternalError(context.Background(), "init variable fail: variable %s convert from string value to the system variable type %s failed, bad value %s", variable_name, sv.Type.String(), variable_value))
+						errutil.ReportError(sysTenantCtx, moerr.NewInternalError(context.Background(), "init variable fail: variable %s convert from string value to the system variable type %s failed, bad value %s", variable_name, sv.Type.String(), variable_value))
 					}
 				}
 			}
@@ -1587,7 +1585,7 @@ func (ses *Session) InitGlobalSystemVariables() error {
 			return moerr.NewInternalError(sysTenantCtx, "there is no data in mo_mysql_compatibility_mode table for account %s", sysAccountName)
 		}
 	} else {
-		tenantCtx := defines.AttachAccount(ses.GetRequestContext(), tenantInfo.GetTenantID(), tenantInfo.GetUserID(), uint32(accountAdminRoleID))
+		tenantCtx := defines.AttachAccount(ctx, tenantInfo.GetTenantID(), tenantInfo.GetUserID(), uint32(accountAdminRoleID))
 
 		// get system variable from mo_mysql_compatibility mode
 		sqlForGetVariables := getSystemVariablesWithAccount(uint64(tenantInfo.GetTenantID()))
@@ -1632,7 +1630,7 @@ func (ses *Session) InitGlobalSystemVariables() error {
 					if err != nil {
 						return err
 					}
-					err = ses.InitSetSessionVar(variable_name, val)
+					err = ses.InitSetSessionVar(tenantCtx, variable_name, val)
 					if err != nil {
 						return err
 					}
@@ -1705,17 +1703,16 @@ func (ses *Session) getCNLabels() map[string]string {
 }
 
 // getSystemVariableValue get the system vaiables value from the mo_mysql_compatibility_mode table
-func (ses *Session) getGlobalSystemVariableValue(varName string) (val interface{}, err error) {
+func (ses *Session) getGlobalSystemVariableValue(ctx context.Context, varName string) (val interface{}, err error) {
 	var sql string
 	//var err error
 	var erArray []ExecResult
 	var accountId uint32
 	var variableValue string
 	//var val interface{}
-	ctx := ses.GetRequestContext()
 
 	// check the variable name isValid or not
-	_, err = ses.GetGlobalVar(varName)
+	_, err = ses.GetGlobalVar(ctx, varName)
 	if err != nil {
 		return nil, err
 	}
@@ -1892,11 +1889,11 @@ type dbMigration struct {
 	db string
 }
 
-func (d *dbMigration) Migrate(ses *Session) error {
+func (d *dbMigration) Migrate(ctx context.Context, ses *Session) error {
 	if d.db == "" {
 		return nil
 	}
-	return doUse(ses.requestCtx, ses, d.db)
+	return doUse(ctx, ses, d.db)
 }
 
 type prepareStmtMigration struct {
@@ -1905,29 +1902,29 @@ type prepareStmtMigration struct {
 	paramTypes []byte
 }
 
-func (p *prepareStmtMigration) Migrate(ses *Session) error {
-	v, err := ses.GetGlobalVar("lower_case_table_names")
+func (p *prepareStmtMigration) Migrate(ctx context.Context, ses *Session) error {
+	v, err := ses.GetGlobalVar(ctx, "lower_case_table_names")
 	if err != nil {
 		return err
 	}
 	if !strings.HasPrefix(strings.ToLower(p.sql), "prepare") {
 		p.sql = fmt.Sprintf("prepare %s from %s", p.name, p.sql)
 	}
-	stmts, err := mysql.Parse(ses.requestCtx, p.sql, v.(int64), 0)
+	stmts, err := mysql.Parse(ctx, p.sql, v.(int64), 0)
 	if err != nil {
 		return err
 	}
-	if _, err = doPrepareStmt(ses.requestCtx, ses, stmts[0].(*tree.PrepareStmt), p.sql, p.paramTypes); err != nil {
+	if _, err = doPrepareStmt(ctx, ses, stmts[0].(*tree.PrepareStmt), p.sql, p.paramTypes); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ses *Session) Migrate(req *query.MigrateConnToRequest) error {
+func (ses *Session) Migrate(ctx context.Context, req *query.MigrateConnToRequest) error {
 	dbm := dbMigration{
 		db: req.DB,
 	}
-	if err := dbm.Migrate(ses); err != nil {
+	if err := dbm.Migrate(ctx, ses); err != nil {
 		return err
 	}
 
@@ -1941,7 +1938,7 @@ func (ses *Session) Migrate(req *query.MigrateConnToRequest) error {
 			sql:        p.SQL,
 			paramTypes: p.ParamTypes,
 		}
-		if err := pm.Migrate(ses); err != nil {
+		if err := pm.Migrate(ctx, ses); err != nil {
 			return err
 		}
 		id := parsePrepareStmtID(p.Name)

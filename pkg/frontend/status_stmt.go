@@ -72,7 +72,7 @@ func executeStatusStmt(ses *Session, execCtx *ExecCtx) (err error) {
 				logInfo(ses, ses.GetDebugString(), fmt.Sprintf("time of Exec.Run : %s", time.Since(runBegin).String()))
 			}
 
-			oq := NewOutputQueue(ses.GetRequestContext(), ses, 0, nil, nil)
+			oq := NewOutputQueue(execCtx.reqCtx, ses, 0, nil, nil)
 			if err = exportAllData(oq); err != nil {
 				return
 			}
@@ -130,7 +130,7 @@ func executeStatusStmt(ses *Session, execCtx *ExecCtx) (err error) {
 			if st.Local {
 				loadLocalErrGroup = new(errgroup.Group)
 				loadLocalErrGroup.Go(func() error {
-					return processLoadLocal(execCtx.proc.Ctx, ses, st.Param, execCtx.loadLocalWriter)
+					return processLoadLocal(ses, execCtx, st.Param, execCtx.loadLocalWriter)
 				})
 			}
 		}

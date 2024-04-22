@@ -39,7 +39,7 @@ func execInFrontendInBack(backSes *backSession,
 		//	return
 		//}
 	case *tree.Use:
-		err = handleChangeDB(execCtx.reqCtx, backSes, st.Name.Compare())
+		err = handleChangeDB(backSes, execCtx, st.Name.Compare())
 		if err != nil {
 			return
 		}
@@ -65,27 +65,27 @@ func execInFrontendInBack(backSes *backSession,
 	case *tree.Grant:
 		switch st.Typ {
 		case tree.GrantTypeRole:
-			if err = handleGrantRole(execCtx.reqCtx, backSes, &st.GrantRole); err != nil {
+			if err = handleGrantRole(backSes, execCtx, &st.GrantRole); err != nil {
 				return
 			}
 		case tree.GrantTypePrivilege:
-			if err = handleGrantPrivilege(execCtx.reqCtx, backSes, &st.GrantPrivilege); err != nil {
+			if err = handleGrantPrivilege(backSes, execCtx, &st.GrantPrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.Revoke:
 		switch st.Typ {
 		case tree.RevokeTypeRole:
-			if err = handleRevokeRole(execCtx.reqCtx, backSes, &st.RevokeRole); err != nil {
+			if err = handleRevokeRole(backSes, execCtx, &st.RevokeRole); err != nil {
 				return
 			}
 		case tree.RevokeTypePrivilege:
-			if err = handleRevokePrivilege(execCtx.reqCtx, backSes, &st.RevokePrivilege); err != nil {
+			if err = handleRevokePrivilege(backSes, execCtx, &st.RevokePrivilege); err != nil {
 				return
 			}
 		}
 	case *tree.EmptyStmt:
-		if err = handleEmptyStmt(execCtx.reqCtx, backSes, st); err != nil {
+		if err = handleEmptyStmt(backSes, execCtx, st); err != nil {
 			return
 		}
 	default:

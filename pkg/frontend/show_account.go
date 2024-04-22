@@ -508,7 +508,7 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 	ses.SetMysqlResultSet(outputRS)
 
 	ses.rs = mergeRsColumns(MoAccountColumns, EachAccountColumns)
-	if openSaveQueryResult(ses) {
+	if openSaveQueryResult(ctx, ses) {
 		err = saveResult(ses, outputBatches)
 	}
 
