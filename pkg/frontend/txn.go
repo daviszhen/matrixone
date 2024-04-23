@@ -292,7 +292,13 @@ func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
 		panic("context should not be nil")
 	}
 	storage := th.storage
-	err = storage.New(th.txnCtx, th.txnOp)
+	var accId uint32
+	accId, err = defines.GetAccountId(execCtx.reqCtx)
+	if err != nil {
+		return err
+	}
+	tempCtx := defines.AttachAccountId(th.txnCtx, accId)
+	err = storage.New(tempCtx, th.txnOp)
 	if err != nil {
 		execCtx.ses.SetTxnId(dumpUUID[:])
 	} else {

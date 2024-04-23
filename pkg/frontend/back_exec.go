@@ -61,9 +61,7 @@ func (back *backExec) Close() {
 func (back *backExec) Exec(ctx context.Context, sql string) error {
 	if ctx == nil {
 		//ctx = back.backSes.GetRequestContext()
-		ctx = back.backSes.GetTxnHandler().GetTxnCtx()
-	} else {
-		//back.backSes.SetRequestContext(ctx)
+		return moerr.NewInternalError(context.Background(), "context is nil")
 	}
 	_, err := defines.GetAccountId(ctx)
 	if err != nil {
@@ -143,6 +141,7 @@ func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 			fmt.Fprintln(os.Stderr, "doComQueryInBack", retErr)
 		}
 	}()
+	backSes.GetTxnCompileCtx().SetExecCtx(execCtx)
 	backSes.SetSql(input.getSql())
 	//the ses.GetUserName returns the user_name with the account_name.
 	//here,we only need the user_name.
@@ -810,7 +809,7 @@ func (backSes *backSession) CountPayload(i int) {
 }
 
 func (backSes *backSession) GetPrepareStmt(ctx context.Context, name string) (*PrepareStmt, error) {
-	return nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support prepare in background exec")
+	return nil, moerr.NewInternalError(ctx, "do not support prepare in background exec")
 }
 
 func (backSes *backSession) IsBackgroundSession() bool {
@@ -885,7 +884,7 @@ func (backSes *backSession) GetConnectContext() context.Context {
 }
 
 func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error) {
-	return nil, nil, moerr.NewInternalError(backSes.GetTxnHandler().GetTxnCtx(), "do not support user defined var in background exec")
+	return nil, nil, moerr.NewInternalError(context.Background(), "do not support user defined var in background exec")
 }
 
 func (backSes *backSession) GetSessionVar(ctx context.Context, name string) (interface{}, error) {
@@ -998,7 +997,7 @@ func (sh *SqlHelper) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta,
 func (sh *SqlHelper) ExecSql(sql string) (ret []interface{}, err error) {
 	var erArray []ExecResult
 
-	ctx := sh.ses.GetTxnHandler().GetTxnCtx()
+	ctx := sh.ses.txnCompileCtx.execCtx.reqCtx
 	/*
 		if we run the transaction statement (BEGIN, ect) here , it creates an independent transaction.
 		if we do not run the transaction statement (BEGIN, ect) here, it runs the sql in the share transaction

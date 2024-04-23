@@ -53,14 +53,21 @@ type TxnCompilerContext struct {
 	dbOfView, nameOfView string
 	sub                  *plan.SubscriptionMeta
 	//for support explain analyze
-	tcw *TxnComputationWrapper
-	mu  sync.Mutex
+	tcw     *TxnComputationWrapper
+	execCtx *ExecCtx
+	mu      sync.Mutex
 }
 
 var _ plan2.CompilerContext = &TxnCompilerContext{}
 
+func (tcc *TxnCompilerContext) SetExecCtx(execCtx *ExecCtx) {
+	tcc.mu.Lock()
+	defer tcc.mu.Unlock()
+	tcc.execCtx = execCtx
+}
+
 func (tcc *TxnCompilerContext) ReplacePlan(execPlan *plan.Execute) (*plan.Plan, tree.Statement, error) {
-	p, st, _, err := replacePlan(tcc.txnHandler.GetTxnCtx(), tcc.ses.(*Session), tcc.tcw, execPlan)
+	p, st, _, err := replacePlan(tcc.execCtx.reqCtx, tcc.ses.(*Session), tcc.tcw, execPlan)
 	return p, st, err
 }
 
@@ -133,17 +140,16 @@ func (tcc *TxnCompilerContext) GetAccountId() (uint32, error) {
 }
 
 func (tcc *TxnCompilerContext) GetContext() context.Context {
-	return tcc.txnHandler.GetTxnCtx()
+	return tcc.execCtx.reqCtx
 }
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	var err error
-	var txnCtx context.Context
 	var txn TxnOperator
-	txnCtx, txn = tcc.GetTxnHandler().GetTxn()
+	_, txn = tcc.GetTxnHandler().GetTxn()
 	//open database
 	ses := tcc.GetSession()
-	_, err = tcc.GetTxnHandler().GetStorage().Database(txnCtx, name, txn)
+	_, err = tcc.GetTxnHandler().GetStorage().Database(tcc.execCtx.reqCtx, name, txn)
 	if err != nil {
 		logError(ses, ses.GetDebugString(),
 			"Failed to get database",
@@ -160,14 +166,14 @@ func (tcc *TxnCompilerContext) GetDatabaseId(dbName string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
-	database, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
+	_, txn := tcc.GetTxnHandler().GetTxn()
+	database, err := tcc.GetTxnHandler().GetStorage().Database(tcc.execCtx.reqCtx, dbName, txn)
 	if err != nil {
 		return 0, err
 	}
-	databaseId, err := strconv.ParseUint(database.GetDatabaseId(txnCtx), 10, 64)
+	databaseId, err := strconv.ParseUint(database.GetDatabaseId(tcc.execCtx.reqCtx), 10, 64)
 	if err != nil {
-		return 0, moerr.NewInternalError(txnCtx, "The databaseid of '%s' is not a valid number", dbName)
+		return 0, moerr.NewInternalError(tcc.execCtx.reqCtx, "The databaseid of '%s' is not a valid number", dbName)
 	}
 	return databaseId, nil
 }
@@ -180,29 +186,30 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	}
 
 	ses := tcc.GetSession()
-	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
+	_, txn := tcc.GetTxnHandler().GetTxn()
+	tempCtx := tcc.execCtx.reqCtx
 	account := ses.GetTenantInfo()
 	if isClusterTable(dbName, tableName) {
 		//if it is the cluster table in the general account, switch into the sys account
 		if account != nil && account.GetTenantID() != sysAccountID {
-			txnCtx = defines.AttachAccountId(txnCtx, sysAccountID)
+			tempCtx = defines.AttachAccountId(tempCtx, sysAccountID)
 		}
 	}
 	if sub != nil {
-		txnCtx = defines.AttachAccountId(txnCtx, uint32(sub.AccountId))
+		tempCtx = defines.AttachAccountId(tempCtx, uint32(sub.AccountId))
 		dbName = sub.DbName
 	}
 	//for system_metrics.metric and system.statement_info,
 	//it is special under the no sys account, should switch into the sys account first.
 	if dbName == catalog.MO_SYSTEM && tableName == catalog.MO_STATEMENT {
-		txnCtx = defines.AttachAccountId(txnCtx, uint32(sysAccountID))
+		tempCtx = defines.AttachAccountId(tempCtx, uint32(sysAccountID))
 	}
 	if dbName == catalog.MO_SYSTEM_METRICS && (tableName == catalog.MO_METRIC || tableName == catalog.MO_SQL_STMT_CU) {
-		txnCtx = defines.AttachAccountId(txnCtx, uint32(sysAccountID))
+		tempCtx = defines.AttachAccountId(tempCtx, uint32(sysAccountID))
 	}
 
 	//open database
-	db, err := tcc.GetTxnHandler().GetStorage().Database(txnCtx, dbName, txn)
+	db, err := tcc.GetTxnHandler().GetStorage().Database(tempCtx, dbName, txn)
 	if err != nil {
 		logError(ses, ses.GetDebugString(),
 			"Failed to get database",
@@ -218,9 +225,9 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	// logDebugf(ses.GetDebugString(), "dbName %v tableNames %v", dbName, tableNames)
 
 	//open table
-	table, err := db.Relation(txnCtx, tableName, nil)
+	table, err := db.Relation(tempCtx, tableName, nil)
 	if err != nil {
-		tmpTable, e := tcc.getTmpRelation(txnCtx, engine.GetTempTableName(dbName, tableName))
+		tmpTable, e := tcc.getTmpRelation(tempCtx, engine.GetTempTableName(dbName, tableName))
 		if e != nil {
 			logError(ses, ses.GetDebugString(),
 				"Failed to get table",
@@ -231,20 +238,20 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 			table = tmpTable
 		}
 	}
-	return txnCtx, table, nil
+	return tempCtx, table, nil
 }
 
 func (tcc *TxnCompilerContext) getTmpRelation(_ context.Context, tableName string) (engine.Relation, error) {
 	e := tcc.ses.GetStorage()
-	txnCtx, txn := tcc.txnHandler.GetTxn()
-	db, err := e.Database(txnCtx, defines.TEMPORARY_DBNAME, txn)
+	_, txn := tcc.txnHandler.GetTxn()
+	db, err := e.Database(tcc.execCtx.reqCtx, defines.TEMPORARY_DBNAME, txn)
 	if err != nil {
 		logError(tcc.ses, tcc.ses.GetDebugString(),
 			"Failed to get temp database",
 			zap.Error(err))
 		return nil, err
 	}
-	table, err := db.Relation(txnCtx, tableName, nil)
+	table, err := db.Relation(tcc.execCtx.reqCtx, tableName, nil)
 	return table, err
 }
 
@@ -267,8 +274,8 @@ func (tcc *TxnCompilerContext) ensureDatabaseIsNotEmpty(dbName string, checkSub 
 }
 
 func (tcc *TxnCompilerContext) ResolveById(tableId uint64) (*plan2.ObjectRef, *plan2.TableDef) {
-	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
-	dbName, tableName, table, err := tcc.GetTxnHandler().GetStorage().GetRelationById(txnCtx, txn, tableId)
+	_, txn := tcc.GetTxnHandler().GetTxn()
+	dbName, tableName, table, err := tcc.GetTxnHandler().GetStorage().GetRelationById(tcc.execCtx.reqCtx, txn, tableId)
 	if err != nil {
 		return nil, nil
 	}
@@ -279,7 +286,7 @@ func (tcc *TxnCompilerContext) ResolveById(tableId uint64) (*plan2.ObjectRef, *p
 		ObjName:    tableName,
 		Obj:        int64(tableId),
 	}
-	tableDef := table.CopyTableDef(txnCtx)
+	tableDef := table.CopyTableDef(tcc.execCtx.reqCtx)
 	return obj, tableDef
 }
 
@@ -338,7 +345,7 @@ func (tcc *TxnCompilerContext) ResolveUdf(name string, args []*plan.Expr) (udf *
 		v2.TxnStatementResolveUdfDurationHistogram.Observe(time.Since(start).Seconds())
 	}()
 	ses := tcc.GetSession()
-	ctx := tcc.GetTxnHandler().GetTxnCtx()
+	ctx := tcc.execCtx.reqCtx
 
 	err = inputNameIsInvalid(ctx, name)
 	if err != nil {
@@ -485,7 +492,7 @@ func (tcc *TxnCompilerContext) ResolveUdf(name string, args []*plan.Expr) (udf *
 }
 
 func (tcc *TxnCompilerContext) ResolveVariable(varName string, isSystemVar, isGlobalVar bool) (interface{}, error) {
-	ctx := tcc.GetTxnHandler().GetTxnCtx()
+	ctx := tcc.execCtx.reqCtx
 
 	if ctx.Value(defines.InSp{}) != nil && ctx.Value(defines.InSp{}).(bool) {
 		tmpScope := ctx.Value(defines.VarScopeKey{}).(*[]map[string]interface{})
@@ -526,7 +533,7 @@ func (tcc *TxnCompilerContext) ResolveAccountIds(accountNames []string) (account
 	}
 
 	ses := tcc.GetSession()
-	ctx := tcc.GetTxnHandler().GetTxnCtx()
+	ctx := tcc.execCtx.reqCtx
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
 
@@ -738,8 +745,8 @@ func (tcc *TxnCompilerContext) SetProcess(proc *process.Process) {
 }
 
 func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta, error) {
-	txnCtx, txn := tcc.GetTxnHandler().GetTxn()
-	sub, err := getSubscriptionMeta(txnCtx, dbName, tcc.GetSession(), txn)
+	_, txn := tcc.GetTxnHandler().GetTxn()
+	sub, err := getSubscriptionMeta(tcc.execCtx.reqCtx, dbName, tcc.GetSession(), txn)
 	if err != nil {
 		return nil, err
 	}

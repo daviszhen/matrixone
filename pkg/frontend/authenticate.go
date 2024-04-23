@@ -6405,12 +6405,12 @@ func getSqlForPrivilege(ctx context.Context, roleId int64, entry privilegeEntry,
 }
 
 // getSqlForPrivilege2 complements the database name and calls getSqlForPrivilege
-func getSqlForPrivilege2(ses *Session, roleId int64, entry privilegeEntry, pl privilegeLevelType) (string, error) {
+func getSqlForPrivilege2(ctx context.Context, ses *Session, roleId int64, entry privilegeEntry, pl privilegeLevelType) (string, error) {
 	//handle the empty database
 	if len(entry.databaseName) == 0 {
 		entry.databaseName = ses.GetDatabaseName()
 	}
-	return getSqlForPrivilege(ses.GetTxnHandler().GetTxnCtx(), roleId, entry, pl)
+	return getSqlForPrivilege(ctx, roleId, entry, pl)
 }
 
 // verifyPrivilegeEntryInMultiPrivilegeLevels checks the privilege
@@ -6439,7 +6439,7 @@ func verifyPrivilegeEntryInMultiPrivilegeLevels(
 				return true, nil
 			}
 		}
-		sql, err = getSqlForPrivilege2(ses, roleId, entry, pl)
+		sql, err = getSqlForPrivilege2(ctx, ses, roleId, entry, pl)
 		if err != nil {
 			return false, err
 		}
@@ -9406,7 +9406,7 @@ func doInterpretCall(ctx context.Context, ses *Session, call *tree.CallStmt) ([]
 	return interpreter.GetResult(), nil
 }
 
-func doGrantPrivilegeImplicitly(_ context.Context, ses *Session, stmt tree.Statement) error {
+func doGrantPrivilegeImplicitly(ctx context.Context, ses *Session, stmt tree.Statement) error {
 	var err error
 	var sql string
 	tenantInfo := ses.GetTenantInfo()
@@ -9423,9 +9423,9 @@ func doGrantPrivilegeImplicitly(_ context.Context, ses *Session, stmt tree.State
 	tenantInfo = ses.GetTenantInfo()
 	// if is system account
 	if tenantInfo.IsSysTenant() {
-		tenantCtx = defines.AttachAccount(ses.GetTxnHandler().GetTxnCtx(), uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
+		tenantCtx = defines.AttachAccount(ctx, uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
 	} else {
-		tenantCtx = defines.AttachAccount(ses.GetTxnHandler().GetTxnCtx(), tenantInfo.GetTenantID(), tenantInfo.GetUserID(), uint32(accountAdminRoleID))
+		tenantCtx = defines.AttachAccount(ctx, tenantInfo.GetTenantID(), tenantInfo.GetUserID(), uint32(accountAdminRoleID))
 	}
 
 	// 2.grant database privilege
@@ -9456,7 +9456,7 @@ func doGrantPrivilegeImplicitly(_ context.Context, ses *Session, stmt tree.State
 	return err
 }
 
-func doRevokePrivilegeImplicitly(_ context.Context, ses *Session, stmt tree.Statement) error {
+func doRevokePrivilegeImplicitly(ctx context.Context, ses *Session, stmt tree.Statement) error {
 	var err error
 	var sql string
 	tenantInfo := ses.GetTenantInfo()
@@ -9473,9 +9473,9 @@ func doRevokePrivilegeImplicitly(_ context.Context, ses *Session, stmt tree.Stat
 	tenantInfo = ses.GetTenantInfo()
 	// if is system account
 	if tenantInfo.IsSysTenant() {
-		tenantCtx = defines.AttachAccount(ses.GetTxnHandler().GetTxnCtx(), uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
+		tenantCtx = defines.AttachAccount(ctx, uint32(sysAccountID), uint32(rootID), uint32(moAdminRoleID))
 	} else {
-		tenantCtx = defines.AttachAccount(ses.GetTxnHandler().GetTxnCtx(), tenantInfo.GetTenantID(), tenantInfo.GetUserID(), uint32(accountAdminRoleID))
+		tenantCtx = defines.AttachAccount(ctx, tenantInfo.GetTenantID(), tenantInfo.GetUserID(), uint32(accountAdminRoleID))
 	}
 
 	// 2.grant database privilege

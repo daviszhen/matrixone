@@ -246,8 +246,7 @@ func (rt *Routine) handleRequest(req *Request) error {
 
 	reqBegin := time.Now()
 	var span trace.Span
-	//all offspring related to the request inherit the txnCtx
-	routineCtx, span = trace.Start(ses.GetTxnHandler().GetTxnCtx(), "Routine.handleRequest",
+	routineCtx, span = trace.Start(rt.getCancelRoutineCtx(), "Routine.handleRequest",
 		trace.WithHungThreshold(30*time.Minute),
 		trace.WithProfileGoroutine(),
 		trace.WithProfileSystemStatus(func() ([]byte, error) {
@@ -265,7 +264,8 @@ func (rt *Routine) handleRequest(req *Request) error {
 	defer span.End()
 
 	parameters := rt.getParameters()
-	cancelRequestCtx, cancelRequestFunc := context.WithTimeout(routineCtx, parameters.SessionTimeout.Duration)
+	//all offspring related to the request inherit the txnCtx
+	cancelRequestCtx, cancelRequestFunc := context.WithTimeout(ses.GetTxnHandler().GetTxnCtx(), parameters.SessionTimeout.Duration)
 	rt.setCancelRequestFunc(cancelRequestFunc)
 	ses.UpdateDebugString()
 

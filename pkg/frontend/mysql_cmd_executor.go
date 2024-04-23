@@ -313,7 +313,8 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 	var db engine.Database
 	var err error
 
-	ctx, txnOp := ses.GetTxnHandler().GetTxn()
+	_, txnOp := ses.GetTxnHandler().GetTxn()
+	ctx := execCtx.reqCtx
 	// get db info as current account
 	if db, err = ses.GetStorage().Database(ctx, stmt.DbName, txnOp); err != nil {
 		return err
@@ -2411,6 +2412,8 @@ func executeStmtWithTxn(ses FeSession,
 		// statement management
 		_, txnOp := ses.GetTxnHandler().GetTxn()
 
+		execCtx.proc.TxnOperator = txnOp
+
 		txnOp.GetWorkspace().StartStatement()
 
 		//3. increase statement id
@@ -2611,7 +2614,7 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 			fmt.Fprintln(os.Stderr, "doComQuery", retErr)
 		}
 	}()
-
+	ses.GetTxnCompileCtx().SetExecCtx(execCtx)
 	// set the batch buf for stream scan
 	var inMemStreamScan []*kafka.Message
 
