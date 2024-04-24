@@ -17,7 +17,6 @@ package frontend
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -135,12 +134,12 @@ func (back *backExec) Clear() {
 // execute query
 func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 	input *UserInput) (retErr error) {
-	fmt.Fprintln(os.Stderr, "doComQueryInBack", input.getSql())
-	defer func() {
-		if retErr != nil {
-			fmt.Fprintln(os.Stderr, "doComQueryInBack", retErr)
-		}
-	}()
+	//fmt.Fprintln(os.Stderr, "doComQueryInBack", input.getSql())
+	//defer func() {
+	//	if retErr != nil {
+	//		fmt.Fprintln(os.Stderr, "doComQueryInBack", retErr)
+	//	}
+	//}()
 	backSes.GetTxnCompileCtx().SetExecCtx(execCtx)
 	backSes.SetSql(input.getSql())
 	//the ses.GetUserName returns the user_name with the account_name.

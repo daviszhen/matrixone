@@ -5,6 +5,6 @@ data-dir = "./mo-data"
 [log]
 level = "error"
 
-[observability]
-disableTrace = true
-disableMetric = true
+#[observability]
+#disableTrace = true
+#disableMetric = true

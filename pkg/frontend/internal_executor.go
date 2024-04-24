@@ -141,6 +141,9 @@ func (res *internalExecResult) Float64ValueByName(ctx context.Context, ridx uint
 func (ie *internalExecutor) Exec(ctx context.Context, sql string, opts ie.SessionOverrideOptions) (err error) {
 	ie.Lock()
 	defer ie.Unlock()
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, getGlobalPu().SV.SessionTimeout.Duration)
+	defer cancel()
 	sess := ie.newCmdSession(ctx, opts)
 	defer func() {
 		sess.Close()
@@ -159,6 +162,9 @@ func (ie *internalExecutor) Exec(ctx context.Context, sql string, opts ie.Sessio
 func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.SessionOverrideOptions) ie.InternalExecResult {
 	ie.Lock()
 	defer ie.Unlock()
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, getGlobalPu().SV.SessionTimeout.Duration)
+	defer cancel()
 	sess := ie.newCmdSession(ctx, opts)
 	defer sess.Close()
 	ie.proto.stashResult = true

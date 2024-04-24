@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	gotrace "runtime/trace"
 	"sort"
 	"strconv"
@@ -2432,8 +2431,17 @@ func executeStmtWithTxn(ses FeSession,
 			// move finishTxnFunc() out to another defer so that if finishTxnFunc
 			// paniced, the following is still called.
 			_, txnOp = ses.GetTxnHandler().GetTxn()
-			txnOp.GetWorkspace().EndStatement()
+			if txnOp != nil {
+				//most of the cases, txnOp will not nil except that "set autocommit = 1"
+				//commit the txn immediately then the txnOp is nil.
+				txnOp.GetWorkspace().EndStatement()
+			}
 		}()
+	} else {
+		// statement management
+		_, txnOp := ses.GetTxnHandler().GetTxn()
+
+		execCtx.proc.TxnOperator = txnOp
 	}
 
 	//5. check plan within txn
@@ -2608,12 +2616,12 @@ func executeStmt(ses *Session,
 
 // execute query
 func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error) {
-	fmt.Fprintln(os.Stderr, "doComQuery", input.getSql())
-	defer func() {
-		if retErr != nil {
-			fmt.Fprintln(os.Stderr, "doComQuery", retErr)
-		}
-	}()
+	//fmt.Fprintln(os.Stderr, "doComQuery", input.getSql())
+	//defer func() {
+	//	if retErr != nil {
+	//		fmt.Fprintln(os.Stderr, "doComQuery", retErr)
+	//	}
+	//}()
 	ses.GetTxnCompileCtx().SetExecCtx(execCtx)
 	// set the batch buf for stream scan
 	var inMemStreamScan []*kafka.Message

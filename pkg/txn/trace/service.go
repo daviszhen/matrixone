@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/fagongzi/goetty/v2/buf"
+	"go.uber.org/zap"
+
 	"github.com/matrixorigin/matrixone/pkg/common/log"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/reuse"
@@ -40,7 +42,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"github.com/matrixorigin/matrixone/pkg/util/executor"
-	"go.uber.org/zap"
 )
 
 func WithEnable(
@@ -171,24 +172,24 @@ func NewService(
 	s.statementC = make(chan csvEvent, s.options.bufferSize)
 	s.statementBufC = make(chan *buffer, s.options.bufferSize)
 
-	if err := s.stopper.RunTask(s.handleTxnEvents); err != nil {
-		panic(err)
-	}
-	if err := s.stopper.RunTask(s.handleTxnActionEvents); err != nil {
-		panic(err)
-	}
-	if err := s.stopper.RunTask(s.handleDataEvents); err != nil {
-		panic(err)
-	}
-	if err := s.stopper.RunTask(s.handleLoad); err != nil {
-		panic(err)
-	}
-	if err := s.stopper.RunTask(s.handleStatements); err != nil {
-		panic(err)
-	}
-	if err := s.stopper.RunTask(s.watch); err != nil {
-		panic(err)
-	}
+	//if err := s.stopper.RunTask(s.handleTxnEvents); err != nil {
+	//	panic(err)
+	//}
+	//if err := s.stopper.RunTask(s.handleTxnActionEvents); err != nil {
+	//	panic(err)
+	//}
+	//if err := s.stopper.RunTask(s.handleDataEvents); err != nil {
+	//	panic(err)
+	//}
+	//if err := s.stopper.RunTask(s.handleLoad); err != nil {
+	//	panic(err)
+	//}
+	//if err := s.stopper.RunTask(s.handleStatements); err != nil {
+	//	panic(err)
+	//}
+	//if err := s.stopper.RunTask(s.watch); err != nil {
+	//	panic(err)
+	//}
 	return s, nil
 }
 

@@ -95,16 +95,32 @@ func finishTxnFunc(ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
 	//	logError(ses, ses.GetDebugString(), "recover from panic", zap.Error(recoverErr), zap.Error(execErr))
 	//}
 
-	if execErr == nil {
-		err = commitTxnFunc(ses, execCtx)
-		if err == nil {
-			return err
+	if execCtx.txnOpt.byCommit {
+		//commit the txn by the COMMIT statement
+		txnErr := ses.GetTxnHandler().Commit(execCtx)
+		if txnErr != nil {
+			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, txnErr)
 		}
-		// if commitTxnFunc failed, we will rollback the transaction.
-		execErr = err
-	}
+	} else if execCtx.txnOpt.byRollback {
+		//roll back the txn by the ROLLBACK statement
+		txnErr := ses.GetTxnHandler().Rollback(execCtx)
+		if txnErr != nil {
+			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, txnErr)
+			return txnErr
+		}
+	} else {
+		if execErr == nil {
+			err = commitTxnFunc(ses, execCtx)
+			if err == nil {
+				return err
+			}
+			// if commitTxnFunc failed, we will roll back the transaction.
+			execErr = err
+		}
 
-	return rollbackTxnFunc(ses, execErr, execCtx)
+		return rollbackTxnFunc(ses, execErr, execCtx)
+	}
+	return
 }
 
 type FeTxnOption struct {
@@ -184,11 +200,11 @@ func (th *Txn) GetTxnCtx() context.Context {
 }
 
 func (th *Txn) invalidateTxnUnsafe() {
-	if th.txnCtxCancel != nil {
-		th.txnCtxCancel()
-		th.txnCtxCancel = nil
-	}
-	th.txnCtx = nil
+	//if th.txnCtxCancel != nil {
+	//	th.txnCtxCancel()
+	//	th.txnCtxCancel = nil
+	//}
+	//th.txnCtx = nil
 	th.txnOp = nil
 	resetBits(&th.serverStatus, defaultServerStatus)
 	resetBits(&th.optionBits, defaultOptionBits)
@@ -477,12 +493,13 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 		}()
 	}
 	if th.txnOp != nil {
+		commitTs := th.txnOp.Txn().CommitTS
 		execCtx.ses.SetTxnId(th.txnOp.Txn().ID)
 		err = th.txnOp.Commit(ctx2)
 		if err != nil {
 			th.invalidateTxnUnsafe()
 		}
-		execCtx.ses.updateLastCommitTS(th.txnOp.Txn().CommitTS)
+		execCtx.ses.updateLastCommitTS(commitTs)
 	}
 	th.invalidateTxnUnsafe()
 	execCtx.ses.SetTxnId(dumpUUID[:])
@@ -749,9 +766,9 @@ func (th *Txn) SetTempEngine(te *memoryengine.Engine) {
 func (th *Txn) cancelTxnCtx() {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	if th.txnCtxCancel != nil {
-		th.txnCtxCancel()
-	}
+	//if th.txnCtxCancel != nil {
+	//	th.txnCtxCancel()
+	//}
 }
 
 func (th *Txn) OptionBitsIsSet(bit uint32) bool {

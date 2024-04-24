@@ -415,8 +415,8 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 
 		// 3. init temp-db to store temporary relations
-		txnCtx2, txnOp2 := cwft.ses.GetTxnHandler().GetTxn()
-		err = tempEngine.Create(txnCtx2, defines.TEMPORARY_DBNAME, txnOp2)
+		_, txnOp2 := cwft.ses.GetTxnHandler().GetTxn()
+		err = tempEngine.Create(execCtx.reqCtx, defines.TEMPORARY_DBNAME, txnOp2)
 		if err != nil {
 			return nil, err
 		}

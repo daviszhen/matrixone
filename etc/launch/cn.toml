@@ -8,6 +8,6 @@ level = "error"
 uuid = "dd1dccb4-4d3c-41f8-b482-5251dc7a41bf"
 port-base = 18000
 
-[observability]
-disableTrace = true
-disableMetric = true
+#[observability]
+#disableTrace = true
+#disableMetric = true
