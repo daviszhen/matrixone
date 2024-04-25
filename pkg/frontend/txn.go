@@ -15,7 +15,6 @@
 package frontend
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -537,10 +536,11 @@ func (th *Txn) Rollback(execCtx *ExecCtx) error {
 		//non derived statement
 		if th.txnOp != nil && !execCtx.ses.IsDerivedStmt() {
 			//incrStatement has been called
-			ok, id := th.calledIncrStmtUnsafe()
-			if ok && bytes.Equal(th.txnOp.Txn().ID, id) {
+			//ok, id := th.calledIncrStmtUnsafe()
+			//if ok && bytes.Equal(th.txnOp.Txn().ID, id) {
+			{
 				err = th.txnOp.GetWorkspace().RollbackLastStatement(th.txnCtx)
-				th.disableIncrStmtUnsafe()
+				//th.disableIncrStmtUnsafe()
 				if err != nil {
 					err4 := th.rollbackUnsafe(execCtx)
 					return errors.Join(err, err4)
