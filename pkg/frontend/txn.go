@@ -57,7 +57,7 @@ func rollbackTxnFunc(ses FeSession, execErr error, execCtx *ExecCtx) error {
 		ses.cleanCache()
 	}
 	logError(ses, ses.GetDebugString(), execErr.Error())
-	execCtx.stmtExecErr = execErr
+	execCtx.txnOpt.byRollback = execCtx.txnOpt.byRollback || isErrorRollbackWholeTxn(execErr)
 	txnErr := ses.GetTxnHandler().Rollback(execCtx)
 	if txnErr != nil {
 		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, txnErr)
@@ -129,7 +129,8 @@ type FeTxnOption struct {
 	autoCommit bool
 	//byCommit denotes the txn committed by the COMMIT
 	byCommit bool
-	//byRollback denotes the txn rolled back by the ROLLBACK
+	//byRollback denotes the txn rolled back by the ROLLBACK.
+	//or error types that need to roll back the whole txn.
 	byRollback bool
 }
 
@@ -509,10 +510,8 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 // the option bits decide the actual behavior
 func (th *Txn) Rollback(execCtx *ExecCtx) error {
 	var err error
-	var rollbackWholeTxn bool
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	rollbackWholeTxn = isErrorRollbackWholeTxn(execCtx.stmtExecErr) || execCtx.txnOpt.byRollback
 	/*
 			Rollback Rules:
 			1, if it is in single-statement mode (Case2):
@@ -523,7 +522,7 @@ func (th *Txn) Rollback(execCtx *ExecCtx) error {
 	*/
 	if !bitsIsSet(th.optionBits, OPTION_BEGIN|OPTION_NOT_AUTOCOMMIT) ||
 		th.inActiveTxnUnsafe() && NeedToBeCommittedInActiveTransaction(execCtx.stmt) ||
-		rollbackWholeTxn {
+		execCtx.txnOpt.byRollback {
 		//Case1.1: autocommit && not_begin
 		//Case1.2: (not_autocommit || begin) && activeTxn && needToBeCommitted
 		//Case1.3: the error that should rollback the whole txn
@@ -549,6 +548,13 @@ func (th *Txn) Rollback(execCtx *ExecCtx) error {
 		}
 	}
 	return err
+}
+
+func rollbackLastStmt(execCtx *ExecCtx, txnOp TxnOperator, execErr error) (rollRetErr error) {
+	if txnOp != nil && execErr != nil {
+		rollRetErr = txnOp.GetWorkspace().RollbackLastStatement(execCtx.reqCtx)
+	}
+	return
 }
 
 func (th *Txn) rollbackUnsafe(execCtx *ExecCtx) error {

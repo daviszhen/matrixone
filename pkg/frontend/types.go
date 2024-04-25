@@ -370,7 +370,6 @@ type ExecCtx struct {
 	proc            *process.Process
 	proto           MysqlProtocol
 	ses             FeSession
-	stmtExecErr     error
 	txnOpt          FeTxnOption
 	cws             []ComputationWrapper
 }

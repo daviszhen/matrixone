@@ -2361,89 +2361,128 @@ func executeStmtWithResponse(ses *Session,
 func executeStmtWithTxn(ses FeSession,
 	execCtx *ExecCtx,
 ) (err error) {
-	var autocommit bool
 	if !ses.IsDerivedStmt() {
-		//derived stmt shares the same txn with ancestor.
-		//it only executes select statements.
-
-		//7. pass or commit or rollback txn
-		// defer transaction state management.
-		defer func() {
-			err = finishTxnFunc(ses, err, execCtx)
-		}()
-
-		//1. start txn
-		//special BEGIN,COMMIT,ROLLBACK
-		beginStmt := false
-		switch execCtx.stmt.(type) {
-		case *tree.BeginTransaction:
-			execCtx.txnOpt.byBegin = true
-			beginStmt = true
-		case *tree.CommitTransaction:
-			execCtx.txnOpt.byCommit = true
-			return nil
-		case *tree.RollbackTransaction:
-			execCtx.txnOpt.byRollback = true
-			return nil
-		}
-
-		autocommit, err = autocommitValue(execCtx.reqCtx, ses)
-		if err != nil {
-			return err
-		}
-
-		execCtx.txnOpt.autoCommit = autocommit
-		err = ses.GetTxnHandler().Create(execCtx)
-		if err != nil {
-			return err
-		}
-
-		//skip BEGIN stmt
-		if beginStmt {
-			return err
-		}
-
-		if ses.GetTxnHandler() == nil {
-			panic("need txn handler")
-		}
-
-		//2. start statement on workspace
-		// statement management
-		_, txnOp := ses.GetTxnHandler().GetTxn()
-
-		execCtx.proc.TxnOperator = txnOp
-
-		txnOp.GetWorkspace().StartStatement()
-
-		//3. increase statement id
-		err = txnOp.GetWorkspace().IncrStatementID(execCtx.reqCtx, false)
-		if err != nil {
-			return err
-		}
-
-		//4. end statement on workspace
-		// defer Start/End Statement management, called after finishTxnFunc()
-		defer func() {
-			if ses.GetTxnHandler() == nil {
-				panic("need txn handler 2")
-			}
-
-			// move finishTxnFunc() out to another defer so that if finishTxnFunc
-			// paniced, the following is still called.
-			_, txnOp = ses.GetTxnHandler().GetTxn()
-			if txnOp != nil {
-				//most of the cases, txnOp will not nil except that "set autocommit = 1"
-				//commit the txn immediately then the txnOp is nil.
-				txnOp.GetWorkspace().EndStatement()
-			}
-		}()
+		err = executeStmtWithWorkspace(ses, execCtx)
 	} else {
-		// statement management
-		_, txnOp := ses.GetTxnHandler().GetTxn()
 
+		_, txnOp := ses.GetTxnHandler().GetTxn()
+		//refresh proc txnOp
 		execCtx.proc.TxnOperator = txnOp
+
+		err = dispatchStmt(ses, execCtx)
+	}
+	return
+}
+
+func executeStmtWithWorkspace(ses FeSession,
+	execCtx *ExecCtx,
+) (err error) {
+	if ses.IsDerivedStmt() {
+		return
+	}
+	var autocommit bool
+	//derived stmt shares the same txn with ancestor.
+	//it only executes select statements.
+
+	//7. pass or commit or rollback txn
+	// defer transaction state management.
+	defer func() {
+		err = finishTxnFunc(ses, err, execCtx)
+	}()
+
+	//1. start txn
+	//special BEGIN,COMMIT,ROLLBACK
+	beginStmt := false
+	switch execCtx.stmt.(type) {
+	case *tree.BeginTransaction:
+		execCtx.txnOpt.byBegin = true
+		beginStmt = true
+	case *tree.CommitTransaction:
+		execCtx.txnOpt.byCommit = true
+		return nil
+	case *tree.RollbackTransaction:
+		execCtx.txnOpt.byRollback = true
+		return nil
 	}
 
+	autocommit, err = autocommitValue(execCtx.reqCtx, ses)
+	if err != nil {
+		return err
+	}
+
+	execCtx.txnOpt.autoCommit = autocommit
+	err = ses.GetTxnHandler().Create(execCtx)
+	if err != nil {
+		return err
+	}
+
+	//skip BEGIN stmt
+	if beginStmt {
+		return err
+	}
+
+	if ses.GetTxnHandler() == nil {
+		panic("need txn handler")
+	}
+
+	_, txnOp := ses.GetTxnHandler().GetTxn()
+
+	//refresh proc txnOp
+	execCtx.proc.TxnOperator = txnOp
+
+	//!!!NOTE!!!: statement management
+	//2. start statement on workspace
+	txnOp.GetWorkspace().StartStatement()
+	//3. end statement on workspace
+	// defer Start/End Statement management, called after finishTxnFunc()
+	defer func() {
+		if ses.GetTxnHandler() == nil {
+			panic("need txn handler 2")
+		}
+
+		_, txnOp = ses.GetTxnHandler().GetTxn()
+		if txnOp != nil {
+			//most of the cases, txnOp will not nil except that "set autocommit = 1"
+			//commit the txn immediately then the txnOp is nil.
+			txnOp.GetWorkspace().EndStatement()
+		}
+	}()
+
+	err = executeStmtWithIncrStmt(ses, execCtx, txnOp)
+
+	return
+}
+
+func executeStmtWithIncrStmt(ses FeSession,
+	execCtx *ExecCtx,
+	txnOp TxnOperator,
+) (err error) {
+	if ses.IsDerivedStmt() {
+		return
+	}
+	//3. increase statement id
+	err = txnOp.GetWorkspace().IncrStatementID(execCtx.reqCtx, false)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if ses.GetTxnHandler() == nil {
+			panic("need txn handler 3")
+		}
+
+		//_, txnOp = ses.GetTxnHandler().GetTxn()
+		//if txnOp != nil {
+		//	err = rollbackLastStmt(execCtx, txnOp, err)
+		//}
+	}()
+
+	err = dispatchStmt(ses, execCtx)
+	return
+}
+
+func dispatchStmt(ses FeSession,
+	execCtx *ExecCtx) (err error) {
 	//5. check plan within txn
 	if execCtx.cw.Plan() != nil {
 		if checkModify(execCtx.cw.Plan(), ses) {
@@ -2465,6 +2504,7 @@ func executeStmtWithTxn(ses FeSession,
 	default:
 		return moerr.NewInternalError(execCtx.reqCtx, "no such session implementation")
 	}
+	return
 }
 
 func executeStmt(ses *Session,
