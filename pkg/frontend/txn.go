@@ -183,6 +183,12 @@ func InitTxn(storage engine.Engine, connCtx context.Context, txnCtx context.Cont
 	}
 }
 
+func (th *Txn) GetConnCtx() context.Context {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.connCtx
+}
+
 // CreateTxnCtx always return a valid txnCtx.
 // if there is none, it creates one.
 // if there is one, it returns previous one.
@@ -407,13 +413,13 @@ func (th *Txn) createTxnCtxUnsafe() {
 	}
 }
 
-func (th *Txn) GetTxn() (context.Context, TxnOperator) {
+func (th *Txn) GetTxn() TxnOperator {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	//if !th.inActiveTxnUnsafe() {
 	//	panic("invalid txn")
 	//}
-	return th.txnCtx, th.txnOp
+	return th.txnOp
 }
 
 // Commit commits the txn.

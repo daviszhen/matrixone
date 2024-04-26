@@ -179,7 +179,7 @@ var RecordStatement = func(ctx context.Context, ses *Session, proc *process.Proc
 	var txn TxnOperator
 	var err error
 	if handler := ses.GetTxnHandler(); handler.InActiveTxn() {
-		_, txn = handler.GetTxn()
+		txn = handler.GetTxn()
 		if err != nil {
 			return nil, err
 		}
@@ -276,7 +276,7 @@ var RecordStatementTxnID = func(ctx context.Context, fses FeSession) error {
 	if stm := motrace.StatementFromContext(ctx); ses != nil && stm != nil && stm.IsZeroTxnID() {
 		if handler := ses.GetTxnHandler(); handler.InActiveTxn() {
 			// simplify the logic of TxnOperator. refer to https://github.com/matrixorigin/matrixone/pull/13436#pullrequestreview-1779063200
-			_, txn = handler.GetTxn()
+			txn = handler.GetTxn()
 			if err != nil {
 				return err
 			}
@@ -290,7 +290,7 @@ var RecordStatementTxnID = func(ctx context.Context, fses FeSession) error {
 	if upSes := ses.upstream; upSes != nil && upSes.tStmt != nil && upSes.tStmt.IsZeroTxnID() /* not record txn-id */ {
 		// background session has valid txn
 		if handler := ses.GetTxnHandler(); handler.InActiveTxn() {
-			_, txn = handler.GetTxn()
+			txn = handler.GetTxn()
 			if err != nil {
 				return err
 			}
@@ -312,7 +312,7 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 	var db engine.Database
 	var err error
 
-	_, txnOp := ses.GetTxnHandler().GetTxn()
+	txnOp := ses.GetTxnHandler().GetTxn()
 	ctx := execCtx.reqCtx
 	// get db info as current account
 	if db, err = ses.GetStorage().Database(ctx, stmt.DbName, txnOp); err != nil {
@@ -482,7 +482,7 @@ func doUse(ctx context.Context, ses FeSession, db string) error {
 	var txn TxnOperator
 	var err error
 	var dbMeta engine.Database
-	_, txn = txnHandler.GetTxn()
+	txn = txnHandler.GetTxn()
 	//TODO: check meta data
 	if dbMeta, err = getGlobalPu().StorageEngine.Database(ctx, db, txn); err != nil {
 		//echo client. no such database
@@ -2365,7 +2365,7 @@ func executeStmtWithTxn(ses FeSession,
 		err = executeStmtWithWorkspace(ses, execCtx)
 	} else {
 
-		_, txnOp := ses.GetTxnHandler().GetTxn()
+		txnOp := ses.GetTxnHandler().GetTxn()
 		//refresh proc txnOp
 		execCtx.proc.TxnOperator = txnOp
 
@@ -2425,7 +2425,7 @@ func executeStmtWithWorkspace(ses FeSession,
 		panic("need txn handler")
 	}
 
-	_, txnOp := ses.GetTxnHandler().GetTxn()
+	txnOp := ses.GetTxnHandler().GetTxn()
 
 	//refresh proc txnOp
 	execCtx.proc.TxnOperator = txnOp
@@ -2440,7 +2440,7 @@ func executeStmtWithWorkspace(ses FeSession,
 			panic("need txn handler 2")
 		}
 
-		_, txnOp = ses.GetTxnHandler().GetTxn()
+		txnOp = ses.GetTxnHandler().GetTxn()
 		if txnOp != nil {
 			//most of the cases, txnOp will not nil except that "set autocommit = 1"
 			//commit the txn immediately then the txnOp is nil.

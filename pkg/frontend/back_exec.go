@@ -253,19 +253,6 @@ func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 			}
 		}
 
-		//execCtx := ExecCtx{
-		//	connCtx:    backSes.GetConnectContext(),
-		//	reqCtx:     requestCtx,
-		//	stmt:       stmt,
-		//	isLastStmt: i >= len(cws)-1,
-		//	tenant:     tenant,
-		//	userName:   userNameOnly,
-		//	sqlOfStmt:  sqlRecord[i],
-		//	cw:         cw,
-		//	proc:       proc,
-		//	ses:        backSes,
-		//	cws:        cws,
-		//}
 		execCtx.stmt = stmt
 		execCtx.isLastStmt = i >= len(cws)-1
 		execCtx.tenant = tenant
@@ -283,71 +270,6 @@ func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 
 	return nil
 }
-
-//
-//func executeStmtInBackWithTxn(requestCtx context.Context,
-//	backSes *backSession,
-//	execCtx *ExecCtx,
-//) (err error) {
-//	//6.
-//	defer func() {
-//		err = finishTxnFunc(requestCtx, backSes, err, execCtx)
-//	}()
-//
-//	//1. start txn
-//	//special BEGIN,COMMIT,ROLLBACK
-//	beginStmt := false
-//	switch execCtx.stmt.(type) {
-//	case *tree.BeginTransaction:
-//		execCtx.txnOpt.byBegin = true
-//		beginStmt = true
-//	case *tree.CommitTransaction:
-//		execCtx.txnOpt.byCommit = true
-//		return nil
-//	case *tree.RollbackTransaction:
-//		execCtx.txnOpt.byRollback = true
-//		return nil
-//	}
-//
-//	execCtx.txnOpt.autoCommit = true
-//	err = backSes.GetTxnHandler().Create(execCtx)
-//	if err != nil {
-//		return err
-//	}
-//
-//	//skip BEGIN stmt
-//	if beginStmt {
-//		return err
-//	}
-//
-//	// statement management
-//	_, txnOp := backSes.GetTxnHandler().GetTxn()
-//
-//	//2.
-//	if !backSes.IsDerivedStmt() {
-//		txnOp.GetWorkspace().StartStatement()
-//	}
-//
-//	//3. increase statement id
-//	err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
-//	if err != nil {
-//		return err
-//	}
-//
-//	//4.  defer Start/End Statement management, called after finishTxnFunc()
-//	defer func() {
-//		// move finishTxnFunc() out to another defer so that if finishTxnFunc
-//		// paniced, the following is still called.
-//		_, txnOp = backSes.GetTxnHandler().GetTxn()
-//		//non derived statement
-//		if !backSes.IsDerivedStmt() {
-//			//startStatement has been called
-//			txnOp.GetWorkspace().EndStatement()
-//		}
-//	}()
-//	//5.
-//	return executeStmtInBack(requestCtx, backSes, execCtx)
-//}
 
 func executeStmtInBack(backSes *backSession,
 	execCtx *ExecCtx,
@@ -480,10 +402,8 @@ var NewBackgroundExec = func(
 	reqCtx context.Context,
 	upstream FeSession,
 	mp *mpool.MPool) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, upstream.GetConnectContext(), nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, upstream.GetTxnHandler().GetConnCtx(), nil, nil)
 	backSes := &backSession{
-		//requestCtx: reqCtx,
-		connectCtx: upstream.GetConnectContext(),
 		feSessionImpl: feSessionImpl{
 			pool:           mp,
 			proto:          &FakeProtocol{},
@@ -656,8 +576,6 @@ func getResultSet(ctx context.Context, bh BackgroundExec) ([]ExecResult, error) 
 
 type backSession struct {
 	feSessionImpl
-	//requestCtx context.Context
-	connectCtx context.Context
 }
 
 func (backSes *backSession) getCachedPlan(sql string) *cachedPlan {
@@ -666,8 +584,6 @@ func (backSes *backSession) getCachedPlan(sql string) *cachedPlan {
 
 func (backSes *backSession) Close() {
 	backSes.feSessionImpl.Close()
-	//backSes.requestCtx = nil
-	backSes.connectCtx = nil
 }
 
 func (backSes *backSession) Clear() {
@@ -692,7 +608,7 @@ func (backSes *backSession) GetTxnInfo() string {
 	if txnH == nil {
 		return ""
 	}
-	_, txnOp := txnH.GetTxn()
+	txnOp := txnH.GetTxn()
 	if txnOp == nil {
 		return ""
 	}
@@ -763,10 +679,6 @@ func (backSes *backSession) GetRawBatchBackgroundExec(ctx context.Context) Backg
 	//TODO implement me
 	panic("implement me")
 }
-
-//func (backSes *backSession) SetRequestContext(ctx context.Context) {
-//	//backSes.requestCtx = ctx
-//}
 
 func (backSes *backSession) GetConnectionID() uint32 {
 	return 0
@@ -878,10 +790,6 @@ func (backSes *backSession) IfInitedTempEngine() bool {
 	return false
 }
 
-func (backSes *backSession) GetConnectContext() context.Context {
-	return backSes.connectCtx
-}
-
 func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error) {
 	return nil, nil, moerr.NewInternalError(context.Background(), "do not support user defined var in background exec")
 }
@@ -924,10 +832,6 @@ func (backSes *backSession) GetUserName() string {
 func (backSes *backSession) GetStatsCache() *plan2.StatsCache {
 	return nil
 }
-
-//func (backSes *backSession) GetRequestContext() context.Context {
-//	return backSes.requestCtx
-//}
 
 func (backSes *backSession) GetTimeZone() *time.Location {
 	return backSes.timeZone

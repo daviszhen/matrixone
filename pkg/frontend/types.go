@@ -288,7 +288,6 @@ type FeSession interface {
 	getGlobalSystemVariableValue(ctx context.Context, name string) (interface{}, error)
 	GetSessionVar(ctx context.Context, name string) (interface{}, error)
 	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
-	GetConnectContext() context.Context
 	IfInitedTempEngine() bool
 	GetTempTableStorage() *memorystorage.Storage
 	GetDebugString() string

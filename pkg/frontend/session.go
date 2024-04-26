@@ -126,9 +126,6 @@ type Session struct {
 	prepareStmts map[string]*PrepareStmt
 	lastStmtId   uint32
 
-	//requestCtx context.Context
-	connectCtx context.Context
-
 	priv *privilege
 
 	errInfo *errInfo
@@ -462,7 +459,7 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 		if !sharedTxnHandler.InActiveTxn() {
 			panic("shared txn is invalid")
 		}
-		txnCtx, txnOp = sharedTxnHandler.GetTxn()
+		txnOp = sharedTxnHandler.GetTxn()
 	}
 	txnHandler := InitTxn(getGlobalPu().StorageEngine, connCtx, txnCtx, txnOp)
 
@@ -564,7 +561,6 @@ func (ses *Session) Close() {
 		stmt.Close()
 	}
 	ses.prepareStmts = nil
-	ses.connectCtx = nil
 	ses.allResultSet = nil
 	ses.tenant = nil
 	ses.priv = nil
@@ -783,10 +779,10 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 	var txnCtx context.Context
 	var txnOp TxnOperator
 	if ses.GetTxnHandler() != nil {
-		txnCtx, txnOp = ses.GetTxnHandler().GetTxn()
+		txnOp = ses.GetTxnHandler().GetTxn()
 	}
 
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetConnectContext(), txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), txnCtx, txnOp)
 	var callback func(interface{}, *batch.Batch) error
 	if newRawBatch {
 		callback = batchFetcher2
@@ -794,8 +790,6 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		callback = fakeDataSetFetcher2
 	}
 	backSes := &backSession{
-		//requestCtx: ctx,
-		connectCtx: ses.connectCtx,
 		feSessionImpl: feSessionImpl{
 			pool:           ses.pool,
 			proto:          &FakeProtocol{},
@@ -831,10 +825,8 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetConnectContext(), nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), nil, nil)
 	backSes := &backSession{
-		//requestCtx: ses.GetRequestContext(),
-		connectCtx: ses.GetConnectContext(),
 		feSessionImpl: feSessionImpl{
 			pool:           ses.GetMemPool(),
 			proto:          &FakeProtocol{},
@@ -959,33 +951,6 @@ func (ses *Session) GetLastInsertID() uint64 {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	return ses.lastInsertID
-}
-
-//func (ses *Session) SetRequestContext(reqCtx context.Context) {
-//	ses.mu.Lock()
-//	defer ses.mu.Unlock()
-//	ses.requestCtx = reqCtx
-//}
-
-//func (ses *Session) GetRequestContext() context.Context {
-//	if ses == nil {
-//		panic("nil session")
-//	}
-//	ses.mu.Lock()
-//	defer ses.mu.Unlock()
-//	return ses.requestCtx
-//}
-
-func (ses *Session) SetConnectContext(conn context.Context) {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	ses.connectCtx = conn
-}
-
-func (ses *Session) GetConnectContext() context.Context {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	return ses.connectCtx
 }
 
 func (ses *Session) SetCmd(cmd CommandType) {
@@ -1198,7 +1163,7 @@ func (ses *Session) GetTxnInfo() string {
 	if txnH == nil {
 		return ""
 	}
-	_, txnOp := txnH.GetTxn()
+	txnOp := txnH.GetTxn()
 	if txnOp == nil {
 		return ""
 	}

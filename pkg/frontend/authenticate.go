@@ -7767,7 +7767,6 @@ func InitSysTenantOld(ctx context.Context, aicm *defines.AutoIncrCacheManager, f
 		feSessionImpl: feSessionImpl{
 			proto: &FakeProtocol{},
 		},
-		connectCtx: ctx,
 
 		seqCurValues: make(map[uint64]string),
 		seqLastValue: new(string),

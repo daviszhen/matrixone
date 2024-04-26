@@ -241,36 +241,6 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 	}
 
-	//txnHandler := cwft.ses.GetTxnHandler()
-	//var txnCtx context.Context
-	//txnCtx, cwft.proc.TxnOperator = txnHandler.GetTxn()
-	//
-	//txnCtx = statistic.EnsureStatsInfoCanBeFound(txnCtx, requestCtx)
-
-	// Increase the statement ID and update snapshot TS before build plan, because the
-	// snapshot TS is used when build plan.
-	// NB: In internal executor, we should also do the same action, which is increasing
-	// statement ID and updating snapshot TS.
-	// See `func (exec *txnExecutor) Exec(sql string)` for details.
-	//txnOp := cwft.proc.TxnOperator
-	//cwft.ses.SetTxnId(txnOp.Txn().ID)
-	//non derived statement
-	//if txnOp != nil && !cwft.ses.IsDerivedStmt() {
-	//	//startStatement has been called
-	//	ok, _ := cwft.ses.GetTxnHandler().calledStartStmt()
-	//	if !ok {
-	//		txnOp.GetWorkspace().StartStatement()
-	//		cwft.ses.GetTxnHandler().enableStartStmt(txnOp.Txn().ID)
-	//	}
-	//
-	//	//increase statement id
-	//	err = txnOp.GetWorkspace().IncrStatementID(requestCtx, false)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	cwft.ses.GetTxnHandler().enableIncrStmt(txnOp.Txn().ID)
-	//}
-
 	cacheHit := cwft.plan != nil
 	if !cacheHit {
 		cwft.plan, err = buildPlan(execCtx.reqCtx, cwft.ses, cwft.ses.GetTxnCompileCtx(), cwft.stmt)
@@ -415,7 +385,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
 
 		// 3. init temp-db to store temporary relations
-		_, txnOp2 := cwft.ses.GetTxnHandler().GetTxn()
+		txnOp2 := cwft.ses.GetTxnHandler().GetTxn()
 		err = tempEngine.Create(execCtx.reqCtx, defines.TEMPORARY_DBNAME, txnOp2)
 		if err != nil {
 			return nil, err

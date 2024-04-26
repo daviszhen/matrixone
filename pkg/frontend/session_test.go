@@ -284,7 +284,7 @@ func TestSession_TxnBegin(t *testing.T) {
 		convey.So(err, convey.ShouldBeNil)
 		err = ses.GetTxnHandler().TxnCommit()
 		convey.So(err, convey.ShouldBeNil)
-		_, _, err = ses.GetTxnHandler().GetTxn()
+		_ = ses.GetTxnHandler().GetTxn()
 		convey.So(err, convey.ShouldBeNil)
 
 		err = ses.GetTxnHandler().TxnCommit()

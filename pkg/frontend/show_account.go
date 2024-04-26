@@ -160,7 +160,7 @@ func requestStorageUsage(ctx context.Context, ses *Session, accIds [][]int32) (r
 	}
 
 	var txnOperator client.TxnOperator
-	_, txnOperator = ses.txnHandler.GetTxn()
+	txnOperator = ses.txnHandler.GetTxn()
 
 	// create a new proc for `handler`
 	proc := process.New(ctx, ses.proc.GetMPool(),
