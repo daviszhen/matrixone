@@ -143,33 +143,31 @@ const (
 	defaultOptionBits   uint32 = OPTION_AUTOCOMMIT
 )
 
-type Txn struct {
+type TxnHandler struct {
+	mu sync.Mutex
+
 	storage       engine.Engine
 	tempStorage   *memorystorage.Storage
-	tempTnSerivce *metadata.TNService
+	tempTnService *metadata.TNService
 	tempEngine    *memoryengine.Engine
 	txnOp         TxnOperator
 
 	//connCtx is the ancestor of the txnCtx.
-	//it is initialized at the Txn object created and
+	//it is initialized at the TxnHandler object created and
 	//exists always.
+	//it starts from the routineCtx.
 	connCtx context.Context
 
 	// it is for the transaction and different from the requestCtx.
 	// it is created before the transaction is started and
-	// released after the transaction is commit or rollback.
-	// the lifetime of txnCtx is longer than the requestCtx.
-	// the timeout of txnCtx is from the FrontendParameters.SessionTimeout with
-	// default 24 hours.
-	txnCtx       context.Context
-	txnCtxCancel context.CancelFunc
+	// is not released after the transaction is commit or rollback.
+	// the lifetime of txnCtx is longer than the requestCtx and
+	// the same as the connCtx.
+	// it inherits the connCtx.
+	// it can not be canceled at the KillQuery
+	txnCtx context.Context
 
-	shareTxn           bool
-	mu                 sync.Mutex
-	hasCalledStartStmt bool
-	prevTxnId          []byte
-	hasCalledIncrStmt  bool
-	prevIncrTxnId      []byte
+	shareTxn bool
 
 	//the server status
 	serverStatus uint32
@@ -178,8 +176,8 @@ type Txn struct {
 	optionBits uint32
 }
 
-func InitTxn(storage engine.Engine, connCtx context.Context, txnOp TxnOperator) *Txn {
-	ret := &Txn{
+func InitTxnHandler(storage engine.Engine, connCtx context.Context, txnOp TxnOperator) *TxnHandler {
+	ret := &TxnHandler{
 		storage:      &engine.EntireEngine{Engine: storage},
 		connCtx:      connCtx,
 		txnOp:        txnOp,
@@ -187,46 +185,49 @@ func InitTxn(storage engine.Engine, connCtx context.Context, txnOp TxnOperator) 
 		serverStatus: defaultServerStatus,
 		optionBits:   defaultOptionBits,
 	}
-	ret.txnCtx, ret.txnCtxCancel = context.WithCancel(connCtx)
+	ret.txnCtx, _ = context.WithCancel(connCtx)
 	return ret
 }
 
-func (th *Txn) GetConnCtx() context.Context {
+func (th *TxnHandler) Close() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	th.storage = nil
+	th.tempStorage = nil
+	th.tempTnService = nil
+	th.tempEngine = nil
+	th.txnOp = nil
+	th.connCtx = nil
+	th.txnCtx = nil
+}
+
+func (th *TxnHandler) GetConnCtx() context.Context {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.connCtx
 }
 
-// GetTxnCtx should be called after the CreateTxnCtx
-func (th *Txn) GetTxnCtx() context.Context {
+func (th *TxnHandler) GetTxnCtx() context.Context {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.txnCtx
 }
 
-func (th *Txn) invalidateTxnUnsafe() {
-	//if th.txnCtxCancel != nil {
-	//	th.txnCtxCancel()
-	//	th.txnCtxCancel = nil
-	//}
-	//th.txnCtx = nil
+func (th *TxnHandler) invalidateTxnUnsafe() {
 	th.txnOp = nil
 	resetBits(&th.serverStatus, defaultServerStatus)
 	resetBits(&th.optionBits, defaultOptionBits)
 }
 
-func (th *Txn) InActiveTxn() bool {
+func (th *TxnHandler) InActiveTxn() bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.inActiveTxnUnsafe()
 }
 
-// inActiveTxnUnsafe can not be used outside the Txn.
+// inActiveTxnUnsafe can not be used outside the TxnHandler.
 // refresh server status also
-func (th *Txn) inActiveTxnUnsafe() bool {
-	//if th.txnOp == nil && th.txnCtx != nil {
-	//	panic("txnOp == nil and txnCtx != nil")
-	//}
+func (th *TxnHandler) inActiveTxnUnsafe() bool {
 	if th.txnOp != nil && th.txnCtx == nil {
 		panic("txnOp != nil and txnCtx == nil")
 	}
@@ -242,7 +243,7 @@ func (th *Txn) inActiveTxnUnsafe() bool {
 
 // Create starts a new txn.
 // option bits decide the actual behaviour
-func (th *Txn) Create(execCtx *ExecCtx) error {
+func (th *TxnHandler) Create(execCtx *ExecCtx) error {
 	var err error
 	th.mu.Lock()
 	defer th.mu.Unlock()
@@ -277,7 +278,7 @@ func (th *Txn) Create(execCtx *ExecCtx) error {
 
 // starts a new txn.
 // if there is a txn existed, commit it before creating a new one.
-func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
+func (th *TxnHandler) createUnsafe(execCtx *ExecCtx) error {
 	var err error
 	defer th.inActiveTxnUnsafe()
 	if th.shareTxn {
@@ -312,14 +313,13 @@ func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
-	storage := th.storage
 	var accId uint32
 	accId, err = defines.GetAccountId(execCtx.reqCtx)
 	if err != nil {
 		return err
 	}
 	tempCtx := defines.AttachAccountId(th.txnCtx, accId)
-	err = storage.New(tempCtx, th.txnOp)
+	err = th.storage.New(tempCtx, th.txnOp)
 	if err != nil {
 		execCtx.ses.SetTxnId(dumpUUID[:])
 	} else {
@@ -329,7 +329,7 @@ func (th *Txn) createUnsafe(execCtx *ExecCtx) error {
 }
 
 // createTxnOpUnsafe creates a new txn operator using TxnClient. Should not be called outside txn
-func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
+func (th *TxnHandler) createTxnOpUnsafe(execCtx *ExecCtx) error {
 	var err error
 	if getGlobalPu().TxnClient == nil {
 		panic("must set txn client")
@@ -404,18 +404,15 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 	return err
 }
 
-func (th *Txn) GetTxn() TxnOperator {
+func (th *TxnHandler) GetTxn() TxnOperator {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	//if !th.inActiveTxnUnsafe() {
-	//	panic("invalid txn")
-	//}
 	return th.txnOp
 }
 
 // Commit commits the txn.
 // option bits decide the actual commit behaviour
-func (th *Txn) Commit(execCtx *ExecCtx) error {
+func (th *TxnHandler) Commit(execCtx *ExecCtx) error {
 	var err error
 	th.mu.Lock()
 	defer th.mu.Unlock()
@@ -439,7 +436,7 @@ func (th *Txn) Commit(execCtx *ExecCtx) error {
 	return nil
 }
 
-func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
+func (th *TxnHandler) commitUnsafe(execCtx *ExecCtx) error {
 	_, span := trace.Start(execCtx.reqCtx, "TxnHandler.CommitTxn",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(execCtx.ses.GetTxnId(), execCtx.ses.GetStmtId(), execCtx.ses.GetSqlOfStmt()))
@@ -505,7 +502,7 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 
 // Rollback rolls back the txn
 // the option bits decide the actual behavior
-func (th *Txn) Rollback(execCtx *ExecCtx) error {
+func (th *TxnHandler) Rollback(execCtx *ExecCtx) error {
 	var err error
 	th.mu.Lock()
 	defer th.mu.Unlock()
@@ -531,30 +528,17 @@ func (th *Txn) Rollback(execCtx *ExecCtx) error {
 
 		//non derived statement
 		if th.txnOp != nil && !execCtx.ses.IsDerivedStmt() {
-			//incrStatement has been called
-			//ok, id := th.calledIncrStmtUnsafe()
-			//if ok && bytes.Equal(th.txnOp.Txn().ID, id) {
-			{
-				err = th.txnOp.GetWorkspace().RollbackLastStatement(th.txnCtx)
-				//th.disableIncrStmtUnsafe()
-				if err != nil {
-					err4 := th.rollbackUnsafe(execCtx)
-					return errors.Join(err, err4)
-				}
+			err = th.txnOp.GetWorkspace().RollbackLastStatement(th.txnCtx)
+			if err != nil {
+				err4 := th.rollbackUnsafe(execCtx)
+				return errors.Join(err, err4)
 			}
 		}
 	}
 	return err
 }
 
-func rollbackLastStmt(execCtx *ExecCtx, txnOp TxnOperator, execErr error) (rollRetErr error) {
-	if txnOp != nil && execErr != nil {
-		rollRetErr = txnOp.GetWorkspace().RollbackLastStatement(execCtx.reqCtx)
-	}
-	return
-}
-
-func (th *Txn) rollbackUnsafe(execCtx *ExecCtx) error {
+func (th *TxnHandler) rollbackUnsafe(execCtx *ExecCtx) error {
 	_, span := trace.Start(execCtx.reqCtx, "TxnHandler.RollbackTxn",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(execCtx.ses.GetTxnId(), execCtx.ses.GetStmtId(), execCtx.ses.GetSqlOfStmt()))
@@ -613,10 +597,9 @@ func (th *Txn) rollbackUnsafe(execCtx *ExecCtx) error {
 /*
 SetAutocommit sets the value of the system variable 'autocommit'.
 
-The rule is that we can not execute the statement 'set parameter = value' in
-an active transaction whichever it is started by BEGIN or in 'set autocommit = 0;'.
+It commits the active transaction if the old value is false and the new value is true.
 */
-func (th *Txn) SetAutocommit(execCtx *ExecCtx, old, on bool) error {
+func (th *TxnHandler) SetAutocommit(execCtx *ExecCtx, old, on bool) error {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	//on -> on : do nothing
@@ -646,7 +629,7 @@ func (th *Txn) SetAutocommit(execCtx *ExecCtx, old, on bool) error {
 	return nil
 }
 
-func (th *Txn) setAutocommitOn() {
+func (th *TxnHandler) setAutocommitOn() {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	clearBits(&th.optionBits, OPTION_BEGIN|OPTION_NOT_AUTOCOMMIT)
@@ -654,135 +637,74 @@ func (th *Txn) setAutocommitOn() {
 	setBits(&th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT))
 }
 
-func (th *Txn) calledIncrStmtUnsafe() (bool, []byte) {
-	return th.hasCalledIncrStmt, th.prevTxnId
-}
-
-func (th *Txn) disableIncrStmtUnsafe() {
-	th.hasCalledIncrStmt = false
-	th.prevIncrTxnId = nil
-}
-
-func (th *Txn) enableIncrStmtUnsafe(txnId []byte) {
-	th.hasCalledIncrStmt = true
-	th.prevIncrTxnId = txnId
-}
-
-func (th *Txn) enableIncrStmt(txnId []byte) {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	th.hasCalledIncrStmt = true
-	th.prevIncrTxnId = txnId
-}
-
-func (th *Txn) IsShareTxn() bool {
+func (th *TxnHandler) IsShareTxn() bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.shareTxn
 }
 
-func (th *Txn) calledStartStmt() (bool, []byte) {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	return th.calledStartStmtUnsafe()
-}
-
-func (th *Txn) calledStartStmtUnsafe() (bool, []byte) {
-	return th.hasCalledStartStmt, th.prevTxnId
-}
-
-func (th *Txn) enableStartStmt(txnId []byte) {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	th.enableStartStmtUnsafe(txnId)
-}
-
-func (th *Txn) enableStartStmtUnsafe(txnId []byte) {
-	th.hasCalledStartStmt = true
-	th.prevTxnId = txnId
-}
-
-func (th *Txn) disableStartStmt() {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	th.disableStartStmtUnsafe()
-}
-
-func (th *Txn) disableStartStmtUnsafe() {
-	th.hasCalledStartStmt = false
-	th.prevTxnId = nil
-}
-
-func (th *Txn) SetOptionBits(bits uint32) {
+func (th *TxnHandler) SetOptionBits(bits uint32) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	setBits(&th.optionBits, bits)
 }
 
-func (th *Txn) GetOptionBits() uint32 {
+func (th *TxnHandler) GetOptionBits() uint32 {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.optionBits
 }
 
-func (th *Txn) SetServerStatus(status uint16) {
+func (th *TxnHandler) SetServerStatus(status uint16) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	setBits(&th.serverStatus, uint32(status))
 }
 
-func (th *Txn) GetServerStatus() uint16 {
+func (th *TxnHandler) GetServerStatus() uint16 {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return uint16(th.serverStatus)
 }
 
-func (th *Txn) InMultiStmtTransactionMode() bool {
+func (th *TxnHandler) InMultiStmtTransactionMode() bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return bitsIsSet(th.optionBits, OPTION_NOT_AUTOCOMMIT|OPTION_BEGIN)
 }
 
-func (th *Txn) GetStorage() engine.Engine {
+func (th *TxnHandler) GetStorage() engine.Engine {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.storage
 }
 
-func (th *Txn) HasTempEngine() bool {
+func (th *TxnHandler) HasTempEngine() bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.hasTempEngineUnsafe()
 }
 
-func (th *Txn) hasTempEngineUnsafe() bool {
+func (th *TxnHandler) hasTempEngineUnsafe() bool {
 	if entireEng, ok := th.storage.(*engine.EntireEngine); ok {
 		return entireEng.TempEngine != nil
 	}
 	return false
 }
 
-func (th *Txn) cancelTxnCtx() {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	//if th.txnCtxCancel != nil {
-	//	th.txnCtxCancel()
-	//}
-}
-
-func (th *Txn) OptionBitsIsSet(bit uint32) bool {
+func (th *TxnHandler) OptionBitsIsSet(bit uint32) bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return bitsIsSet(th.optionBits, bit)
 }
 
-func (th *Txn) CreateTempStorage(ck clock.Clock) error {
+func (th *TxnHandler) CreateTempStorage(ck clock.Clock) error {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.createTempStorageUnsafe(ck)
 }
 
-func (th *Txn) GetTempStorage() *memorystorage.Storage {
+func (th *TxnHandler) GetTempStorage() *memorystorage.Storage {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	if th.tempStorage == nil {
@@ -791,7 +713,7 @@ func (th *Txn) GetTempStorage() *memorystorage.Storage {
 	return th.tempStorage
 }
 
-func (th *Txn) createTempStorageUnsafe(ck clock.Clock) error {
+func (th *TxnHandler) createTempStorageUnsafe(ck clock.Clock) error {
 	// Without concurrency, there is no potential for data competition
 	// Arbitrary value is OK since it's single sharded. Let's use 0xbeef
 	// suggested by @reusee
@@ -807,7 +729,7 @@ func (th *Txn) createTempStorageUnsafe(ck clock.Clock) error {
 	if err != nil {
 		return err
 	}
-	th.tempTnSerivce = &metadata.TNService{
+	th.tempTnService = &metadata.TNService{
 		ServiceID:         uid.String(),
 		TxnServiceAddress: tnAddr,
 		Shards:            shards,
@@ -825,7 +747,7 @@ func (th *Txn) createTempStorageUnsafe(ck clock.Clock) error {
 	return nil
 }
 
-func (th *Txn) CreateTempEngine() {
+func (th *TxnHandler) CreateTempEngine() {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 
@@ -840,13 +762,13 @@ func (th *Txn) CreateTempEngine() {
 			0,
 			clusterservice.WithDisableRefresh(),
 			clusterservice.WithServices(nil, []metadata.TNService{
-				*th.tempTnSerivce,
+				*th.tempTnService,
 			})),
 	)
 	updateTempEngine(th.storage, th.tempEngine)
 }
 
-func (th *Txn) GetTempEngine() *memoryengine.Engine {
+func (th *TxnHandler) GetTempEngine() *memoryengine.Engine {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.tempEngine

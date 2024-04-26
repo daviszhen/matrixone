@@ -438,7 +438,7 @@ func (e *errInfo) length() int {
 	return len(e.codes)
 }
 
-func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *Txn) *Session {
+func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *TxnHandler) *Session {
 	//if the sharedTxnHandler exists,we use its txnCtx and txnOperator in this session.
 	//Currently, we only use the sharedTxnHandler in the background session.
 	var txnOp TxnOperator
@@ -449,7 +449,7 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 		}
 		txnOp = sharedTxnHandler.GetTxn()
 	}
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, connCtx, txnOp)
+	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, connCtx, txnOp)
 
 	ses := &Session{
 		feSessionImpl: feSessionImpl{
@@ -532,8 +532,7 @@ func (ses *Session) Close() {
 	ses.data = nil
 	ses.ep = nil
 	if ses.txnHandler != nil {
-		ses.txnHandler.storage = nil
-		ses.txnHandler.tempStorage = nil
+		ses.txnHandler.Close()
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {
@@ -711,7 +710,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		txnOp = ses.GetTxnHandler().GetTxn()
 	}
 
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), txnOp)
+	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), txnOp)
 	var callback func(interface{}, *batch.Batch) error
 	if newRawBatch {
 		callback = batchFetcher2
@@ -754,7 +753,7 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), nil)
+	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), nil)
 	backSes := &backSession{
 		feSessionImpl: feSessionImpl{
 			pool:           ses.GetMemPool(),

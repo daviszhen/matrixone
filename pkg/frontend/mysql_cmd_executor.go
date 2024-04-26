@@ -429,6 +429,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	for j := 0; j < n; j++ { //row index
 		if ec.needExportToFile() {
 			select {
+			//TODO: killQuery
 			case <-txnCtx.Done():
 				return nil
 			default:

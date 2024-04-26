@@ -46,7 +46,7 @@ import (
 
 type TxnCompilerContext struct {
 	dbName               string
-	txnHandler           *Txn
+	txnHandler           *TxnHandler
 	ses                  FeSession
 	proc                 *process.Process
 	buildAlterView       bool
@@ -77,7 +77,7 @@ func (tcc *TxnCompilerContext) GetStatsCache() *plan2.StatsCache {
 	return tcc.ses.GetStatsCache()
 }
 
-func InitTxnCompilerContext(txn *Txn, db string) *TxnCompilerContext {
+func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
 	return &TxnCompilerContext{txnHandler: txn, dbName: db}
 }
 
@@ -107,7 +107,7 @@ func (tcc *TxnCompilerContext) GetSession() FeSession {
 	return tcc.ses
 }
 
-func (tcc *TxnCompilerContext) GetTxnHandler() *Txn {
+func (tcc *TxnCompilerContext) GetTxnHandler() *TxnHandler {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
 	return tcc.txnHandler

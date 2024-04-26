@@ -349,10 +349,7 @@ func (rt *Routine) killQuery(killMyself bool, statementId string) {
 		if ses != nil {
 			ses.SetQueryInExecute(false)
 			logutil.Infof("set query status on the connection %d", rt.getConnectionID())
-			txnHandler := ses.GetTxnHandler()
-			if txnHandler != nil {
-				txnHandler.cancelTxnCtx()
-			}
+			//TODO: cancel the execCtx
 		}
 	}
 }

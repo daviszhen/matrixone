@@ -293,7 +293,7 @@ type FeSession interface {
 	GetSqlOfStmt() string
 	updateLastCommitTS(ts timestamp.Timestamp)
 	GetMysqlProtocol() MysqlProtocol
-	GetTxnHandler() *Txn
+	GetTxnHandler() *TxnHandler
 	GetDatabaseName() string
 	SetDatabaseName(db string)
 	GetMysqlResultSet() *MysqlResultSet
@@ -370,7 +370,7 @@ type feSessionImpl struct {
 	buf           *buffer.Buffer
 	stmtProfile   process.StmtProfile
 	tenant        *TenantInfo
-	txnHandler    *Txn
+	txnHandler    *TxnHandler
 	txnCompileCtx *TxnCompilerContext
 	mrs           *MysqlResultSet
 	//it gets the result set from the pipeline and send it to the client
@@ -547,7 +547,7 @@ func (ses *feSessionImpl) SetTenantInfo(ti *TenantInfo) {
 	ses.tenant = ti
 }
 
-func (ses *feSessionImpl) GetTxnHandler() *Txn {
+func (ses *feSessionImpl) GetTxnHandler() *TxnHandler {
 	return ses.txnHandler
 }
 

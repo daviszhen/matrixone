@@ -399,7 +399,7 @@ var NewBackgroundExec = func(
 	reqCtx context.Context,
 	upstream FeSession,
 	mp *mpool.MPool) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, upstream.GetTxnHandler().GetConnCtx(), nil)
+	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, upstream.GetTxnHandler().GetConnCtx(), nil)
 	backSes := &backSession{
 		feSessionImpl: feSessionImpl{
 			pool:           mp,
