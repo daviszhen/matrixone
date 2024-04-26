@@ -38,7 +38,7 @@ func executeStatusStmt(ses *Session, execCtx *ExecCtx) (err error) {
 	case *tree.Select:
 		if ep.needExportToFile() {
 
-			columns, err = execCtx.cw.GetColumns()
+			columns, err = execCtx.cw.GetColumns(execCtx.reqCtx)
 			if err != nil {
 				logError(ses, ses.GetDebugString(),
 					"Failed to get columns from computation handler",

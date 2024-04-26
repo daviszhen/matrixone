@@ -29,7 +29,7 @@ func executeResultRowStmtInBack(backSes *backSession,
 	var columns []interface{}
 	mrs := backSes.GetMysqlResultSet()
 	// cw.Compile might rewrite sql, here we fetch the latest version
-	columns, err = execCtx.cw.GetColumns()
+	columns, err = execCtx.cw.GetColumns(execCtx.reqCtx)
 	if err != nil {
 		logError(backSes, backSes.GetDebugString(),
 			"Failed to get columns from computation handler",

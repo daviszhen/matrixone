@@ -187,6 +187,8 @@ type Protocol interface {
 	incDebugCount(int)
 
 	resetDebugCount() []uint64
+
+	UpdateCtx(context.Context)
 }
 
 type ProtocolImpl struct {
@@ -216,6 +218,12 @@ type ProtocolImpl struct {
 
 	//for debug
 	debugCount [16]uint64
+
+	ctx context.Context
+}
+
+func (pi *ProtocolImpl) UpdateCtx(ctx context.Context) {
+	pi.ctx = ctx
 }
 
 func (pi *ProtocolImpl) incDebugCount(i int) {
@@ -410,6 +418,10 @@ type FakeProtocol struct {
 	username string
 	database string
 	ioses    goetty.IOSession
+}
+
+func (fp *FakeProtocol) UpdateCtx(ctx context.Context) {
+
 }
 
 func (fp *FakeProtocol) GetCapability() uint32 {

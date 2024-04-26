@@ -304,7 +304,7 @@ func executeStmtInBack(backSes *backSession,
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(execCtx, backSes.GetOutputCallback()); err != nil {
+	if ret, err = execCtx.cw.Compile(execCtx, backSes.GetOutputCallback(execCtx)); err != nil {
 		return
 	}
 
@@ -500,14 +500,14 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, execCtx *ExecCt
 
 // fakeDataSetFetcher2 gets the result set from the pipeline and save it in the session.
 // It will not send the result to the client.
-func fakeDataSetFetcher2(handle interface{}, dataSet *batch.Batch) error {
+func fakeDataSetFetcher2(handle FeSession, execCtx *ExecCtx, dataSet *batch.Batch) error {
 	if handle == nil || dataSet == nil {
 		return nil
 	}
 
 	back := handle.(*backSession)
 	oq := newFakeOutputQueue(back.mrs)
-	err := fillResultSet(oq, dataSet, back)
+	err := fillResultSet(execCtx.reqCtx, oq, dataSet, back)
 	if err != nil {
 		return err
 	}
@@ -515,13 +515,13 @@ func fakeDataSetFetcher2(handle interface{}, dataSet *batch.Batch) error {
 	return nil
 }
 
-func fillResultSet(oq outputPool, dataSet *batch.Batch, ses FeSession) error {
+func fillResultSet(ctx context.Context, oq outputPool, dataSet *batch.Batch, ses FeSession) error {
 	n := dataSet.RowCount()
 	for j := 0; j < n; j++ { //row index
 		//needCopyBytes = true. we need to copy the bytes from the batch.Batch
 		//to avoid the data being changed after the batch.Batch returned to the
 		//pipeline.
-		_, err := extractRowFromEveryVector(ses, dataSet, j, oq, true)
+		_, err := extractRowFromEveryVector(ctx, ses, dataSet, j, oq, true)
 		if err != nil {
 			return err
 		}
@@ -531,7 +531,7 @@ func fillResultSet(oq outputPool, dataSet *batch.Batch, ses FeSession) error {
 
 // batchFetcher2 gets the result batches from the pipeline and save the origin batches in the session.
 // It will not send the result to the client.
-func batchFetcher2(handle interface{}, dataSet *batch.Batch) error {
+func batchFetcher2(handle FeSession, _ *ExecCtx, dataSet *batch.Batch) error {
 	if handle == nil {
 		return nil
 	}
@@ -545,7 +545,7 @@ func batchFetcher2(handle interface{}, dataSet *batch.Batch) error {
 
 // batchFetcher gets the result batches from the pipeline and save the origin batches in the session.
 // It will not send the result to the client.
-func batchFetcher(handle interface{}, dataSet *batch.Batch) error {
+func batchFetcher(handle FeSession, _ *ExecCtx, dataSet *batch.Batch) error {
 	if handle == nil {
 		return nil
 	}
@@ -587,9 +587,9 @@ func (backSes *backSession) Clear() {
 	backSes.feSessionImpl.Clear()
 }
 
-func (backSes *backSession) GetOutputCallback() func(*batch.Batch) error {
+func (backSes *backSession) GetOutputCallback(execCtx *ExecCtx) func(*batch.Batch) error {
 	return func(bat *batch.Batch) error {
-		return backSes.outputCallback(backSes, bat)
+		return backSes.outputCallback(backSes, execCtx, bat)
 	}
 }
 

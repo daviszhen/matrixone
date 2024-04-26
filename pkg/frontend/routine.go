@@ -464,6 +464,7 @@ func NewRoutine(ctx context.Context, protocol MysqlProtocol, parameters *config.
 		parameters:        parameters,
 		printInfoOnce:     true,
 	}
+	protocol.UpdateCtx(cancelRoutineCtx)
 
 	return ri
 }

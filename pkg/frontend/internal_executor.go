@@ -243,6 +243,10 @@ type internalProtocol struct {
 	username    string
 }
 
+func (ip *internalProtocol) UpdateCtx(ctx context.Context) {
+
+}
+
 func (ip *internalProtocol) GetCapability() uint32 {
 	return DefaultCapability
 }

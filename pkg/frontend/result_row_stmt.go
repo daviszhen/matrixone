@@ -36,7 +36,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 	switch statement := execCtx.stmt.(type) {
 	case *tree.Select:
 
-		columns, err = execCtx.cw.GetColumns()
+		columns, err = execCtx.cw.GetColumns(execCtx.reqCtx)
 		if err != nil {
 			logError(ses, ses.GetDebugString(),
 				"Failed to get columns from computation handler",
@@ -149,7 +149,7 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 		}
 
 	default:
-		columns, err = execCtx.cw.GetColumns()
+		columns, err = execCtx.cw.GetColumns(execCtx.reqCtx)
 		if err != nil {
 			logError(ses, ses.GetDebugString(),
 				"Failed to get columns from computation handler",
@@ -261,7 +261,7 @@ func respStreamResultRow(ses *Session,
 				return
 			}
 
-			err = buildMoExplainQuery(explainColName, buffer, ses, getDataFromPipeline)
+			err = buildMoExplainQuery(execCtx, explainColName, buffer, ses, getDataFromPipeline)
 			if err != nil {
 				return
 			}

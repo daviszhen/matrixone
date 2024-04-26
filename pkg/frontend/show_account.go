@@ -499,7 +499,7 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 
 	oq := newFakeOutputQueue(outputRS)
 	for _, b := range outputBatches {
-		if err = fillResultSet(oq, b, ses); err != nil {
+		if err = fillResultSet(ctx, oq, b, ses); err != nil {
 			return err
 		}
 	}
@@ -508,7 +508,7 @@ func doShowAccounts(ctx context.Context, ses *Session, sa *tree.ShowAccounts) (e
 
 	ses.rs = mergeRsColumns(MoAccountColumns, EachAccountColumns)
 	if openSaveQueryResult(ctx, ses) {
-		err = saveResult(ses, outputBatches)
+		err = saveResult(ctx, ses, outputBatches)
 	}
 
 	return err
@@ -530,13 +530,13 @@ func mergeRsColumns(rsOfMoAccountColumns *plan.ResultColDef, rsOfEachAccountColu
 	return def
 }
 
-func saveResult(ses *Session, outputBatch []*batch.Batch) error {
+func saveResult(ctx context.Context, ses *Session, outputBatch []*batch.Batch) error {
 	for _, b := range outputBatch {
-		if err := saveQueryResult(ses, b); err != nil {
+		if err := saveQueryResult(ctx, ses, b); err != nil {
 			return err
 		}
 	}
-	if err := saveQueryResultMeta(ses); err != nil {
+	if err := saveQueryResultMeta(ctx, ses); err != nil {
 		return err
 	}
 	return nil

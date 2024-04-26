@@ -100,7 +100,7 @@ func TestIeProto(t *testing.T) {
 	assert.Equal(t, 42, v.(int))
 
 	p.ResetStatistics()
-	assert.NoError(t, p.SendResultSetTextBatchRowSpeedup(mockResultSet(), 1))
+	assert.NoError(t, p.SendResultSetTextBatchRowSpeedup(nil, mockResultSet(), 1))
 	r := p.swapOutResult()
 	v, e := r.Value(ctx, 0, 0)
 	assert.NoError(t, e)

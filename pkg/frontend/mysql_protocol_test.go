@@ -2338,7 +2338,7 @@ func Test_resultset(t *testing.T) {
 
 		res := make9ColumnsResultSet()
 
-		err = proto.SendResultSetTextBatchRowSpeedup(res, uint64(len(res.Data)))
+		err = proto.SendResultSetTextBatchRowSpeedup(nil, res, uint64(len(res.Data)))
 		convey.So(err, convey.ShouldBeNil)
 	})
 
@@ -2412,7 +2412,7 @@ func Test_resultset(t *testing.T) {
 
 		res := make9ColumnsResultSet()
 
-		err = proto.SendResultSetTextBatchRowSpeedup(res, 0)
+		err = proto.SendResultSetTextBatchRowSpeedup(nil, res, 0)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }

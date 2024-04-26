@@ -359,11 +359,11 @@ func getExprValue(e tree.Expr, ses *Session, execCtx *ExecCtx) (interface{}, err
 		}
 	}
 
-	return getValueFromVector(resultVec, ses, planExpr)
+	return getValueFromVector(execCtx.reqCtx, resultVec, ses, planExpr)
 }
 
 // only support single value and unary minus
-func GetSimpleExprValue(e tree.Expr, ses *Session) (interface{}, error) {
+func GetSimpleExprValue(ctx context.Context, e tree.Expr, ses *Session) (interface{}, error) {
 	switch v := e.(type) {
 	case *tree.UnresolvedName:
 		// set @a = on, type of a is bool.
@@ -387,13 +387,13 @@ func GetSimpleExprValue(e tree.Expr, ses *Session) (interface{}, error) {
 			return nil, err
 		}
 
-		value, err := getValueFromVector(vec, ses, planExpr)
+		value, err := getValueFromVector(ctx, vec, ses, planExpr)
 		vec.Free(ses.txnCompileCtx.GetProcess().Mp())
 		return value, err
 	}
 }
 
-func getValueFromVector(vec *vector.Vector, ses *Session, expr *plan2.Expr) (interface{}, error) {
+func getValueFromVector(ctx context.Context, vec *vector.Vector, ses *Session, expr *plan2.Expr) (interface{}, error) {
 	if vec.IsConstNull() || vec.GetNulls().Contains(0) {
 		return nil, nil
 	}
@@ -456,7 +456,7 @@ func getValueFromVector(vec *vector.Vector, ses *Session, expr *plan2.Expr) (int
 	case types.T_enum:
 		return vector.MustFixedCol[types.Enum](vec)[0], nil
 	default:
-		return nil, moerr.NewInvalidArg(ses.GetTxnHandler().GetTxnCtx(), "variable type", vec.GetType().Oid.String())
+		return nil, moerr.NewInvalidArg(ctx, "variable type", vec.GetType().Oid.String())
 	}
 }
 

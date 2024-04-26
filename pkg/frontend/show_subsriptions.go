@@ -116,7 +116,7 @@ func getAccountIdNames(ctx context.Context, ses *Session, bh BackgroundExec, lik
 		}
 		oq := newFakeOutputQueue(mrs)
 		for i := 0; i < batch.RowCount(); i++ {
-			row, err := extractRowFromEveryVector(ses, batch, i, oq, true)
+			row, err := extractRowFromEveryVector(ctx, ses, batch, i, oq, true)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -161,7 +161,7 @@ func getPubs(ctx context.Context, ses *Session, bh BackgroundExec, accountId int
 		}
 		oq := newFakeOutputQueue(mrs)
 		for i := 0; i < batch.RowCount(); i++ {
-			row, err := extractRowFromEveryVector(ses, batch, i, oq, true)
+			row, err := extractRowFromEveryVector(ctx, ses, batch, i, oq, true)
 			if err != nil {
 				return nil, err
 			}
@@ -223,7 +223,7 @@ func getSubs(ctx context.Context, ses *Session, bh BackgroundExec, accountId uin
 		}
 		oq := newFakeOutputQueue(mrs)
 		for i := 0; i < batch.RowCount(); i++ {
-			row, err := extractRowFromEveryVector(ses, batch, i, oq, true)
+			row, err := extractRowFromEveryVector(ctx, ses, batch, i, oq, true)
 			if err != nil {
 				return nil, err
 			}

@@ -393,18 +393,17 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 
 // getDataFromPipeline: extract the data from the pipeline.
 // obj: session
-func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
+func getDataFromPipeline(obj FeSession, execCtx *ExecCtx, bat *batch.Batch) error {
 	_, task := gotrace.NewTask(context.TODO(), "frontend.WriteDataToClient")
 	defer task.End()
 	ses := obj.(*Session)
-	txnCtx := ses.GetTxnHandler().GetTxnCtx()
-	if openSaveQueryResult(txnCtx, ses) {
+	if openSaveQueryResult(execCtx.reqCtx, ses) {
 		if bat == nil {
-			if err := saveQueryResultMeta(ses); err != nil {
+			if err := saveQueryResultMeta(execCtx.reqCtx, ses); err != nil {
 				return err
 			}
 		} else {
-			if err := saveQueryResult(ses, bat); err != nil {
+			if err := saveQueryResult(execCtx.reqCtx, ses, bat); err != nil {
 				return err
 			}
 		}
@@ -417,7 +416,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	proto := ses.GetMysqlProtocol()
 
 	ec := ses.GetExportConfig()
-	oq := NewOutputQueue(txnCtx, ses, len(bat.Vecs), nil, nil)
+	oq := NewOutputQueue(execCtx.reqCtx, ses, len(bat.Vecs), nil, nil)
 	row2colTime := time.Duration(0)
 	procBatchBegin := time.Now()
 	n := bat.Vecs[0].Length()
@@ -429,15 +428,14 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	for j := 0; j < n; j++ { //row index
 		if ec.needExportToFile() {
 			select {
-			//TODO: killQuery
-			case <-txnCtx.Done():
+			case <-execCtx.reqCtx.Done():
 				return nil
 			default:
 			}
 			continue
 		}
 
-		row, err := extractRowFromEveryVector(ses, bat, j, oq, true)
+		row, err := extractRowFromEveryVector(execCtx.reqCtx, ses, bat, j, oq, true)
 		if err != nil {
 			return err
 		}
@@ -451,7 +449,7 @@ func getDataFromPipeline(obj interface{}, bat *batch.Batch) error {
 	if ec.needExportToFile() {
 		oq.rowIdx = uint64(n)
 		bat2 := preCopyBat(obj, bat)
-		go constructByte(obj, bat2, oq.ep.Index, oq.ep.ByteChan, oq)
+		go constructByte(execCtx.reqCtx, obj, bat2, oq.ep.Index, oq.ep.ByteChan, oq)
 	}
 	err := oq.flush()
 	if err != nil {
@@ -511,10 +509,10 @@ func handleDump(ses FeSession, execCtx *ExecCtx, dump *tree.MoDump) error {
 	return doDumpQueryResult(execCtx.reqCtx, ses.(*Session), dump.ExportParams)
 }
 
-func doCmdFieldList(requestCtx context.Context, ses *Session, _ *InternalCmdFieldList) error {
+func doCmdFieldList(reqCtx context.Context, ses *Session, _ *InternalCmdFieldList) error {
 	dbName := ses.GetDatabaseName()
 	if dbName == "" {
-		return moerr.NewNoDB(requestCtx)
+		return moerr.NewNoDB(reqCtx)
 	}
 
 	//Get table infos for the database from the cube
@@ -527,22 +525,22 @@ func doCmdFieldList(requestCtx context.Context, ses *Session, _ *InternalCmdFiel
 	//if tableInfos == nil || db != dbName {
 	//	txnHandler := ses.GetTxnHandler()
 	//	eng := ses.GetStorage()
-	//	db, err := eng.Database(requestCtx, dbName, txnHandler.GetTxn())
+	//	db, err := eng.Database(reqCtx, dbName, txnHandler.GetTxn())
 	//	if err != nil {
 	//		return err
 	//	}
 	//
-	//	names, err := db.Relations(requestCtx)
+	//	names, err := db.Relations(reqCtx)
 	//	if err != nil {
 	//		return err
 	//	}
 	//	for _, name := range names {
-	//		table, err := db.Relation(requestCtx, name)
+	//		table, err := db.Relation(reqCtx, name)
 	//		if err != nil {
 	//			return err
 	//		}
 	//
-	//		defs, err := table.TableDefs(requestCtx)
+	//		defs, err := table.TableDefs(reqCtx)
 	//		if err != nil {
 	//			return err
 	//		}
@@ -1035,16 +1033,16 @@ func handleAnalyzeStmt(ses *Session, execCtx *ExecCtx, stmt *tree.AnalyzeStmt) e
 	return doComQuery(ses, execCtx, &UserInput{sql: sql})
 }
 
-func doExplainStmt(requestCtx context.Context, ses *Session, stmt *tree.ExplainStmt) error {
+func doExplainStmt(reqCtx context.Context, ses *Session, stmt *tree.ExplainStmt) error {
 
 	//1. generate the plan
-	es, err := getExplainOption(requestCtx, stmt.Options)
+	es, err := getExplainOption(reqCtx, stmt.Options)
 	if err != nil {
 		return err
 	}
 
 	//get query optimizer and execute Optimize
-	exPlan, err := buildPlan(requestCtx, ses, ses.GetTxnCompileCtx(), stmt.Statement)
+	exPlan, err := buildPlan(reqCtx, ses, ses.GetTxnCompileCtx(), stmt.Statement)
 	if err != nil {
 		return err
 	}
@@ -1060,24 +1058,24 @@ func doExplainStmt(requestCtx context.Context, ses *Session, stmt *tree.ExplainS
 		paramVals := ses.GetTxnCompileCtx().tcw.paramVals
 		if len(paramVals) > 0 {
 			//replace the param var in the plan by the param value
-			exPlan, err = plan2.FillValuesOfParamsInPlan(requestCtx, exPlan, paramVals)
+			exPlan, err = plan2.FillValuesOfParamsInPlan(reqCtx, exPlan, paramVals)
 			if err != nil {
 				return err
 			}
 			if exPlan == nil {
-				return moerr.NewInternalError(requestCtx, "failed to copy exPlan")
+				return moerr.NewInternalError(reqCtx, "failed to copy exPlan")
 			}
 		}
 	}
 	if exPlan.GetQuery() == nil {
-		return moerr.NewNotSupported(requestCtx, "the sql query plan does not support explain.")
+		return moerr.NewNotSupported(reqCtx, "the sql query plan does not support explain.")
 	}
 	// generator query explain
 	explainQuery := explain.NewExplainQueryImpl(exPlan.GetQuery())
 
 	// build explain data buffer
 	buffer := explain.NewExplainDataBuffer()
-	err = explainQuery.ExplainPlan(requestCtx, buffer, es)
+	err = explainQuery.ExplainPlan(reqCtx, buffer, es)
 	if err != nil {
 		return err
 	}
@@ -1097,7 +1095,7 @@ func doExplainStmt(requestCtx context.Context, ses *Session, stmt *tree.ExplainS
 	}
 	ses.rs = mysqlColDef2PlanResultColDef(mrs)
 
-	if openSaveQueryResult(requestCtx, ses) {
+	if openSaveQueryResult(reqCtx, ses) {
 		//3. fill the batch for saving the query result
 		bat, err := fillQueryBatch(ses, explainColName, buffer.Lines)
 		defer bat.Clean(ses.GetMemPool())
@@ -1106,7 +1104,7 @@ func doExplainStmt(requestCtx context.Context, ses *Session, stmt *tree.ExplainS
 		}
 
 		// save query result
-		err = maySaveQueryResult(requestCtx, ses, bat)
+		err = maySaveQueryResult(reqCtx, ses, bat)
 		if err != nil {
 
 			return err
@@ -1683,10 +1681,10 @@ func doShowCollation(ses *Session, execCtx *ExecCtx, proc *process.Process, sc *
 
 	// save query result
 	if openSaveQueryResult(execCtx.reqCtx, ses) {
-		if err := saveQueryResult(ses, bat); err != nil {
+		if err := saveQueryResult(execCtx.reqCtx, ses, bat); err != nil {
 			return err
 		}
-		if err := saveQueryResultMeta(ses); err != nil {
+		if err := saveQueryResultMeta(execCtx.reqCtx, ses); err != nil {
 			return err
 		}
 	}
@@ -1811,7 +1809,7 @@ func GetExplainColumns(ctx context.Context, explainColName string) ([]interface{
 	return columns, err
 }
 
-func getExplainOption(requestCtx context.Context, options []tree.OptionElem) (*explain.ExplainOptions, error) {
+func getExplainOption(reqCtx context.Context, options []tree.OptionElem) (*explain.ExplainOptions, error) {
 	es := explain.NewExplainDefaultOptions()
 	if options == nil {
 		return es, nil
@@ -1823,7 +1821,7 @@ func getExplainOption(requestCtx context.Context, options []tree.OptionElem) (*e
 				} else if strings.EqualFold(v.Value, "FALSE") {
 					es.Verbose = false
 				} else {
-					return nil, moerr.NewInvalidInput(requestCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
+					return nil, moerr.NewInvalidInput(reqCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
 				}
 			} else if strings.EqualFold(v.Name, "ANALYZE") {
 				if strings.EqualFold(v.Value, "TRUE") || v.Value == "NULL" {
@@ -1831,27 +1829,27 @@ func getExplainOption(requestCtx context.Context, options []tree.OptionElem) (*e
 				} else if strings.EqualFold(v.Value, "FALSE") {
 					es.Analyze = false
 				} else {
-					return nil, moerr.NewInvalidInput(requestCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
+					return nil, moerr.NewInvalidInput(reqCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
 				}
 			} else if strings.EqualFold(v.Name, "FORMAT") {
 				if strings.EqualFold(v.Value, "TEXT") {
 					es.Format = explain.EXPLAIN_FORMAT_TEXT
 				} else if strings.EqualFold(v.Value, "JSON") {
-					return nil, moerr.NewNotSupported(requestCtx, "Unsupport explain format '%s'", v.Value)
+					return nil, moerr.NewNotSupported(reqCtx, "Unsupport explain format '%s'", v.Value)
 				} else if strings.EqualFold(v.Value, "DOT") {
-					return nil, moerr.NewNotSupported(requestCtx, "Unsupport explain format '%s'", v.Value)
+					return nil, moerr.NewNotSupported(reqCtx, "Unsupport explain format '%s'", v.Value)
 				} else {
-					return nil, moerr.NewInvalidInput(requestCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
+					return nil, moerr.NewInvalidInput(reqCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
 				}
 			} else {
-				return nil, moerr.NewInvalidInput(requestCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
+				return nil, moerr.NewInvalidInput(reqCtx, "invalid explain option '%s', valud '%s'", v.Name, v.Value)
 			}
 		}
 		return es, nil
 	}
 }
 
-func buildMoExplainQuery(explainColName string, buffer *explain.ExplainDataBuffer, session *Session, fill func(interface{}, *batch.Batch) error) error {
+func buildMoExplainQuery(execCtx *ExecCtx, explainColName string, buffer *explain.ExplainDataBuffer, session *Session, fill outputCallBackFunc) error {
 	bat := batch.New(true, []string{explainColName})
 	rs := buffer.Lines
 	vs := make([][]byte, len(rs))
@@ -1869,16 +1867,16 @@ func buildMoExplainQuery(explainColName string, buffer *explain.ExplainDataBuffe
 	bat.Vecs[0] = vec
 	bat.SetRowCount(count)
 
-	err := fill(session, bat)
+	err := fill(session, execCtx, bat)
 	if err != nil {
 		return err
 	}
 	// to trigger save result meta
-	err = fill(session, nil)
+	err = fill(session, execCtx, nil)
 	return err
 }
 
-func buildPlan(requestCtx context.Context, ses FeSession, ctx plan2.CompilerContext, stmt tree.Statement) (*plan2.Plan, error) {
+func buildPlan(reqCtx context.Context, ses FeSession, ctx plan2.CompilerContext, stmt tree.Statement) (*plan2.Plan, error) {
 	var ret *plan2.Plan
 	var err error
 
@@ -1911,14 +1909,14 @@ func buildPlan(requestCtx context.Context, ses FeSession, ctx plan2.CompilerCont
 		v2.TxnStatementBuildPlanDurationHistogram.Observe(cost.Seconds())
 	}()
 
-	stats := statistic.StatsInfoFromContext(requestCtx)
+	stats := statistic.StatsInfoFromContext(reqCtx)
 	stats.PlanStart()
 	defer stats.PlanEnd()
 
 	isPrepareStmt := false
 	if ses != nil {
 		var accId uint32
-		accId, err = defines.GetAccountId(requestCtx)
+		accId, err = defines.GetAccountId(reqCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -1938,7 +1936,7 @@ func buildPlan(requestCtx context.Context, ses FeSession, ctx plan2.CompilerCont
 	}
 	if ret != nil {
 		if ses != nil && ses.GetTenantInfo() != nil && !ses.IsBackgroundSession() {
-			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses.(*Session), stmt, ret)
+			err = authenticateCanExecuteStatementAndPlan(reqCtx, ses.(*Session), stmt, ret)
 			if err != nil {
 				return nil, err
 			}
@@ -1967,7 +1965,7 @@ func buildPlan(requestCtx context.Context, ses FeSession, ctx plan2.CompilerCont
 	if ret != nil {
 		ret.IsPrepare = isPrepareStmt
 		if ses != nil && ses.GetTenantInfo() != nil && !ses.IsBackgroundSession() {
-			err = authenticateCanExecuteStatementAndPlan(requestCtx, ses.(*Session), stmt, ret)
+			err = authenticateCanExecuteStatementAndPlan(reqCtx, ses.(*Session), stmt, ret)
 			if err != nil {
 				return nil, err
 			}
@@ -2097,8 +2095,8 @@ func incStatementErrorsCounter(tenant string, stmt tree.Statement) {
 }
 
 // authenticateUserCanExecuteStatement checks the user can execute the statement
-func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Session, stmt tree.Statement) error {
-	requestCtx, span := trace.Debug(requestCtx, "authenticateUserCanExecuteStatement")
+func authenticateUserCanExecuteStatement(reqCtx context.Context, ses *Session, stmt tree.Statement) error {
+	reqCtx, span := trace.Debug(reqCtx, "authenticateUserCanExecuteStatement")
 	defer span.End()
 	if getGlobalPu().SV.SkipCheckPrivilege {
 		return nil
@@ -2114,26 +2112,26 @@ func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Sessio
 
 		// can or not execute in retricted status
 		if ses.getRoutine() != nil && ses.getRoutine().isRestricted() && !ses.GetPrivilege().canExecInRestricted {
-			return moerr.NewInternalError(requestCtx, "do not have privilege to execute the statement")
+			return moerr.NewInternalError(reqCtx, "do not have privilege to execute the statement")
 		}
 
-		havePrivilege, err = authenticateUserCanExecuteStatementWithObjectTypeAccountAndDatabase(requestCtx, ses, stmt)
+		havePrivilege, err = authenticateUserCanExecuteStatementWithObjectTypeAccountAndDatabase(reqCtx, ses, stmt)
 		if err != nil {
 			return err
 		}
 
 		if !havePrivilege {
-			err = moerr.NewInternalError(requestCtx, "do not have privilege to execute the statement")
+			err = moerr.NewInternalError(reqCtx, "do not have privilege to execute the statement")
 			return err
 		}
 
-		havePrivilege, err = authenticateUserCanExecuteStatementWithObjectTypeNone(requestCtx, ses, stmt)
+		havePrivilege, err = authenticateUserCanExecuteStatementWithObjectTypeNone(reqCtx, ses, stmt)
 		if err != nil {
 			return err
 		}
 
 		if !havePrivilege {
-			err = moerr.NewInternalError(requestCtx, "do not have privilege to execute the statement")
+			err = moerr.NewInternalError(reqCtx, "do not have privilege to execute the statement")
 			return err
 		}
 	}
@@ -2141,8 +2139,8 @@ func authenticateUserCanExecuteStatement(requestCtx context.Context, ses *Sessio
 }
 
 // authenticateCanExecuteStatementAndPlan checks the user can execute the statement and its plan
-func authenticateCanExecuteStatementAndPlan(requestCtx context.Context, ses *Session, stmt tree.Statement, p *plan.Plan) error {
-	_, task := gotrace.NewTask(context.TODO(), "frontend.authenticateCanExecuteStatementAndPlan")
+func authenticateCanExecuteStatementAndPlan(reqCtx context.Context, ses *Session, stmt tree.Statement, p *plan.Plan) error {
+	_, task := gotrace.NewTask(reqCtx, "frontend.authenticateCanExecuteStatementAndPlan")
 	defer task.End()
 	if getGlobalPu().SV.SkipCheckPrivilege {
 		return nil
@@ -2151,28 +2149,28 @@ func authenticateCanExecuteStatementAndPlan(requestCtx context.Context, ses *Ses
 	if ses.skipAuthForSpecialUser() {
 		return nil
 	}
-	yes, err := authenticateUserCanExecuteStatementWithObjectTypeDatabaseAndTable(requestCtx, ses, stmt, p)
+	yes, err := authenticateUserCanExecuteStatementWithObjectTypeDatabaseAndTable(reqCtx, ses, stmt, p)
 	if err != nil {
 		return err
 	}
 	if !yes {
-		return moerr.NewInternalError(requestCtx, "do not have privilege to execute the statement")
+		return moerr.NewInternalError(reqCtx, "do not have privilege to execute the statement")
 	}
 	return nil
 }
 
 // authenticatePrivilegeOfPrepareAndExecute checks the user can execute the Prepare or Execute statement
-func authenticateUserCanExecutePrepareOrExecute(requestCtx context.Context, ses *Session, stmt tree.Statement, p *plan.Plan) error {
-	_, task := gotrace.NewTask(context.TODO(), "frontend.authenticateUserCanExecutePrepareOrExecute")
+func authenticateUserCanExecutePrepareOrExecute(reqCtx context.Context, ses *Session, stmt tree.Statement, p *plan.Plan) error {
+	_, task := gotrace.NewTask(reqCtx, "frontend.authenticateUserCanExecutePrepareOrExecute")
 	defer task.End()
 	if getGlobalPu().SV.SkipCheckPrivilege {
 		return nil
 	}
-	err := authenticateUserCanExecuteStatement(requestCtx, ses, stmt)
+	err := authenticateUserCanExecuteStatement(reqCtx, ses, stmt)
 	if err != nil {
 		return err
 	}
-	err = authenticateCanExecuteStatementAndPlan(requestCtx, ses, stmt, p)
+	err = authenticateCanExecuteStatementAndPlan(reqCtx, ses, stmt, p)
 	if err != nil {
 		return err
 	}
@@ -2180,21 +2178,21 @@ func authenticateUserCanExecutePrepareOrExecute(requestCtx context.Context, ses 
 }
 
 // canExecuteStatementInUncommittedTxn checks the user can execute the statement in an uncommitted transaction
-func canExecuteStatementInUncommittedTransaction(requestCtx context.Context, ses FeSession, stmt tree.Statement) error {
-	can, err := statementCanBeExecutedInUncommittedTransaction(requestCtx, ses, stmt)
+func canExecuteStatementInUncommittedTransaction(reqCtx context.Context, ses FeSession, stmt tree.Statement) error {
+	can, err := statementCanBeExecutedInUncommittedTransaction(reqCtx, ses, stmt)
 	if err != nil {
 		return err
 	}
 	if !can {
 		//is ddl statement
 		if IsCreateDropDatabase(stmt) {
-			return moerr.NewInternalError(requestCtx, createDropDatabaseErrorInfo())
+			return moerr.NewInternalError(reqCtx, createDropDatabaseErrorInfo())
 		} else if IsDDL(stmt) {
-			return moerr.NewInternalError(requestCtx, onlyCreateStatementErrorInfo())
+			return moerr.NewInternalError(reqCtx, onlyCreateStatementErrorInfo())
 		} else if IsAdministrativeStatement(stmt) {
-			return moerr.NewInternalError(requestCtx, administrativeCommandIsUnsupportedInTxnErrorInfo())
+			return moerr.NewInternalError(reqCtx, administrativeCommandIsUnsupportedInTxnErrorInfo())
 		} else {
-			return moerr.NewInternalError(requestCtx, unclassifiedStatementInUncommittedTxnErrorInfo())
+			return moerr.NewInternalError(reqCtx, unclassifiedStatementInUncommittedTxnErrorInfo())
 		}
 	}
 	return nil
@@ -2601,7 +2599,7 @@ func executeStmt(ses *Session,
 
 	cmpBegin = time.Now()
 
-	if ret, err = execCtx.cw.Compile(execCtx, ses.GetOutputCallback()); err != nil {
+	if ret, err = execCtx.cw.Compile(execCtx, ses.GetOutputCallback(execCtx)); err != nil {
 		return
 	}
 
@@ -3077,41 +3075,41 @@ func ExecRequest(ses *Session, execCtx *ExecCtx, req *Request) (resp *Response, 
 	return resp, nil
 }
 
-func parseStmtExecute(requestCtx context.Context, ses *Session, data []byte) (string, *PrepareStmt, error) {
+func parseStmtExecute(reqCtx context.Context, ses *Session, data []byte) (string, *PrepareStmt, error) {
 	// see https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_stmt_execute.html
 	pos := 0
 	if len(data) < 4 {
-		return "", nil, moerr.NewInvalidInput(requestCtx, "sql command contains malformed packet")
+		return "", nil, moerr.NewInvalidInput(reqCtx, "sql command contains malformed packet")
 	}
 	stmtID := binary.LittleEndian.Uint32(data[0:4])
 	pos += 4
 
 	stmtName := fmt.Sprintf("%s_%d", prefixPrepareStmtName, stmtID)
-	preStmt, err := ses.GetPrepareStmt(requestCtx, stmtName)
+	preStmt, err := ses.GetPrepareStmt(reqCtx, stmtName)
 	if err != nil {
 		return "", nil, err
 	}
 
 	sql := fmt.Sprintf("execute %s", stmtName)
 	logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
-	err = ses.GetMysqlProtocol().ParseExecuteData(requestCtx, ses.GetTxnCompileCtx().GetProcess(), preStmt, data, pos)
+	err = ses.GetMysqlProtocol().ParseExecuteData(reqCtx, ses.GetTxnCompileCtx().GetProcess(), preStmt, data, pos)
 	if err != nil {
 		return "", nil, err
 	}
 	return sql, preStmt, nil
 }
 
-func parseStmtSendLongData(requestCtx context.Context, ses *Session, data []byte) error {
+func parseStmtSendLongData(reqCtx context.Context, ses *Session, data []byte) error {
 	// see https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_stmt_send_long_data.html
 	pos := 0
 	if len(data) < 4 {
-		return moerr.NewInvalidInput(requestCtx, "sql command contains malformed packet")
+		return moerr.NewInvalidInput(reqCtx, "sql command contains malformed packet")
 	}
 	stmtID := binary.LittleEndian.Uint32(data[0:4])
 	pos += 4
 
 	stmtName := fmt.Sprintf("%s_%d", prefixPrepareStmtName, stmtID)
-	preStmt, err := ses.GetPrepareStmt(requestCtx, stmtName)
+	preStmt, err := ses.GetPrepareStmt(reqCtx, stmtName)
 	if err != nil {
 		return err
 	}
@@ -3119,7 +3117,7 @@ func parseStmtSendLongData(requestCtx context.Context, ses *Session, data []byte
 	sql := fmt.Sprintf("send long data for stmt %s", stmtName)
 	logDebug(ses, ses.GetDebugString(), "query trace", logutil.ConnectionIdField(ses.GetConnectionID()), logutil.QueryField(sql))
 
-	err = ses.GetMysqlProtocol().ParseSendLongData(requestCtx, ses.GetTxnCompileCtx().GetProcess(), preStmt, data, pos)
+	err = ses.GetMysqlProtocol().ParseSendLongData(reqCtx, ses.GetTxnCompileCtx().GetProcess(), preStmt, data, pos)
 	if err != nil {
 		return err
 	}

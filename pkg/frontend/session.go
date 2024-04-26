@@ -711,7 +711,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 	}
 
 	txnHandler := InitTxnHandler(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), txnOp)
-	var callback func(interface{}, *batch.Batch) error
+	var callback outputCallBackFunc
 	if newRawBatch {
 		callback = batchFetcher2
 	} else {
@@ -836,11 +836,11 @@ func (ses *Session) GetShowStmtType() ShowStatementType {
 	return ses.showStmtType
 }
 
-func (ses *Session) GetOutputCallback() func(*batch.Batch) error {
+func (ses *Session) GetOutputCallback(execCtx *ExecCtx) func(*batch.Batch) error {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
 	return func(bat *batch.Batch) error {
-		return ses.outputCallback(ses, bat)
+		return ses.outputCallback(ses, execCtx, bat)
 	}
 }
 

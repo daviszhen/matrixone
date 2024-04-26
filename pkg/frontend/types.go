@@ -61,7 +61,7 @@ type ComputationWrapper interface {
 
 	GetProcess() *process.Process
 
-	GetColumns() ([]interface{}, error)
+	GetColumns(ctx context.Context) ([]interface{}, error)
 
 	Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error)
 
@@ -363,6 +363,14 @@ type ExecCtx struct {
 	cws             []ComputationWrapper
 }
 
+// outputCallBackFunc is the callback function to send the result to the client.
+// parameters:
+//
+//	FeSession
+//	ExecCtx
+//	batch.Batch
+type outputCallBackFunc func(FeSession, *ExecCtx, *batch.Batch) error
+
 // TODO: shared component among the session implmentation
 type feSessionImpl struct {
 	pool          *mpool.MPool
@@ -374,7 +382,7 @@ type feSessionImpl struct {
 	txnCompileCtx *TxnCompilerContext
 	mrs           *MysqlResultSet
 	//it gets the result set from the pipeline and send it to the client
-	outputCallback func(interface{}, *batch.Batch) error
+	outputCallback outputCallBackFunc
 
 	//all the result set of executing the sql in background task
 	allResultSet []*MysqlResultSet
@@ -563,7 +571,7 @@ func (ses *feSessionImpl) GetMysqlResultSet() *MysqlResultSet {
 	return ses.mrs
 }
 
-func (ses *feSessionImpl) SetOutputCallback(callback func(interface{}, *batch.Batch) error) {
+func (ses *feSessionImpl) SetOutputCallback(callback outputCallBackFunc) {
 	ses.outputCallback = callback
 }
 
