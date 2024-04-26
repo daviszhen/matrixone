@@ -30,7 +30,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
@@ -38,8 +37,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect/mysql"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
-	"github.com/matrixorigin/matrixone/pkg/txn/clock"
-	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -402,7 +399,7 @@ var NewBackgroundExec = func(
 	reqCtx context.Context,
 	upstream FeSession,
 	mp *mpool.MPool) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, upstream.GetTxnHandler().GetConnCtx(), nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, upstream.GetTxnHandler().GetConnCtx(), nil)
 	backSes := &backSession{
 		feSessionImpl: feSessionImpl{
 			pool:           mp,
@@ -644,18 +641,6 @@ func (backSes *backSession) GetUpstream() FeSession {
 	return backSes.upstream
 }
 
-func (backSes *backSession) EnableInitTempEngine() {
-
-}
-
-func (backSes *backSession) SetTempEngine(ctx context.Context, te engine.Engine) error {
-	return nil
-}
-
-func (backSes *backSession) SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error) {
-	return nil, nil
-}
-
 func (backSes *backSession) getCNLabels() map[string]string {
 	return backSes.label
 }
@@ -782,14 +767,6 @@ func (backSes *backSession) GetDebugString() string {
 	return ""
 }
 
-func (backSes *backSession) GetTempTableStorage() *memorystorage.Storage {
-	return nil
-}
-
-func (backSes *backSession) IfInitedTempEngine() bool {
-	return false
-}
-
 func (backSes *backSession) GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error) {
 	return nil, nil, moerr.NewInternalError(context.Background(), "do not support user defined var in background exec")
 }
@@ -811,10 +788,6 @@ func (backSes *backSession) GetBackgroundExec(ctx context.Context) BackgroundExe
 		ctx,
 		backSes,
 		backSes.GetMemPool())
-}
-
-func (backSes *backSession) GetStorage() engine.Engine {
-	return getGlobalPu().StorageEngine
 }
 
 func (backSes *backSession) GetAccountId() uint32 {

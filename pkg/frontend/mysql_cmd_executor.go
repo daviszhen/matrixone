@@ -315,7 +315,7 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 	txnOp := ses.GetTxnHandler().GetTxn()
 	ctx := execCtx.reqCtx
 	// get db info as current account
-	if db, err = ses.GetStorage().Database(ctx, stmt.DbName, txnOp); err != nil {
+	if db, err = ses.GetTxnHandler().GetStorage().Database(ctx, stmt.DbName, txnOp); err != nil {
 		return err
 	}
 
@@ -345,7 +345,7 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 		// as pub account
 		ctx = context.WithValue(ctx, defines.TenantIDKey{}, uint32(pubAccountId))
 		// get db as pub account
-		if db, err = ses.GetStorage().Database(ctx, pubs[0].pubDatabase, txnOp); err != nil {
+		if db, err = ses.GetTxnHandler().GetStorage().Database(ctx, pubs[0].pubDatabase, txnOp); err != nil {
 			return err
 		}
 	}

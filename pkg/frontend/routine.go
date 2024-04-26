@@ -231,10 +231,6 @@ func (rt *Routine) handleRequest(req *Request) error {
 
 	ses := rt.getSession()
 
-	//create txnCtx first.
-	//other ctx inherits the txnCtx
-	ses.GetTxnHandler().CreateTxnCtx()
-
 	execCtx := ExecCtx{
 		ses: ses,
 	}

@@ -241,17 +241,17 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 	return tempCtx, table, nil
 }
 
-func (tcc *TxnCompilerContext) getTmpRelation(_ context.Context, tableName string) (engine.Relation, error) {
-	e := tcc.ses.GetStorage()
+func (tcc *TxnCompilerContext) getTmpRelation(ctx context.Context, tableName string) (engine.Relation, error) {
+	e := tcc.ses.GetTxnHandler().GetStorage()
 	txn := tcc.txnHandler.GetTxn()
-	db, err := e.Database(tcc.execCtx.reqCtx, defines.TEMPORARY_DBNAME, txn)
+	db, err := e.Database(ctx, defines.TEMPORARY_DBNAME, txn)
 	if err != nil {
 		logError(tcc.ses, tcc.ses.GetDebugString(),
 			"Failed to get temp database",
 			zap.Error(err))
 		return nil, err
 	}
-	table, err := db.Relation(tcc.execCtx.reqCtx, tableName, nil)
+	table, err := db.Relation(ctx, tableName, nil)
 	return table, err
 }
 

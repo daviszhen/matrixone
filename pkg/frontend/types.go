@@ -25,10 +25,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/config"
-	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -39,8 +37,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
-	"github.com/matrixorigin/matrixone/pkg/txn/clock"
-	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	"github.com/matrixorigin/matrixone/pkg/util"
 )
 
@@ -282,14 +278,11 @@ type FeSession interface {
 	GetSql() string
 	GetAccountId() uint32
 	GetTenantInfo() *TenantInfo
-	GetStorage() engine.Engine
 	GetBackgroundExec(ctx context.Context) BackgroundExec
 	GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec
 	getGlobalSystemVariableValue(ctx context.Context, name string) (interface{}, error)
 	GetSessionVar(ctx context.Context, name string) (interface{}, error)
 	GetUserDefinedVar(name string) (SystemVariableType, *UserDefinedVar, error)
-	IfInitedTempEngine() bool
-	GetTempTableStorage() *memorystorage.Storage
 	GetDebugString() string
 	GetFromRealUser() bool
 	getLastCommitTS() timestamp.Timestamp
@@ -331,9 +324,6 @@ type FeSession interface {
 	SetData([][]interface{})
 	GetIsInternal() bool
 	getCNLabels() map[string]string
-	SetTempTableStorage(getClock clock.Clock) (*metadata.TNService, error)
-	SetTempEngine(ctx context.Context, te engine.Engine) error
-	EnableInitTempEngine()
 	GetUpstream() FeSession
 	cleanCache()
 	getNextProcessId() string

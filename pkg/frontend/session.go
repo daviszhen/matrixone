@@ -32,7 +32,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/defines"
-	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/pb/query"
 	"github.com/matrixorigin/matrixone/pkg/pb/status"
@@ -40,14 +39,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect/mysql"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
-	"github.com/matrixorigin/matrixone/pkg/txn/clock"
-	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	"github.com/matrixorigin/matrixone/pkg/util/errutil"
 	db_holder "github.com/matrixorigin/matrixone/pkg/util/export/etl/db"
 	v2 "github.com/matrixorigin/matrixone/pkg/util/metric/v2"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/memoryengine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
@@ -119,7 +114,6 @@ type Session struct {
 	data            [][]interface{}
 	ep              *ExportConfig
 	showStmtType    ShowStatementType
-	storage         engine.Engine
 	sysVars         map[string]interface{}
 	userDefinedVars map[string]*UserDefinedVar
 
@@ -140,12 +134,7 @@ type Session struct {
 
 	isNotBackgroundSession bool
 	lastInsertID           uint64
-
-	InitTempEngine bool
-
-	tempTablestorage *memorystorage.Storage
-
-	tStmt *motrace.StatementInfo
+	tStmt                  *motrace.StatementInfo
 
 	ast tree.Statement
 
@@ -452,7 +441,6 @@ func (e *errInfo) length() int {
 func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, gSysVars *GlobalSystemVariables, isNotBackgroundSession bool, sharedTxnHandler *Txn) *Session {
 	//if the sharedTxnHandler exists,we use its txnCtx and txnOperator in this session.
 	//Currently, we only use the sharedTxnHandler in the background session.
-	var txnCtx context.Context
 	var txnOp TxnOperator
 	var err error
 	if sharedTxnHandler != nil {
@@ -461,7 +449,7 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 		}
 		txnOp = sharedTxnHandler.GetTxn()
 	}
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, connCtx, txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, connCtx, txnOp)
 
 	ses := &Session{
 		feSessionImpl: feSessionImpl{
@@ -474,7 +462,6 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 			outputCallback: getDataFromPipeline,
 			timeZone:       time.Local,
 		},
-		storage: &engine.EntireEngine{Engine: getGlobalPu().StorageEngine},
 		errInfo: &errInfo{
 			codes:  make([]uint16, 0, MoDefaultErrorCount),
 			msgs:   make([]string, 0, MoDefaultErrorCount),
@@ -545,14 +532,14 @@ func (ses *Session) Close() {
 	ses.data = nil
 	ses.ep = nil
 	if ses.txnHandler != nil {
-		//ses.txnHandler.ses = nil
+		ses.txnHandler.storage = nil
+		ses.txnHandler.tempStorage = nil
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {
 		ses.txnCompileCtx.ses = nil
 		ses.txnCompileCtx = nil
 	}
-	ses.storage = nil
 	ses.sql = ""
 	ses.sysVars = nil
 	ses.userDefinedVars = nil
@@ -567,7 +554,6 @@ func (ses *Session) Close() {
 	ses.errInfo = nil
 	ses.cache = nil
 	ses.debugStr = ""
-	ses.tempTablestorage = nil
 	ses.tStmt = nil
 	ses.ast = nil
 	ses.rs = nil
@@ -697,61 +683,6 @@ func (ses *Session) UpdateDebugString() {
 	ses.debugStr = sb.String()
 }
 
-func (ses *Session) EnableInitTempEngine() {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	ses.InitTempEngine = true
-}
-func (ses *Session) IfInitedTempEngine() bool {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	return ses.InitTempEngine
-}
-
-func (ses *Session) GetTempTableStorage() *memorystorage.Storage {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	if ses.tempTablestorage == nil {
-		panic("temp table storage is not initialized")
-	}
-	return ses.tempTablestorage
-}
-
-func (ses *Session) SetTempTableStorage(ck clock.Clock) (*metadata.TNService, error) {
-	// Without concurrency, there is no potential for data competition
-
-	// Arbitrary value is OK since it's single sharded. Let's use 0xbeef
-	// suggested by @reusee
-	shards := []metadata.TNShard{
-		{
-			ReplicaID:     0xbeef,
-			TNShardRecord: metadata.TNShardRecord{ShardID: 0xbeef},
-		},
-	}
-	// Arbitrary value is OK, for more information about TEMPORARY_TABLE_DN_ADDR, please refer to the comment in defines/const.go
-	tnAddr := defines.TEMPORARY_TABLE_TN_ADDR
-	uid, err := uuid.NewV7()
-	if err != nil {
-		return nil, err
-	}
-	tnStore := metadata.TNService{
-		ServiceID:         uid.String(),
-		TxnServiceAddress: tnAddr,
-		Shards:            shards,
-	}
-
-	ms, err := memorystorage.NewMemoryStorage(
-		mpool.MustNewZeroNoFixed(),
-		ck,
-		memoryengine.RandomIDGenerator,
-	)
-	if err != nil {
-		return nil, err
-	}
-	ses.tempTablestorage = ms
-	return &tnStore, nil
-}
-
 func (ses *Session) GetPrivilegeCache() *privilegeCache {
 	ses.mu.Lock()
 	defer ses.mu.Unlock()
@@ -775,14 +706,12 @@ func (ses *Session) GetBackgroundExec(ctx context.Context) BackgroundExec {
 // GetShareTxnBackgroundExec returns a background executor running the sql in a shared transaction.
 // newRawBatch denotes we need the raw batch instead of mysql result set.
 func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch bool) BackgroundExec {
-
-	var txnCtx context.Context
 	var txnOp TxnOperator
 	if ses.GetTxnHandler() != nil {
 		txnOp = ses.GetTxnHandler().GetTxn()
 	}
 
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), txnCtx, txnOp)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), txnOp)
 	var callback func(interface{}, *batch.Batch) error
 	if newRawBatch {
 		callback = batchFetcher2
@@ -825,7 +754,7 @@ var GetRawBatchBackgroundExec = func(ctx context.Context, ses *Session) Backgrou
 }
 
 func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExec {
-	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), nil, nil)
+	txnHandler := InitTxn(getGlobalPu().StorageEngine, ses.GetTxnHandler().GetConnCtx(), nil)
 	backSes := &backSession{
 		feSessionImpl: feSessionImpl{
 			pool:           ses.GetMemPool(),
@@ -1169,31 +1098,6 @@ func (ses *Session) GetTxnInfo() string {
 	}
 	meta := txnOp.Txn()
 	return meta.DebugString()
-}
-
-func (ses *Session) IsEntireEngine() bool {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	_, isEntire := ses.storage.(*engine.EntireEngine)
-	if isEntire {
-		return true
-	} else {
-		return false
-	}
-}
-
-func (ses *Session) GetStorage() engine.Engine {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	return ses.storage
-}
-
-func (ses *Session) SetTempEngine(ctx context.Context, te engine.Engine) error {
-	ses.mu.Lock()
-	defer ses.mu.Unlock()
-	ee := ses.storage.(*engine.EntireEngine)
-	ee.TempEngine = te
-	return nil
 }
 
 func (ses *Session) GetDatabaseName() string {

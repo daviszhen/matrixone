@@ -21,14 +21,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/mohae/deepcopy"
 
-	"github.com/matrixorigin/matrixone/pkg/clusterservice"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
-	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/common/runtime"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/defines"
-	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/compile"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
@@ -36,12 +33,12 @@ import (
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/util"
 	"github.com/matrixorigin/matrixone/pkg/txn/clock"
+	"github.com/matrixorigin/matrixone/pkg/txn/storage/memorystorage"
 	txnTrace "github.com/matrixorigin/matrixone/pkg/txn/trace"
 	util2 "github.com/matrixorigin/matrixone/pkg/util"
 	"github.com/matrixorigin/matrixone/pkg/util/trace"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace"
 	"github.com/matrixorigin/matrixone/pkg/util/trace/impl/motrace/statistic"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/memoryengine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
 
@@ -235,10 +232,8 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 
 	var err error
 	defer RecordStatementTxnID(execCtx.reqCtx, cwft.ses)
-	if cwft.ses.IfInitedTempEngine() {
-		execCtx.reqCtx = context.WithValue(execCtx.reqCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
-		cwft.proc.Ctx = context.WithValue(cwft.proc.Ctx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
-		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
+	if cwft.ses.GetTxnHandler().HasTempEngine() {
+		updateTempStorageInCtx(execCtx, cwft.proc, cwft.ses.GetTxnHandler().GetTempStorage())
 	}
 
 	cacheHit := cwft.plan != nil
@@ -320,7 +315,7 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		tenant,
 		cwft.ses.GetUserName(),
 		execCtx.reqCtx,
-		cwft.ses.GetStorage(),
+		cwft.ses.GetTxnHandler().GetStorage(),
 		cwft.proc,
 		cwft.stmt,
 		cwft.ses.GetIsInternal(),
@@ -351,38 +346,22 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		return nil, err
 	}
 	// check if it is necessary to initialize the temporary engine
-	if cwft.compile.NeedInitTempEngine(cwft.ses.IfInitedTempEngine()) {
+	if !cwft.ses.GetTxnHandler().HasTempEngine() && cwft.compile.NeedInitTempEngine() {
 		// 0. init memory-non-dist storage
-		var tnStore *metadata.TNService
-		tnStore, err = cwft.ses.SetTempTableStorage(cwft.GetClock())
+		err = cwft.ses.GetTxnHandler().CreateTempStorage(cwft.GetClock())
 		if err != nil {
 			return nil, err
 		}
 
 		// temporary storage is passed through Ctx
-		execCtx.reqCtx = context.WithValue(execCtx.reqCtx, defines.TemporaryTN{}, cwft.ses.GetTempTableStorage())
+		updateTempStorageInCtx(execCtx, cwft.proc, cwft.ses.GetTxnHandler().GetTempStorage())
 
 		// 1. init memory-non-dist engine
-		tempEngine := memoryengine.New(
-			execCtx.reqCtx,
-			memoryengine.NewDefaultShardPolicy(
-				mpool.MustNewZeroNoFixed(),
-			),
-			memoryengine.RandomIDGenerator,
-			clusterservice.NewMOCluster(
-				nil,
-				0,
-				clusterservice.WithDisableRefresh(),
-				clusterservice.WithServices(nil, []metadata.TNService{
-					*tnStore,
-				})),
-		)
+		cwft.ses.GetTxnHandler().CreateTempEngine()
+		tempEngine := cwft.ses.GetTxnHandler().GetTempEngine()
 
 		// 2. bind the temporary engine to the session and txnHandler
-		_ = cwft.ses.SetTempEngine(execCtx.reqCtx, tempEngine)
-		cwft.compile.SetTempEngine(execCtx.reqCtx, tempEngine)
-		cwft.ses.GetTxnHandler().SetTempEngine(tempEngine)
-		cwft.ses.GetTxnHandler().AttachTempStorageToTxnCtx(execCtx, cwft.ses.IfInitedTempEngine(), cwft.ses.GetTempTableStorage())
+		cwft.compile.SetTempEngine(tempEngine, cwft.ses.GetTxnHandler().GetTempStorage())
 
 		// 3. init temp-db to store temporary relations
 		txnOp2 := cwft.ses.GetTxnHandler().GetTxn()
@@ -390,11 +369,18 @@ func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Ba
 		if err != nil {
 			return nil, err
 		}
-
-		cwft.ses.EnableInitTempEngine()
 	}
 	cwft.compile.SetOriginSQL(originSQL)
 	return cwft.compile, err
+}
+
+func updateTempStorageInCtx(execCtx *ExecCtx, proc *process.Process, tempStorage *memorystorage.Storage) {
+	if execCtx != nil && execCtx.reqCtx != nil {
+		execCtx.reqCtx = attachValue(execCtx.reqCtx, defines.TemporaryTN{}, tempStorage)
+	}
+	if proc != nil && proc.Ctx != nil {
+		proc.Ctx = attachValue(proc.Ctx, defines.TemporaryTN{}, tempStorage)
+	}
 }
 
 func (cwft *TxnComputationWrapper) RecordExecPlan(ctx context.Context) error {

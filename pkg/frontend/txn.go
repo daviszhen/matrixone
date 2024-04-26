@@ -21,7 +21,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/matrixorigin/matrixone/pkg/clusterservice"
+	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
+	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/memoryengine"
 
 	"go.uber.org/zap"
@@ -140,8 +144,11 @@ const (
 )
 
 type Txn struct {
-	storage engine.Engine
-	txnOp   TxnOperator
+	storage       engine.Engine
+	tempStorage   *memorystorage.Storage
+	tempTnSerivce *metadata.TNService
+	tempEngine    *memoryengine.Engine
+	txnOp         TxnOperator
 
 	//connCtx is the ancestor of the txnCtx.
 	//it is initialized at the Txn object created and
@@ -171,31 +178,23 @@ type Txn struct {
 	optionBits uint32
 }
 
-func InitTxn(storage engine.Engine, connCtx context.Context, txnCtx context.Context, txnOp TxnOperator) *Txn {
-	return &Txn{
+func InitTxn(storage engine.Engine, connCtx context.Context, txnOp TxnOperator) *Txn {
+	ret := &Txn{
 		storage:      &engine.EntireEngine{Engine: storage},
 		connCtx:      connCtx,
-		txnCtx:       txnCtx,
 		txnOp:        txnOp,
-		shareTxn:     txnCtx != nil && txnOp != nil,
+		shareTxn:     txnOp != nil,
 		serverStatus: defaultServerStatus,
 		optionBits:   defaultOptionBits,
 	}
+	ret.txnCtx, ret.txnCtxCancel = context.WithCancel(connCtx)
+	return ret
 }
 
 func (th *Txn) GetConnCtx() context.Context {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return th.connCtx
-}
-
-// CreateTxnCtx always return a valid txnCtx.
-// if there is none, it creates one.
-// if there is one, it returns previous one.
-func (th *Txn) CreateTxnCtx() {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	th.createTxnCtxUnsafe()
 }
 
 // GetTxnCtx should be called after the CreateTxnCtx
@@ -347,7 +346,6 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 			opts = v.([]client.TxnOption)
 		}
 	}
-	th.createTxnCtxUnsafe()
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
@@ -406,13 +404,6 @@ func (th *Txn) createTxnOpUnsafe(execCtx *ExecCtx) error {
 	return err
 }
 
-// createTxnCtxUnsafe creates txn ctx. Should not be called outside txn
-func (th *Txn) createTxnCtxUnsafe() {
-	if th.txnCtx == nil {
-		th.txnCtx, th.txnCtxCancel = context.WithTimeout(th.connCtx, getGlobalPu().SV.SessionTimeout.Duration)
-	}
-}
-
 func (th *Txn) GetTxn() TxnOperator {
 	th.mu.Lock()
 	defer th.mu.Unlock()
@@ -464,9 +455,9 @@ func (th *Txn) commitUnsafe(execCtx *ExecCtx) error {
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
-	if execCtx.ses.IfInitedTempEngine() && execCtx.ses.GetTempTableStorage() != nil {
+	if th.hasTempEngineUnsafe() && th.tempStorage != nil {
 		if th.txnCtx.Value(defines.TemporaryTN{}) == nil {
-			th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
+			th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, th.tempStorage)
 		}
 	}
 	storage := th.storage
@@ -581,9 +572,9 @@ func (th *Txn) rollbackUnsafe(execCtx *ExecCtx) error {
 	if th.txnCtx == nil {
 		panic("context should not be nil")
 	}
-	if execCtx.ses.IfInitedTempEngine() && execCtx.ses.GetTempTableStorage() != nil {
+	if th.hasTempEngineUnsafe() && th.tempStorage != nil {
 		if th.txnCtx.Value(defines.TemporaryTN{}) == nil {
-			th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, execCtx.ses.GetTempTableStorage())
+			th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, th.tempStorage)
 		}
 	}
 	ctx2, cancel := context.WithTimeout(
@@ -758,21 +749,17 @@ func (th *Txn) GetStorage() engine.Engine {
 	return th.storage
 }
 
-func (th *Txn) AttachTempStorageToTxnCtx(execCtx *ExecCtx, inited bool, temp *memorystorage.Storage) error {
+func (th *Txn) HasTempEngine() bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	if inited {
-		th.createTxnCtxUnsafe()
-		th.txnCtx = context.WithValue(th.txnCtx, defines.TemporaryTN{}, temp)
-	}
-	return nil
+	return th.hasTempEngineUnsafe()
 }
 
-func (th *Txn) SetTempEngine(te *memoryengine.Engine) {
-	th.mu.Lock()
-	defer th.mu.Unlock()
-	ee := th.storage.(*engine.EntireEngine)
-	ee.TempEngine = te
+func (th *Txn) hasTempEngineUnsafe() bool {
+	if entireEng, ok := th.storage.(*engine.EntireEngine); ok {
+		return entireEng.TempEngine != nil
+	}
+	return false
 }
 
 func (th *Txn) cancelTxnCtx() {
@@ -787,4 +774,80 @@ func (th *Txn) OptionBitsIsSet(bit uint32) bool {
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	return bitsIsSet(th.optionBits, bit)
+}
+
+func (th *Txn) CreateTempStorage(ck clock.Clock) error {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.createTempStorageUnsafe(ck)
+}
+
+func (th *Txn) GetTempStorage() *memorystorage.Storage {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	if th.tempStorage == nil {
+		panic("temp table storage is not initialized")
+	}
+	return th.tempStorage
+}
+
+func (th *Txn) createTempStorageUnsafe(ck clock.Clock) error {
+	// Without concurrency, there is no potential for data competition
+	// Arbitrary value is OK since it's single sharded. Let's use 0xbeef
+	// suggested by @reusee
+	shards := []metadata.TNShard{
+		{
+			ReplicaID:     0xbeef,
+			TNShardRecord: metadata.TNShardRecord{ShardID: 0xbeef},
+		},
+	}
+	// Arbitrary value is OK, for more information about TEMPORARY_TABLE_DN_ADDR, please refer to the comment in defines/const.go
+	tnAddr := defines.TEMPORARY_TABLE_TN_ADDR
+	uid, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	th.tempTnSerivce = &metadata.TNService{
+		ServiceID:         uid.String(),
+		TxnServiceAddress: tnAddr,
+		Shards:            shards,
+	}
+
+	ms, err := memorystorage.NewMemoryStorage(
+		mpool.MustNewZeroNoFixed(),
+		ck,
+		memoryengine.RandomIDGenerator,
+	)
+	if err != nil {
+		return err
+	}
+	th.tempStorage = ms
+	return nil
+}
+
+func (th *Txn) CreateTempEngine() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+
+	th.tempEngine = memoryengine.New(
+		context.TODO(), //!!!NOTE: memoryengine.New will neglect this context.
+		memoryengine.NewDefaultShardPolicy(
+			mpool.MustNewZeroNoFixed(),
+		),
+		memoryengine.RandomIDGenerator,
+		clusterservice.NewMOCluster(
+			nil,
+			0,
+			clusterservice.WithDisableRefresh(),
+			clusterservice.WithServices(nil, []metadata.TNService{
+				*th.tempTnSerivce,
+			})),
+	)
+	updateTempEngine(th.storage, th.tempEngine)
+}
+
+func (th *Txn) GetTempEngine() *memoryengine.Engine {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.tempEngine
 }
