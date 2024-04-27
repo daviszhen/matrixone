@@ -713,6 +713,12 @@ func (th *TxnHandler) GetTempStorage() *memorystorage.Storage {
 	return th.tempStorage
 }
 
+func (th *TxnHandler) GetTempTNService() *metadata.TNService {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	return th.tempTnService
+}
+
 func (th *TxnHandler) createTempStorageUnsafe(ck clock.Clock) error {
 	// Without concurrency, there is no potential for data competition
 	// Arbitrary value is OK since it's single sharded. Let's use 0xbeef

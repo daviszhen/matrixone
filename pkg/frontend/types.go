@@ -63,7 +63,7 @@ type ComputationWrapper interface {
 
 	GetColumns(ctx context.Context) ([]interface{}, error)
 
-	Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error)
+	Compile(any any, fill func(*batch.Batch) error) (interface{}, error)
 
 	GetUUID() []byte
 

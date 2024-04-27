@@ -65,7 +65,7 @@ func (ncw *NullComputationWrapper) GetColumns(context.Context) ([]interface{}, e
 	return []interface{}{}, nil
 }
 
-func (ncw *NullComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
+func (ncw *NullComputationWrapper) Compile(any any, fill func(*batch.Batch) error) (interface{}, error) {
 	return nil, nil
 }
 
@@ -223,9 +223,10 @@ func (cwft *TxnComputationWrapper) GetServerStatus() uint16 {
 	return uint16(cwft.ses.GetTxnHandler().GetServerStatus())
 }
 
-func (cwft *TxnComputationWrapper) Compile(execCtx *ExecCtx, fill func(*batch.Batch) error) (interface{}, error) {
+func (cwft *TxnComputationWrapper) Compile(any any, fill func(*batch.Batch) error) (interface{}, error) {
 	var originSQL string
 	var span trace.Span
+	execCtx := any.(*ExecCtx)
 	execCtx.reqCtx, span = trace.Start(execCtx.reqCtx, "TxnComputationWrapper.Compile",
 		trace.WithKind(trace.SpanKindStatement))
 	defer span.End(trace.WithStatementExtra(cwft.ses.GetTxnId(), cwft.ses.GetStmtId(), cwft.ses.GetSqlOfStmt()))

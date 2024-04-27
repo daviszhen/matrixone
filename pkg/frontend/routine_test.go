@@ -116,7 +116,7 @@ var newMockWrapper = func(ctrl *gomock.Controller, ses *Session,
 					res.resultX.Store(contextCancel)
 				}
 			}
-			err = proto.SendResultSetTextBatchRowSpeedup(nil, mrs, mrs.GetRowCount())
+			err = proto.SendResultSetTextBatchRowSpeedup(mrs, mrs.GetRowCount())
 			if err != nil {
 				logutil.Errorf("flush error %v", err)
 				return nil, err
@@ -127,12 +127,14 @@ var newMockWrapper = func(ctrl *gomock.Controller, ses *Session,
 	mcw := mock_frontend.NewMockComputationWrapper(ctrl)
 	mcw.EXPECT().GetAst().Return(stmt).AnyTimes()
 	mcw.EXPECT().GetProcess().Return(proc).AnyTimes()
-	mcw.EXPECT().GetColumns().Return(columns, nil).AnyTimes()
+	mcw.EXPECT().GetColumns(gomock.Any()).Return(columns, nil).AnyTimes()
 	mcw.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
 	mcw.EXPECT().GetUUID().Return(uuid[:]).AnyTimes()
 	mcw.EXPECT().RecordExecPlan(gomock.Any()).Return(nil).AnyTimes()
 	mcw.EXPECT().GetLoadTag().Return(false).AnyTimes()
 	mcw.EXPECT().Clear().AnyTimes()
+	mcw.EXPECT().Free().AnyTimes()
+	mcw.EXPECT().Plan().Return(nil).AnyTimes()
 	return mcw
 }
 
@@ -157,7 +159,7 @@ func Test_ConnectionCount(t *testing.T) {
 	noResultSet := make(map[string]bool)
 	resultSet := make(map[string]*result)
 
-	var wrapperStubFunc = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
+	var wrapperStubFunc = func(execCtx *ExecCtx, db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 		var cw []ComputationWrapper = nil
 		var stmts []tree.Statement = nil
 		var cmdFieldStmt *InternalCmdFieldList
@@ -181,7 +183,7 @@ func Test_ConnectionCount(t *testing.T) {
 		return cw, nil
 	}
 
-	bhStub := gostub.Stub(&GetComputationWrapper, wrapperStubFunc)
+	bhStub := gostub.Stub(&GetComputationWrapper2, wrapperStubFunc)
 	defer bhStub.Reset()
 
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)

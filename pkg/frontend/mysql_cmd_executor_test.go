@@ -96,9 +96,10 @@ func Test_mce(t *testing.T) {
 
 		txnOperator.EXPECT().Commit(gomock.Any()).Return(nil).AnyTimes()
 		txnOperator.EXPECT().Rollback(gomock.Any()).Return(nil).AnyTimes()
+		txnOperator.EXPECT().GetWorkspace().Return(newTestWorkspace()).AnyTimes()
 
 		txnClient := mock_frontend.NewMockTxnClient(ctrl)
-		txnClient.EXPECT().New(gomock.Any(), gomock.Any()).Return(txnOperator, nil).AnyTimes()
+		txnClient.EXPECT().New(gomock.Any(), gomock.Any(), gomock.Any()).Return(txnOperator, nil).AnyTimes()
 
 		ioses := mock_frontend.NewMockIOSession(ctrl)
 		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
@@ -131,6 +132,8 @@ func Test_mce(t *testing.T) {
 		create_1.EXPECT().GetLoadTag().Return(false).AnyTimes()
 		create_1.EXPECT().RecordExecPlan(ctx).Return(nil).AnyTimes()
 		create_1.EXPECT().Clear().AnyTimes()
+		create_1.EXPECT().Free().AnyTimes()
+		create_1.EXPECT().Plan().Return(nil).AnyTimes()
 
 		select_1 := mock_frontend.NewMockComputationWrapper(ctrl)
 		stmts, err = parsers.Parse(ctx, dialect.MYSQL, "select a,b,c from A", 1, 0)
@@ -144,6 +147,8 @@ func Test_mce(t *testing.T) {
 		select_1.EXPECT().GetLoadTag().Return(false).AnyTimes()
 		select_1.EXPECT().RecordExecPlan(ctx).Return(nil).AnyTimes()
 		select_1.EXPECT().Clear().AnyTimes()
+		select_1.EXPECT().Free().AnyTimes()
+		select_1.EXPECT().Plan().Return(nil).AnyTimes()
 
 		cola := &MysqlColumn{}
 		cola.SetName("a")
@@ -159,7 +164,7 @@ func Test_mce(t *testing.T) {
 			colb,
 			colc,
 		}
-		select_1.EXPECT().GetColumns().Return(cols, nil).AnyTimes()
+		select_1.EXPECT().GetColumns(gomock.Any()).Return(cols, nil).AnyTimes()
 
 		cws := []ComputationWrapper{
 			//use_t,
@@ -220,13 +225,15 @@ func Test_mce(t *testing.T) {
 			select_2.EXPECT().Compile(gomock.Any(), gomock.Any()).Return(runner, nil).AnyTimes()
 			select_2.EXPECT().Run(gomock.Any()).Return(nil, nil).AnyTimes()
 			select_2.EXPECT().GetLoadTag().Return(false).AnyTimes()
-			select_2.EXPECT().GetColumns().Return(self_handle_sql_columns[i], nil).AnyTimes()
+			select_2.EXPECT().GetColumns(gomock.Any()).Return(self_handle_sql_columns[i], nil).AnyTimes()
 			select_2.EXPECT().RecordExecPlan(ctx).Return(nil).AnyTimes()
 			select_2.EXPECT().Clear().AnyTimes()
+			select_2.EXPECT().Free().AnyTimes()
+			select_2.EXPECT().Plan().Return(nil).AnyTimes()
 			cws = append(cws, select_2)
 		}
 
-		stubs := gostub.StubFunc(&GetComputationWrapper, cws, nil)
+		stubs := gostub.StubFunc(&GetComputationWrapper2, cws, nil)
 		defer stubs.Reset()
 
 		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
@@ -238,14 +245,11 @@ func Test_mce(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.SetSession(ses)
-		ses.txnHandler = &TxnHandler{
-			storage: &engine.EntireEngine{Engine: pu.StorageEngine},
-		}
-		ses.txnHandler.SetSession(ses)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		//ses.txnHandler = &TxnHandler{
+		//	storage: &engine.EntireEngine{Engine: pu.StorageEngine},
+		//}
 
 		ctx = context.WithValue(ctx, config.ParameterUnitKey, pu)
 
@@ -255,7 +259,9 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		resp, err := ExecRequest(ctx, ses, req)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		resp, err := ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp, convey.ShouldBeNil)
 
@@ -264,7 +270,7 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		_, err = ExecRequest(ctx, ses, req)
+		_, err = ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 
 		req = &Request{
@@ -272,7 +278,7 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		resp, err = ExecRequest(ctx, ses, req)
+		resp, err = ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp.category, convey.ShouldEqual, OkResponse)
 
@@ -281,7 +287,7 @@ func Test_mce(t *testing.T) {
 			data: []byte("test anywhere"),
 		}
 
-		resp, err = ExecRequest(ctx, ses, req)
+		resp, err = ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeError)
 		convey.So(resp, convey.ShouldBeNil)
 
@@ -316,6 +322,7 @@ func Test_mce_selfhandle(t *testing.T) {
 		txnOperator.EXPECT().Txn().Return(txn.TxnMeta{}).AnyTimes()
 		txnOperator.EXPECT().Commit(ctx).Return(nil).AnyTimes()
 		txnOperator.EXPECT().Rollback(ctx).Return(nil).AnyTimes()
+		txnOperator.EXPECT().GetWorkspace().Return(newTestWorkspace()).AnyTimes()
 
 		txnClient := mock_frontend.NewMockTxnClient(ctrl)
 		txnClient.EXPECT().New(gomock.Any(), gomock.Any(), gomock.Any()).Return(txnOperator, nil).AnyTimes()
@@ -335,15 +342,14 @@ func Test_mce_selfhandle(t *testing.T) {
 
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
-
-		err = handleChangeDB(ctx, ses, "T")
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		err = handleChangeDB(ses, ec, "T")
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(ses.GetDatabaseName(), convey.ShouldEqual, "T")
 
-		err = handleChangeDB(ctx, ses, "T")
+		err = handleChangeDB(ses, ec, "T")
 		convey.So(err, convey.ShouldBeError)
 	})
 
@@ -357,7 +363,16 @@ func Test_mce_selfhandle(t *testing.T) {
 		eng := mock_frontend.NewMockEngine(ctrl)
 		eng.EXPECT().New(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 		eng.EXPECT().Database(ctx, gomock.Any(), nil).Return(nil, nil).AnyTimes()
+		eng.EXPECT().Hints().Return(engine.Hints{CommitOrRollbackTimeout: time.Second * 10}).AnyTimes()
+
+		txnOperator := mock_frontend.NewMockTxnOperator(ctrl)
+		txnOperator.EXPECT().Txn().Return(txn.TxnMeta{}).AnyTimes()
+		txnOperator.EXPECT().Commit(gomock.Any()).Return(nil).AnyTimes()
+		txnOperator.EXPECT().Rollback(gomock.Any()).Return(nil).AnyTimes()
+		txnOperator.EXPECT().GetWorkspace().Return(newTestWorkspace()).AnyTimes()
+
 		txnClient := mock_frontend.NewMockTxnClient(ctrl)
+		txnClient.EXPECT().New(gomock.Any(), gomock.Any(), gomock.Any()).Return(txnOperator, nil).AnyTimes()
 
 		ioses := mock_frontend.NewMockIOSession(ctrl)
 		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
@@ -376,39 +391,10 @@ func Test_mce_selfhandle(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 		ses.mrs = &MysqlResultSet{}
 		proto.SetSession(ses)
-
-		ses.mrs = &MysqlResultSet{}
-		st1, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@max_allowed_packet", 1, 0)
-		convey.So(err, convey.ShouldBeNil)
-		sv1 := st1.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = handleSelectVariables(ses, sv1, true)
-		convey.So(err, convey.ShouldBeNil)
-
-		ses.mrs = &MysqlResultSet{}
-		st2, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@version_comment", 1, 0)
-		convey.So(err, convey.ShouldBeNil)
-		sv2 := st2.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = handleSelectVariables(ses, sv2, true)
-		convey.So(err, convey.ShouldBeNil)
-
-		ses.mrs = &MysqlResultSet{}
-		st3, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@global.version_comment", 1, 0)
-		convey.So(err, convey.ShouldBeNil)
-		sv3 := st3.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = handleSelectVariables(ses, sv3, true)
-		convey.So(err, convey.ShouldBeNil)
-
-		ses.mrs = &MysqlResultSet{}
-		st4, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @version_comment", 1, 0)
-		convey.So(err, convey.ShouldBeNil)
-		sv4 := st4.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		err = handleSelectVariables(ses, sv4, true)
-		convey.So(err, convey.ShouldBeNil)
 
 		ses.mrs = &MysqlResultSet{}
 		queryData := []byte("A")
@@ -416,7 +402,9 @@ func Test_mce_selfhandle(t *testing.T) {
 		query := string(queryData)
 		cflStmt, err := parseCmdFieldList(ctx, makeCmdFieldListSql(query))
 		convey.So(err, convey.ShouldBeNil)
-		err = handleCmdFieldList(ctx, ses, cflStmt)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		err = handleCmdFieldList(ses, ec, cflStmt)
 		convey.So(err, convey.ShouldBeError)
 
 		ses.SetMysqlResultSet(&MysqlResultSet{})
@@ -427,17 +415,17 @@ func Test_mce_selfhandle(t *testing.T) {
 		//	typ:  types.T_varchar.ToType(),
 		//}}
 
-		err = handleCmdFieldList(ctx, ses, cflStmt)
+		err = handleCmdFieldList(ses, ec, cflStmt)
 		convey.So(err, convey.ShouldBeNil)
 
-		err = handleCmdFieldList(ctx, ses, cflStmt)
+		err = handleCmdFieldList(ses, ec, cflStmt)
 		convey.So(err, convey.ShouldBeNil)
 
 		set := "set @@tx_isolation=`READ-COMMITTED`"
 		setVar, err := parsers.ParseOne(ctx, dialect.MYSQL, set, 1, 0)
 		convey.So(err, convey.ShouldBeNil)
 
-		err = handleSetVar(ctx, ses, setVar.(*tree.SetVar), "")
+		err = handleSetVar(ses, ec, setVar.(*tree.SetVar), "")
 		convey.So(err, convey.ShouldBeNil)
 
 		req := &Request{
@@ -445,7 +433,7 @@ func Test_mce_selfhandle(t *testing.T) {
 			data: []byte{'A', 0},
 		}
 
-		resp, err := ExecRequest(ctx, ses, req)
+		resp, err := ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp, convey.ShouldBeNil)
 	})
@@ -479,9 +467,8 @@ func Test_getDataFromPipeline(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 		ses.mrs = &MysqlResultSet{}
 		proto.ses = ses
 
@@ -514,8 +501,9 @@ func Test_getDataFromPipeline(t *testing.T) {
 		}
 
 		batchCase1 := genBatch()
-
-		err = getDataFromPipeline(ses, batchCase1)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		err = getDataFromPipeline(ses, ec, batchCase1)
 		convey.So(err, convey.ShouldBeNil)
 
 		batchCase2 := func() *batch.Batch {
@@ -528,7 +516,7 @@ func Test_getDataFromPipeline(t *testing.T) {
 			return bat
 		}()
 
-		err = getDataFromPipeline(ses, batchCase2)
+		err = getDataFromPipeline(ses, ec, batchCase2)
 		convey.So(err, convey.ShouldBeNil)
 	})
 
@@ -554,13 +542,13 @@ func Test_getDataFromPipeline(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 		ses.mrs = &MysqlResultSet{}
 		proto.ses = ses
-
-		convey.So(getDataFromPipeline(ses, nil), convey.ShouldBeNil)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		convey.So(getDataFromPipeline(ses, ec, nil), convey.ShouldBeNil)
 
 		genBatch := func() *batch.Batch {
 			return allocTestBatch(
@@ -600,11 +588,11 @@ func Test_getDataFromPipeline(t *testing.T) {
 			return bat
 		}()
 
-		err = getDataFromPipeline(ses, batchCase2)
+		err = getDataFromPipeline(ses, ec, batchCase2)
 		convey.So(err, convey.ShouldBeNil)
 
 		batchCase2.Vecs = append(batchCase2.Vecs, vector.NewVec(types.T_any.ToType()))
-		err = getDataFromPipeline(ses, batchCase2)
+		err = getDataFromPipeline(ses, ec, batchCase2)
 		convey.So(err, convey.ShouldNotBeNil)
 
 	})
@@ -724,22 +712,11 @@ func Test_handleSelectVariables(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 		ses.mrs = &MysqlResultSet{}
 
 		proto.SetSession(ses)
-		st2, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@tx_isolation", 1, 0)
-		convey.So(err, convey.ShouldBeNil)
-		sv2 := st2.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		convey.So(handleSelectVariables(ses, sv2, true), convey.ShouldBeNil)
-
-		st3, err := parsers.ParseOne(ctx, dialect.MYSQL, "select @@XXX", 1, 0)
-		convey.So(err, convey.ShouldBeNil)
-		sv3 := st3.(*tree.Select).Select.(*tree.SelectClause).Exprs[0].Expr.(*tree.VarExpr)
-		convey.So(handleSelectVariables(ses, sv3, true), convey.ShouldNotBeNil)
-
 	})
 }
 
@@ -777,9 +754,8 @@ func Test_handleShowVariables(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 		tenant := &TenantInfo{
 			Tenant:   "sys",
 			TenantID: 0,
@@ -789,9 +765,10 @@ func Test_handleShowVariables(t *testing.T) {
 		ses.mrs = &MysqlResultSet{}
 		ses.SetDatabaseName("t")
 		proto.SetSession(ses)
-
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
 		sv := &tree.ShowVariables{Global: false}
-		convey.So(handleShowVariables(ses, sv, nil, true), convey.ShouldBeNil)
+		convey.So(handleShowVariables(ses, ec, sv), convey.ShouldBeNil)
 
 		bh := &backgroundExecTest{}
 		bh.init()
@@ -808,7 +785,7 @@ func Test_handleShowVariables(t *testing.T) {
 
 		bh.sql2result[sql] = newMrsForSystemVariablesOfAccount(rows)
 		sv = &tree.ShowVariables{Global: true}
-		convey.So(handleShowVariables(ses, sv, nil, true), convey.ShouldBeNil)
+		convey.So(handleShowVariables(ses, ec, sv), convey.ShouldBeNil)
 	})
 }
 
@@ -823,6 +800,8 @@ func Test_GetColumns(t *testing.T) {
 
 func Test_GetComputationWrapper(t *testing.T) {
 	convey.Convey("GetComputationWrapper succ", t, func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
 		db, sql, user := "T", "SHOW TABLES", "root"
 		var eng engine.Engine
 		proc := &process.Process{}
@@ -832,7 +811,9 @@ func Test_GetComputationWrapper(t *testing.T) {
 				gSysVars: GSysVariables,
 			},
 		}
-		cw, err := GetComputationWrapper(db, &UserInput{sql: sql}, user, eng, proc, ses)
+		ec := newTestExecCtx(context.Background(), ctrl)
+
+		cw, err := GetComputationWrapper2(ec, db, &UserInput{sql: sql}, user, eng, proc, ses)
 		convey.So(cw, convey.ShouldNotBeEmpty)
 		convey.So(err, convey.ShouldBeNil)
 	})
@@ -864,11 +845,11 @@ func runTestHandle(funName string, t *testing.T, handleFun func(ses *Session) er
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 		ses.mrs = &MysqlResultSet{}
 		ses.txnCompileCtx.proc = testutil.NewProc()
+		ses.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx}
 
 		convey.So(handleFun(ses), convey.ShouldBeNil)
 	})
@@ -880,9 +861,13 @@ func Test_HandlePrepareStmt(t *testing.T) {
 	if err != nil {
 		t.Errorf("parser sql error %v", err)
 	}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	ec := newTestExecCtx(ctx, ctrl)
+	ec.reqCtx = ctx
 	runTestHandle("handlePrepareStmt", t, func(ses *Session) error {
 		stmt := stmt.(*tree.PrepareStmt)
-		_, err := handlePrepareStmt(ctx, ses, stmt, "")
+		_, err := handlePrepareStmt(ses, ec, stmt)
 		return err
 	})
 }
@@ -893,9 +878,13 @@ func Test_HandleDeallocate(t *testing.T) {
 	if err != nil {
 		t.Errorf("parser sql error %v", err)
 	}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	ec := newTestExecCtx(ctx, ctrl)
+	ec.reqCtx = ctx
 	runTestHandle("handleDeallocate", t, func(ses *Session) error {
 		stmt := stmt.(*tree.Deallocate)
-		return handleDeallocate(ctx, ses, stmt)
+		return handleDeallocate(ses, ec, stmt)
 	})
 }
 
@@ -939,11 +928,13 @@ func Test_CMD_FIELD_LIST(t *testing.T) {
 		}).AnyTimes()
 
 		txnOperator := mock_frontend.NewMockTxnOperator(ctrl)
-		txnOperator.EXPECT().Commit(ctx).Return(nil).AnyTimes()
-		txnOperator.EXPECT().Rollback(ctx).Return(nil).AnyTimes()
+		txnOperator.EXPECT().Commit(gomock.Any()).Return(nil).AnyTimes()
+		txnOperator.EXPECT().Rollback(gomock.Any()).Return(nil).AnyTimes()
+		txnOperator.EXPECT().Txn().Return(txn.TxnMeta{}).AnyTimes()
+		txnOperator.EXPECT().GetWorkspace().Return(newTestWorkspace()).AnyTimes()
 
 		txnClient := mock_frontend.NewMockTxnClient(ctrl)
-		txnClient.EXPECT().New(gomock.Any(), gomock.Any()).Return(txnOperator, nil).AnyTimes()
+		txnClient.EXPECT().New(gomock.Any(), gomock.Any(), gomock.Any()).Return(txnOperator, nil).AnyTimes()
 
 		ioses := mock_frontend.NewMockIOSession(ctrl)
 		ioses.EXPECT().OutBuf().Return(buf.NewByteBuf(1024)).AnyTimes()
@@ -962,15 +953,16 @@ func Test_CMD_FIELD_LIST(t *testing.T) {
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.SetSession(ses)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
+
 		ses.mrs = &MysqlResultSet{}
 		ses.SetDatabaseName("t")
 		ses.seqLastValue = new(string)
 
-		err = doComQuery(ctx, ses, &UserInput{sql: cmdFieldListQuery})
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		err = doComQuery(ses, ec, &UserInput{sql: cmdFieldListQuery})
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
@@ -996,9 +988,11 @@ func Test_statement_type(t *testing.T) {
 			{&tree.ShowTables{}},
 			{&tree.Use{}},
 		}
-
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		ses := newTestSession(t, ctrl)
 		for _, k := range kases {
-			ret, _ := statementCanBeExecutedInUncommittedTransaction(nil, k.stmt)
+			ret, _ := statementCanBeExecutedInUncommittedTransaction(nil, ses, k.stmt)
 			convey.So(ret, convey.ShouldBeTrue)
 		}
 
@@ -1154,7 +1148,8 @@ func TestProcessLoadLocal(t *testing.T) {
 				tmp = tmp[n:]
 			}
 		}(buffer)
-		err := processLoadLocal(proc.Ctx, ses, param, writer)
+		ec := newTestExecCtx(context.Background(), ctrl)
+		err := processLoadLocal(ses, ec, param, writer)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(buffer[:10], convey.ShouldResemble, []byte("helloworld"))
 		convey.So(buffer[10:], convey.ShouldResemble, make([]byte, 4096-10))
@@ -1196,9 +1191,11 @@ func Test_StatementClassify(t *testing.T) {
 		{&tree.ShowCreatePublications{}, true},
 		{&tree.ShowBackendServers{}, true},
 	}
-
+	ses := &Session{
+		feSessionImpl: feSessionImpl{},
+	}
 	for _, a := range args {
-		ret, err := statementCanBeExecutedInUncommittedTransaction(nil, a.stmt)
+		ret, err := statementCanBeExecutedInUncommittedTransaction(nil, ses, a.stmt)
 		assert.Nil(t, err)
 		assert.Equal(t, ret, a.want)
 	}
@@ -1230,9 +1227,8 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 	proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 	var gSys GlobalSystemVariables
 	InitGlobalSystemVariables(&gSys)
-	ses := NewSession(proto, nil, &gSys, true, nil)
-	ses.SetRequestContext(ctx)
-	ses.SetConnectContext(ctx)
+	ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+
 	ses.GetMysqlProtocol()
 	proto.SetSession(ses)
 	ses.proto = proto
@@ -1262,8 +1258,9 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		runtime.ProcessLevelRuntime().SetGlobalVariables(runtime.ClusterService, cluster)
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
-
-		err = handleShowBackendServers(ctx, ses, true)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		err = handleShowBackendServers(ses, ec, true)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
 		require.Equal(t, uint64(4), rs.GetColumnCount())
@@ -1306,8 +1303,9 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		runtime.ProcessLevelRuntime().SetGlobalVariables(runtime.ClusterService, cluster)
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
-
-		err = handleShowBackendServers(ctx, ses, true)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		err = handleShowBackendServers(ses, ec, true)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
 		require.Equal(t, uint64(4), rs.GetColumnCount())
@@ -1324,7 +1322,6 @@ func Test_RecordParseErrorStatement(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	ses := newTestSession(t, ctrl)
-	ses.SetRequestContext(context.TODO())
 
 	proc := &process.Process{
 		Ctx: context.TODO(),
@@ -1456,14 +1453,11 @@ func Test_ExecRequest(t *testing.T) {
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
 
-		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.SetSession(ses)
 		ses.txnHandler = &TxnHandler{
 			storage: &engine.EntireEngine{Engine: pu.StorageEngine},
 		}
-		ses.txnHandler.SetSession(ses)
-		ses.SetRequestContext(ctx)
-		ses.SetConnectContext(ctx)
 
 		ctx = context.WithValue(ctx, config.ParameterUnitKey, pu)
 
@@ -1472,14 +1466,16 @@ func Test_ExecRequest(t *testing.T) {
 			cmd:  COM_SET_OPTION,
 			data: []byte("123"),
 		}
-		_, err = ExecRequest(ctx, ses, req)
+		ec := newTestExecCtx(ctx, ctrl)
+		ec.reqCtx = ctx
+		_, err = ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 
 		req = &Request{
 			cmd:  COM_SET_OPTION,
 			data: []byte("1"),
 		}
-		_, err = ExecRequest(ctx, ses, req)
+		_, err = ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }

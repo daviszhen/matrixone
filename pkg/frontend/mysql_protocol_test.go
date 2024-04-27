@@ -45,6 +45,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	mock_frontend "github.com/matrixorigin/matrixone/pkg/frontend/test"
+	"github.com/matrixorigin/matrixone/pkg/pb/txn"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect/mysql"
@@ -176,7 +177,16 @@ func TestKIll(t *testing.T) {
 	//before anything using the configuration
 	eng := mock_frontend.NewMockEngine(ctrl)
 	eng.EXPECT().New(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	eng.EXPECT().Hints().Return(engine.Hints{CommitOrRollbackTimeout: time.Second * 10}).AnyTimes()
+	wp := newTestWorkspace()
+
+	txnOp := mock_frontend.NewMockTxnOperator(ctrl)
+	txnOp.EXPECT().Txn().Return(txn.TxnMeta{}).AnyTimes()
+	txnOp.EXPECT().GetWorkspace().Return(wp).AnyTimes()
+	txnOp.EXPECT().Commit(gomock.Any()).Return(nil).AnyTimes()
+	txnOp.EXPECT().Rollback(gomock.Any()).Return(nil).AnyTimes()
 	txnClient := mock_frontend.NewMockTxnClient(ctrl)
+	txnClient.EXPECT().New(gomock.Any(), gomock.Any(), gomock.Any()).Return(txnOp, nil).AnyTimes()
 	pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
 	require.NoError(t, err)
 	pu.SV.SkipCheckUser = true
@@ -218,7 +228,7 @@ func TestKIll(t *testing.T) {
 		seconds:    30,
 	}
 
-	var wrapperStubFunc = func(db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
+	var wrapperStubFunc = func(execCtx *ExecCtx, db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 		var cw []ComputationWrapper = nil
 		var stmts []tree.Statement = nil
 		var cmdFieldStmt *InternalCmdFieldList
@@ -242,7 +252,7 @@ func TestKIll(t *testing.T) {
 		return cw, nil
 	}
 
-	bhStub := gostub.Stub(&GetComputationWrapper, wrapperStubFunc)
+	bhStub := gostub.Stub(&GetComputationWrapper2, wrapperStubFunc)
 	defer bhStub.Reset()
 
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
@@ -1278,8 +1288,7 @@ func (tRM *TestRoutineManager) resultsetHandler(rs goetty.IOSession, msg interfa
 		return moerr.NewInternalError(ctx, "message is not Packet")
 	}
 	setGlobalPu(pu)
-	ses := NewSession(pro, nil, nil, false, nil)
-	ses.SetRequestContext(ctx)
+	ses := NewSession(ctx, pro, nil, nil, false, nil)
 	pro.SetSession(ses)
 
 	length := packet.Length
@@ -1908,8 +1917,7 @@ func Test_openpacket(t *testing.T) {
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
-		ses := NewSession(proto, nil, nil, false, nil)
-		ses.SetRequestContext(context.TODO())
+		ses := NewSession(context.TODO(), proto, nil, nil, false, nil)
 		proto.ses = ses
 
 		err = proto.fillPacket(make([]byte, MaxPayloadSize)...)
@@ -1938,8 +1946,7 @@ func Test_openpacket(t *testing.T) {
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
-		ses := NewSession(proto, nil, nil, false, nil)
-		ses.SetRequestContext(context.TODO())
+		ses := NewSession(context.TODO(), proto, nil, nil, false, nil)
 		proto.ses = ses
 
 		err = proto.openPacket()
@@ -2297,8 +2304,7 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
@@ -2332,13 +2338,12 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
 
-		err = proto.SendResultSetTextBatchRowSpeedup(nil, res, uint64(len(res.Data)))
+		err = proto.SendResultSetTextBatchRowSpeedup(res, uint64(len(res.Data)))
 		convey.So(err, convey.ShouldBeNil)
 	})
 
@@ -2367,8 +2372,7 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
@@ -2405,14 +2409,13 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
-		ses := NewSession(proto, nil, &gSys, true, nil)
-		ses.SetRequestContext(ctx)
+		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		ses.cmd = COM_STMT_EXECUTE
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
 
-		err = proto.SendResultSetTextBatchRowSpeedup(nil, res, 0)
+		err = proto.SendResultSetTextBatchRowSpeedup(res, 0)
 		convey.So(err, convey.ShouldBeNil)
 	})
 }
