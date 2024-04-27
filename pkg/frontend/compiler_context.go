@@ -45,10 +45,8 @@ import (
 )
 
 type TxnCompilerContext struct {
-	dbName               string
-	txnHandler           *TxnHandler
-	ses                  FeSession
-	proc                 *process.Process
+	dbName string
+	//txnHandler           *TxnHandler
 	buildAlterView       bool
 	dbOfView, nameOfView string
 	sub                  *plan.SubscriptionMeta
@@ -67,18 +65,18 @@ func (tcc *TxnCompilerContext) SetExecCtx(execCtx *ExecCtx) {
 }
 
 func (tcc *TxnCompilerContext) ReplacePlan(execPlan *plan.Execute) (*plan.Plan, tree.Statement, error) {
-	p, st, _, err := replacePlan(tcc.execCtx.reqCtx, tcc.ses.(*Session), tcc.tcw, execPlan)
+	p, st, _, err := replacePlan(tcc.execCtx.reqCtx, tcc.execCtx.ses.(*Session), tcc.tcw, execPlan)
 	return p, st, err
 }
 
 func (tcc *TxnCompilerContext) GetStatsCache() *plan2.StatsCache {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
-	return tcc.ses.GetStatsCache()
+	return tcc.execCtx.ses.GetStatsCache()
 }
 
-func InitTxnCompilerContext(txn *TxnHandler, db string) *TxnCompilerContext {
-	return &TxnCompilerContext{txnHandler: txn, dbName: db}
+func InitTxnCompilerContext(db string) *TxnCompilerContext {
+	return &TxnCompilerContext{dbName: db}
 }
 
 func (tcc *TxnCompilerContext) SetBuildingAlterView(yesOrNo bool, dbName, viewName string) {
@@ -95,28 +93,22 @@ func (tcc *TxnCompilerContext) GetBuildingAlterView() (bool, string, string) {
 	return tcc.buildAlterView, tcc.dbOfView, tcc.nameOfView
 }
 
-func (tcc *TxnCompilerContext) SetSession(ses FeSession) {
-	tcc.mu.Lock()
-	defer tcc.mu.Unlock()
-	tcc.ses = ses
-}
-
 func (tcc *TxnCompilerContext) GetSession() FeSession {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
-	return tcc.ses
+	return tcc.execCtx.ses
 }
 
 func (tcc *TxnCompilerContext) GetTxnHandler() *TxnHandler {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
-	return tcc.txnHandler
+	return tcc.execCtx.ses.GetTxnHandler()
 }
 
 func (tcc *TxnCompilerContext) GetUserName() string {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
-	return tcc.ses.GetUserName()
+	return tcc.execCtx.ses.GetUserName()
 }
 
 func (tcc *TxnCompilerContext) SetDatabase(db string) {
@@ -136,7 +128,7 @@ func (tcc *TxnCompilerContext) GetRootSql() string {
 }
 
 func (tcc *TxnCompilerContext) GetAccountId() (uint32, error) {
-	return tcc.ses.GetAccountId(), nil
+	return tcc.execCtx.ses.GetAccountId(), nil
 }
 
 func (tcc *TxnCompilerContext) GetContext() context.Context {
@@ -242,11 +234,11 @@ func (tcc *TxnCompilerContext) getRelation(dbName string, tableName string, sub 
 }
 
 func (tcc *TxnCompilerContext) getTmpRelation(ctx context.Context, tableName string) (engine.Relation, error) {
-	e := tcc.ses.GetTxnHandler().GetStorage()
-	txn := tcc.txnHandler.GetTxn()
+	e := tcc.execCtx.ses.GetTxnHandler().GetStorage()
+	txn := tcc.execCtx.ses.GetTxnHandler().GetTxn()
 	db, err := e.Database(ctx, defines.TEMPORARY_DBNAME, txn)
 	if err != nil {
-		logError(tcc.ses, tcc.ses.GetDebugString(),
+		logError(tcc.execCtx.ses, tcc.execCtx.ses.GetDebugString(),
 			"Failed to get temp database",
 			zap.Error(err))
 		return nil, err
@@ -697,11 +689,11 @@ func (tcc *TxnCompilerContext) statsInCache(ctx context.Context, dbName string, 
 func (tcc *TxnCompilerContext) GetProcess() *process.Process {
 	tcc.mu.Lock()
 	defer tcc.mu.Unlock()
-	return tcc.proc
+	return tcc.execCtx.proc
 }
 
 func (tcc *TxnCompilerContext) GetQueryResultMeta(uuid string) ([]*plan.ColDef, string, error) {
-	proc := tcc.proc
+	proc := tcc.execCtx.proc
 	// get file size
 	path := catalog.BuildQueryResultMetaPath(proc.SessionInfo.Account, uuid)
 	// read meta's meta
@@ -738,11 +730,11 @@ func (tcc *TxnCompilerContext) GetQueryResultMeta(uuid string) ([]*plan.ColDef, 
 	return r.ResultCols, str, nil
 }
 
-func (tcc *TxnCompilerContext) SetProcess(proc *process.Process) {
-	tcc.mu.Lock()
-	defer tcc.mu.Unlock()
-	tcc.proc = proc
-}
+//func (tcc *TxnCompilerContext) SetProcess(proc *process.Process) {
+//	tcc.mu.Lock()
+//	defer tcc.mu.Unlock()
+//	tcc.execCtx.proc = proc
+//}
 
 func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta, error) {
 	txn := tcc.GetTxnHandler().GetTxn()

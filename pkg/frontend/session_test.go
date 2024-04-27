@@ -318,7 +318,7 @@ func TestVariables(t *testing.T) {
 		}
 		setGlobalPu(pu)
 		session := NewSession(context.Background(), proto, nil, gSysVars, true, nil)
-		session.txnCompileCtx.execCtx = &ExecCtx{reqCtx: context.TODO()}
+		session.txnCompileCtx.execCtx = &ExecCtx{reqCtx: context.TODO(), ses: session}
 		return session
 	}
 
@@ -622,7 +622,7 @@ func TestSession_TxnCompilerContext(t *testing.T) {
 		ses := genSession(ctrl, pu, gSysVars)
 
 		tcc := ses.GetTxnCompileCtx()
-		tcc.execCtx = &ExecCtx{reqCtx: ctx}
+		tcc.execCtx = &ExecCtx{reqCtx: ctx, ses: ses}
 		defDBName := tcc.DefaultDatabase()
 		convey.So(defDBName, convey.ShouldEqual, "")
 		convey.So(tcc.DatabaseExists("abc"), convey.ShouldBeTrue)
@@ -867,8 +867,8 @@ func TestSession_Migrate(t *testing.T) {
 		})
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session := NewSession(ctx, proto, nil, gSysVars, true, nil)
-		session.txnCompileCtx.SetProcess(testutil.NewProc())
-		session.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx}
+		//session.txnCompileCtx.SetProcess(testutil.NewProc())
+		session.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx, proc: testutil.NewProc(), ses: session}
 		return session
 	}
 	ctrl := gomock.NewController(t)

@@ -121,9 +121,11 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	ses.SetTenantInfo(tenant)
 	proc := testutil.NewProcess()
 	proc.FileService = getGlobalPu().FileService
-	ses.GetTxnCompileCtx().SetProcess(proc)
-	ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
-
+	//ses.GetTxnCompileCtx().SetProcess(proc)
+	proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
+	ses.GetTxnCompileCtx().execCtx = &ExecCtx{
+		proc: proc,
+	}
 	//three columns
 	typs := []types.Type{
 		types.T_int8.ToType(),

@@ -5942,8 +5942,11 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
+		//ses.GetTxnCompileCtx().SetProcess(proc)
+		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
+		ses.GetTxnCompileCtx().execCtx = &ExecCtx{
+			proc: proc,
+		}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
@@ -5982,13 +5985,13 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
+		//ses.GetTxnCompileCtx().SetProcess(proc)
+		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		ses.GetTxnCompileCtx().execCtx = &ExecCtx{reqCtx: ctx}
+		ses.GetTxnCompileCtx().execCtx = &ExecCtx{reqCtx: ctx, proc: proc, ses: ses}
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6035,13 +6038,14 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
+		//ses.GetTxnCompileCtx().SetProcess(proc)
+		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		ses.GetTxnCompileCtx().execCtx = &ExecCtx{reqCtx: ctx}
+		ses.GetTxnCompileCtx().execCtx = &ExecCtx{reqCtx: ctx, proc: proc,
+			ses: ses}
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 

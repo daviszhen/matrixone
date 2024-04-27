@@ -848,8 +848,7 @@ func runTestHandle(funName string, t *testing.T, handleFun func(ses *Session) er
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 
 		ses.mrs = &MysqlResultSet{}
-		ses.txnCompileCtx.proc = testutil.NewProc()
-		ses.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx}
+		ses.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx, proc: testutil.NewProc(), ses: ses}
 
 		convey.So(handleFun(ses), convey.ShouldBeNil)
 	})

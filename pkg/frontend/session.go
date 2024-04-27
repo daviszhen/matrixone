@@ -457,7 +457,7 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 			pool:       mp,
 			txnHandler: txnHandler,
 			//TODO:fix database name after the catalog is ready
-			txnCompileCtx:  InitTxnCompilerContext(txnHandler, proto.GetDatabaseName()),
+			txnCompileCtx:  InitTxnCompilerContext(proto.GetDatabaseName()),
 			gSysVars:       gSysVars,
 			outputCallback: getDataFromPipeline,
 			timeZone:       time.Local,
@@ -490,8 +490,6 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 	ses.sqlHelper = &SqlHelper{ses: ses}
 	ses.uuid, _ = uuid.NewV7()
 	//ses.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
-	ses.GetTxnCompileCtx().SetSession(ses)
-	//ses.GetTxnHandler().SetSession(ses)
 	if ses.pool == nil {
 		// If no mp, we create one for session.  Use GuestMmuLimitation as cap.
 		// fixed pool size can be another param, or should be computed from cap,
@@ -536,7 +534,7 @@ func (ses *Session) Close() {
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {
-		ses.txnCompileCtx.ses = nil
+		ses.txnCompileCtx.execCtx = nil
 		ses.txnCompileCtx = nil
 	}
 	ses.sql = ""
@@ -725,7 +723,7 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 			stmtProfile:    process.StmtProfile{},
 			tenant:         nil,
 			txnHandler:     txnHandler,
-			txnCompileCtx:  InitTxnCompilerContext(txnHandler, ses.proto.GetDatabaseName()),
+			txnCompileCtx:  InitTxnCompilerContext(ses.proto.GetDatabaseName()),
 			mrs:            nil,
 			outputCallback: callback,
 			allResultSet:   nil,
@@ -738,8 +736,6 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 	}
 	backSes.uuid, _ = uuid.NewV7()
 	//backSes.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
-	backSes.GetTxnCompileCtx().SetSession(backSes)
-	//backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -762,7 +758,7 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 			stmtProfile:    process.StmtProfile{},
 			tenant:         nil,
 			txnHandler:     txnHandler,
-			txnCompileCtx:  InitTxnCompilerContext(txnHandler, ""),
+			txnCompileCtx:  InitTxnCompilerContext(""),
 			mrs:            nil,
 			outputCallback: batchFetcher2,
 			allResultSet:   nil,
@@ -774,8 +770,6 @@ func (ses *Session) GetRawBatchBackgroundExec(ctx context.Context) BackgroundExe
 		},
 	}
 	backSes.uuid, _ = uuid.NewV7()
-	backSes.GetTxnCompileCtx().SetSession(backSes)
-	//backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
 		backSes: backSes,
 	}

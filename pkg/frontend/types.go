@@ -429,7 +429,7 @@ func (ses *feSessionImpl) Close() {
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {
-		ses.txnCompileCtx.ses = nil
+		ses.txnCompileCtx.execCtx = nil
 		ses.txnCompileCtx = nil
 	}
 	ses.sql = ""

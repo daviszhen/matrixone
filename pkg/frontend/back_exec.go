@@ -197,7 +197,7 @@ func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 	defer span.End()
 
 	proc.SessionInfo.User = userNameOnly
-	backSes.txnCompileCtx.SetProcess(proc)
+	//backSes.txnCompileCtx.SetProcess(proc)
 
 	cws, err := GetComputationWrapperInBack(execCtx, backSes.proto.GetDatabaseName(),
 		input,
@@ -408,7 +408,7 @@ var NewBackgroundExec = func(
 			stmtProfile:    process.StmtProfile{},
 			tenant:         nil,
 			txnHandler:     txnHandler,
-			txnCompileCtx:  InitTxnCompilerContext(txnHandler, ""),
+			txnCompileCtx:  InitTxnCompilerContext(""),
 			mrs:            nil,
 			outputCallback: fakeDataSetFetcher2,
 			allResultSet:   nil,
@@ -420,8 +420,6 @@ var NewBackgroundExec = func(
 		},
 	}
 	backSes.uuid, _ = uuid.NewV7()
-	backSes.GetTxnCompileCtx().SetSession(backSes)
-	//backSes.GetTxnHandler().SetSession(backSes)
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -481,7 +479,8 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, execCtx *ExecCt
 		//@todo we need to improve: make one session, one proc, one txnOperator
 		p := ses.GetTxnCompileCtx().GetProcess()
 		p.FreeVectors()
-		ses.GetTxnCompileCtx().SetProcess(proc)
+		//ses.GetTxnCompileCtx().SetProcess(proc)
+		execCtx.proc = proc
 		ses.GetTxnHandler().SetOptionBits(prevOptionBits)
 		ses.GetTxnHandler().SetServerStatus(prevServerStatus)
 		ses.SetOutputCallback(getDataFromPipeline)
