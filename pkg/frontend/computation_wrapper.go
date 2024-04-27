@@ -90,7 +90,7 @@ func (ncw *NullComputationWrapper) Clear() {
 func (ncw *NullComputationWrapper) Plan() *plan.Plan {
 	return nil
 }
-func (ncw *NullComputationWrapper) SetPlan(p *plan.Plan) {
+func (ncw *NullComputationWrapper) ResetPlanAndStmt(tree.Statement) {
 
 }
 
@@ -126,8 +126,9 @@ func (cwft *TxnComputationWrapper) Plan() *plan.Plan {
 	return cwft.plan
 }
 
-func (cwft *TxnComputationWrapper) SetPlan(p *plan.Plan) {
-	cwft.plan = p
+func (cwft *TxnComputationWrapper) ResetPlanAndStmt(stmt tree.Statement) {
+	cwft.plan = nil
+	cwft.stmt = stmt
 }
 
 func (cwft *TxnComputationWrapper) GetAst() tree.Statement {

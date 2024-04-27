@@ -233,7 +233,7 @@ func Test_mce(t *testing.T) {
 			cws = append(cws, select_2)
 		}
 
-		stubs := gostub.StubFunc(&GetComputationWrapper2, cws, nil)
+		stubs := gostub.StubFunc(&GetComputationWrapper, cws, nil)
 		defer stubs.Reset()
 
 		pu, err := getParameterUnit("test/system_vars_config.toml", eng, txnClient)
@@ -812,8 +812,10 @@ func Test_GetComputationWrapper(t *testing.T) {
 			},
 		}
 		ec := newTestExecCtx(context.Background(), ctrl)
+		ec.ses = ses
+		ec.input = &UserInput{sql: sql}
 
-		cw, err := GetComputationWrapper2(ec, db, &UserInput{sql: sql}, user, eng, proc, ses)
+		cw, err := GetComputationWrapper(ec, db, user, eng, proc, ses)
 		convey.So(cw, convey.ShouldNotBeEmpty)
 		convey.So(err, convey.ShouldBeNil)
 	})

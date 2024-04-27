@@ -2032,9 +2032,9 @@ func checkModify(plan2 *plan.Plan, ses FeSession) bool {
 	return false
 }
 
-var GetComputationWrapper2 = func(execCtx *ExecCtx, db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
+var GetComputationWrapper = func(execCtx *ExecCtx, db string, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 	var cws []ComputationWrapper = nil
-	if cached := ses.getCachedPlan(input.getSql()); cached != nil {
+	if cached := ses.getCachedPlan(execCtx.input.getSql()); cached != nil {
 		for i, stmt := range cached.stmts {
 			tcw := InitTxnComputationWrapper(ses, stmt, proc)
 			tcw.plan = cached.plans[i]
@@ -2048,26 +2048,16 @@ var GetComputationWrapper2 = func(execCtx *ExecCtx, db string, input *UserInput,
 	var cmdFieldStmt *InternalCmdFieldList
 	var err error
 	// if the input is an option ast, we should use it directly
-	if input.getStmt() != nil {
-		stmts = append(stmts, input.getStmt())
-	} else if isCmdFieldListSql(input.getSql()) {
-		cmdFieldStmt, err = parseCmdFieldList(execCtx.reqCtx, input.getSql())
+	if execCtx.input.getStmt() != nil {
+		stmts = append(stmts, execCtx.input.getStmt())
+	} else if isCmdFieldListSql(execCtx.input.getSql()) {
+		cmdFieldStmt, err = parseCmdFieldList(execCtx.reqCtx, execCtx.input.getSql())
 		if err != nil {
 			return nil, err
 		}
 		stmts = append(stmts, cmdFieldStmt)
 	} else {
-		var v interface{}
-		var origin interface{}
-		v, err = ses.GetGlobalVar(execCtx.reqCtx, "lower_case_table_names")
-		if err != nil {
-			v = int64(1)
-		}
-		origin, err = ses.GetGlobalVar(execCtx.reqCtx, "keep_user_target_list_in_result")
-		if err != nil {
-			origin = int64(0)
-		}
-		stmts, err = parsers.Parse(execCtx.reqCtx, dialect.MYSQL, input.getSql(), v.(int64), origin.(int64))
+		stmts, err = parseSql(execCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -2077,6 +2067,24 @@ var GetComputationWrapper2 = func(execCtx *ExecCtx, db string, input *UserInput,
 		cws = append(cws, InitTxnComputationWrapper(ses, stmt, proc))
 	}
 	return cws, nil
+}
+
+func parseSql(execCtx *ExecCtx) (stmts []tree.Statement, err error) {
+	var v interface{}
+	var origin interface{}
+	v, err = execCtx.ses.GetGlobalVar(execCtx.reqCtx, "lower_case_table_names")
+	if err != nil {
+		v = int64(1)
+	}
+	origin, err = execCtx.ses.GetGlobalVar(execCtx.reqCtx, "keep_user_target_list_in_result")
+	if err != nil {
+		origin = int64(0)
+	}
+	stmts, err = parsers.Parse(execCtx.reqCtx, dialect.MYSQL, execCtx.input.getSql(), v.(int64), origin.(int64))
+	if err != nil {
+		return nil, err
+	}
+	return
 }
 
 func incTransactionCounter(tenant string) {
@@ -2470,6 +2478,7 @@ func executeStmtWithIncrStmt(ses FeSession,
 			panic("need txn handler 3")
 		}
 
+		//!!!NOTE!!!: it does not work
 		//_, txnOp = ses.GetTxnHandler().GetTxn()
 		//if txnOp != nil {
 		//	err = rollbackLastStmt(execCtx, txnOp, err)
@@ -2485,11 +2494,19 @@ func dispatchStmt(ses FeSession,
 	//5. check plan within txn
 	if execCtx.cw.Plan() != nil {
 		if checkModify(execCtx.cw.Plan(), ses) {
-			execCtx.cw.SetPlan(nil)
+
 			//plan changed
-			//clear all cached plan
-			for _, cw := range execCtx.cws {
-				cw.SetPlan(nil)
+			//clear all cached plan and parse sql again
+			var stmts []tree.Statement
+			stmts, err = parseSql(execCtx)
+			if err != nil {
+				return err
+			}
+			if len(stmts) != len(execCtx.cws) {
+				return moerr.NewInternalError(execCtx.reqCtx, "the count of stmts parsed from cached sql is not equal to cws length")
+			}
+			for i, cw := range execCtx.cws {
+				cw.ResetPlanAndStmt(stmts[i])
 			}
 		}
 	}
@@ -2750,9 +2767,9 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 
 	statsInfo := statistic.StatsInfo{ParseStartTime: beginInstant}
 	execCtx.reqCtx = statistic.ContextWithStatsInfo(execCtx.reqCtx, &statsInfo)
+	execCtx.input = input
 
-	cws, err := GetComputationWrapper2(execCtx, ses.GetDatabaseName(),
-		input,
+	cws, err := GetComputationWrapper(execCtx, ses.GetDatabaseName(),
 		ses.GetUserName(),
 		getGlobalPu().StorageEngine,
 		proc, ses)
@@ -2880,6 +2897,7 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 		execCtx.proto = proto
 		execCtx.ses = ses
 		execCtx.cws = cws
+		execCtx.input = input
 
 		err = executeStmtWithResponse(ses, execCtx)
 		if err != nil {

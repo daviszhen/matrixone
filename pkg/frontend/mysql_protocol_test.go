@@ -228,31 +228,31 @@ func TestKIll(t *testing.T) {
 		seconds:    30,
 	}
 
-	var wrapperStubFunc = func(execCtx *ExecCtx, db string, input *UserInput, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
+	var wrapperStubFunc = func(execCtx *ExecCtx, db string, user string, eng engine.Engine, proc *process.Process, ses *Session) ([]ComputationWrapper, error) {
 		var cw []ComputationWrapper = nil
 		var stmts []tree.Statement = nil
 		var cmdFieldStmt *InternalCmdFieldList
 		var err error
-		if isCmdFieldListSql(input.getSql()) {
-			cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, input.getSql())
+		if isCmdFieldListSql(execCtx.input.getSql()) {
+			cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, execCtx.input.getSql())
 			if err != nil {
 				return nil, err
 			}
 			stmts = append(stmts, cmdFieldStmt)
 		} else {
-			stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, input.getSql(), 1, 0)
+			stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, execCtx.input.getSql(), 1, 0)
 			if err != nil {
 				return nil, err
 			}
 		}
 
 		for _, stmt := range stmts {
-			cw = append(cw, newMockWrapper(ctrl, ses, resultSet, noResultSet, input.getSql(), stmt, proc))
+			cw = append(cw, newMockWrapper(ctrl, ses, resultSet, noResultSet, execCtx.input.getSql(), stmt, proc))
 		}
 		return cw, nil
 	}
 
-	bhStub := gostub.Stub(&GetComputationWrapper2, wrapperStubFunc)
+	bhStub := gostub.Stub(&GetComputationWrapper, wrapperStubFunc)
 	defer bhStub.Reset()
 
 	ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)

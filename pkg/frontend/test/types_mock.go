@@ -231,6 +231,18 @@ func (mr *MockComputationWrapperMockRecorder) RecordExecPlan(ctx interface{}) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordExecPlan", reflect.TypeOf((*MockComputationWrapper)(nil).RecordExecPlan), ctx)
 }
 
+// ResetPlanAndStmt mocks base method.
+func (m *MockComputationWrapper) ResetPlanAndStmt(stmt tree.Statement) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ResetPlanAndStmt", stmt)
+}
+
+// ResetPlanAndStmt indicates an expected call of ResetPlanAndStmt.
+func (mr *MockComputationWrapperMockRecorder) ResetPlanAndStmt(stmt interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResetPlanAndStmt", reflect.TypeOf((*MockComputationWrapper)(nil).ResetPlanAndStmt), stmt)
+}
+
 // Run mocks base method.
 func (m *MockComputationWrapper) Run(ts uint64) (*util.RunResult, error) {
 	m.ctrl.T.Helper()
@@ -244,18 +256,6 @@ func (m *MockComputationWrapper) Run(ts uint64) (*util.RunResult, error) {
 func (mr *MockComputationWrapperMockRecorder) Run(ts interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockComputationWrapper)(nil).Run), ts)
-}
-
-// SetPlan mocks base method.
-func (m *MockComputationWrapper) SetPlan(arg0 *plan.Plan) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetPlan", arg0)
-}
-
-// SetPlan indicates an expected call of SetPlan.
-func (mr *MockComputationWrapperMockRecorder) SetPlan(arg0 interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPlan", reflect.TypeOf((*MockComputationWrapper)(nil).SetPlan), arg0)
 }
 
 // MockColumnInfo is a mock of ColumnInfo interface.

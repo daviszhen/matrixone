@@ -74,7 +74,7 @@ type ComputationWrapper interface {
 	GetServerStatus() uint16
 	Clear()
 	Plan() *plan.Plan
-	SetPlan(*plan.Plan)
+	ResetPlanAndStmt(stmt tree.Statement)
 	Free()
 }
 
@@ -361,6 +361,7 @@ type ExecCtx struct {
 	ses             FeSession
 	txnOpt          FeTxnOption
 	cws             []ComputationWrapper
+	input           *UserInput
 }
 
 // outputCallBackFunc is the callback function to send the result to the client.
