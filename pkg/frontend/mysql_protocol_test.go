@@ -234,13 +234,13 @@ func TestKIll(t *testing.T) {
 		var cmdFieldStmt *InternalCmdFieldList
 		var err error
 		if isCmdFieldListSql(execCtx.input.getSql()) {
-			cmdFieldStmt, err = parseCmdFieldList(proc.Ctx, execCtx.input.getSql())
+			cmdFieldStmt, err = parseCmdFieldList(execCtx.reqCtx, execCtx.input.getSql())
 			if err != nil {
 				return nil, err
 			}
 			stmts = append(stmts, cmdFieldStmt)
 		} else {
-			stmts, err = parsers.Parse(proc.Ctx, dialect.MYSQL, execCtx.input.getSql(), 1, 0)
+			stmts, err = parsers.Parse(execCtx.reqCtx, dialect.MYSQL, execCtx.input.getSql(), 1, 0)
 			if err != nil {
 				return nil, err
 			}

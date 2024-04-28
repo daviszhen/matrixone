@@ -287,7 +287,7 @@ func executeStmtInBack(backSes *backSession,
 			return
 		}
 		if st.SubscriptionOption != nil && backSes.tenant != nil && !backSes.tenant.IsAdminRole() {
-			err = moerr.NewInternalError(execCtx.proc.Ctx, "only admin can create subscription")
+			err = moerr.NewInternalError(execCtx.reqCtx, "only admin can create subscription")
 			return
 		}
 		st.Sql = execCtx.sqlOfStmt

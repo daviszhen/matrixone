@@ -1123,7 +1123,7 @@ func TestProcessLoadLocal(t *testing.T) {
 			} else if cnt == 1 {
 				pkt = &Packet{Length: 5, Payload: []byte("world"), SequenceID: 2}
 			} else {
-				err = moerr.NewInvalidInput(proc.Ctx, "length 0")
+				err = moerr.NewInvalidInput(context.TODO(), "length 0")
 			}
 			cnt++
 			return

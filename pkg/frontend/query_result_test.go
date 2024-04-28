@@ -124,7 +124,8 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	//ses.GetTxnCompileCtx().SetProcess(proc)
 	proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 	ses.GetTxnCompileCtx().execCtx = &ExecCtx{
-		proc: proc,
+		reqCtx: context.TODO(),
+		proc:   proc,
 	}
 	//three columns
 	typs := []types.Type{

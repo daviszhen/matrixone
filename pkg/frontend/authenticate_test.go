@@ -11036,7 +11036,7 @@ func TestUpload(t *testing.T) {
 			} else if cnt == 1 {
 				pkt = &Packet{Length: 5, Payload: []byte("  return a + b"), SequenceID: 2}
 			} else {
-				err = moerr.NewInvalidInput(proc.Ctx, "length 0")
+				err = moerr.NewInvalidInput(context.TODO(), "length 0")
 			}
 			cnt++
 			return
@@ -11044,7 +11044,7 @@ func TestUpload(t *testing.T) {
 		proto := &FakeProtocol{
 			ioses: ioses,
 		}
-		fs, err := fileservice.NewLocalFS(proc.Ctx, defines.SharedFileServiceName, t.TempDir(), fileservice.DisabledCacheConfig, nil)
+		fs, err := fileservice.NewLocalFS(context.TODO(), defines.SharedFileServiceName, t.TempDir(), fileservice.DisabledCacheConfig, nil)
 		convey.So(err, convey.ShouldBeNil)
 		proc.FileService = fs
 
@@ -11066,7 +11066,7 @@ func TestUpload(t *testing.T) {
 			},
 			proc: proc,
 		}
-		ec := newTestExecCtx(proc.Ctx, ctrl)
+		ec := newTestExecCtx(context.TODO(), ctrl)
 		fp, err := Upload(ses, ec, "test.py", "test")
 		convey.So(err, convey.ShouldBeNil)
 		iovec := &fileservice.IOVector{
@@ -11078,7 +11078,7 @@ func TestUpload(t *testing.T) {
 				},
 			},
 		}
-		err = fs.Read(proc.Ctx, iovec)
+		err = fs.Read(context.TODO(), iovec)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(iovec.Entries[0].Data, convey.ShouldResemble, []byte("def add(a, b):\n  return a + b"))
 	})

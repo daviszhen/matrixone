@@ -705,10 +705,10 @@ func (tcc *TxnCompilerContext) GetQueryResultMeta(uuid string) ([]*plan.ColDef, 
 	idxs[0] = catalog.COLUMNS_IDX
 	idxs[1] = catalog.RESULT_PATH_IDX
 	// read meta's data
-	bats, release, err := reader.LoadAllColumns(proc.Ctx, idxs, common.DefaultAllocator)
+	bats, release, err := reader.LoadAllColumns(tcc.execCtx.reqCtx, idxs, common.DefaultAllocator)
 	if err != nil {
 		if moerr.IsMoErrCode(err, moerr.ErrFileNotFound) {
-			return nil, "", moerr.NewResultFileNotFound(proc.Ctx, makeResultMetaPath(proc.SessionInfo.Account, uuid))
+			return nil, "", moerr.NewResultFileNotFound(tcc.execCtx.reqCtx, makeResultMetaPath(proc.SessionInfo.Account, uuid))
 		}
 		return nil, "", err
 	}
