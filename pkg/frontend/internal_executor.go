@@ -152,11 +152,11 @@ func (ie *internalExecutor) Exec(ctx context.Context, sql string, opts ie.Sessio
 	if sql == "" {
 		return
 	}
-	execCtx := ExecCtx{
+	tempExecCtx := ExecCtx{
 		reqCtx: ctx,
 		ses:    sess,
 	}
-	return doComQuery(sess, &execCtx, &UserInput{sql: sql})
+	return doComQuery(sess, &tempExecCtx, &UserInput{sql: sql})
 }
 
 func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.SessionOverrideOptions) ie.InternalExecResult {
@@ -169,11 +169,11 @@ func (ie *internalExecutor) Query(ctx context.Context, sql string, opts ie.Sessi
 	defer sess.Close()
 	ie.proto.stashResult = true
 	logutil.Info("internalExecutor new session", trace.ContextField(ctx), zap.String("session uuid", sess.uuid.String()))
-	execCtx := ExecCtx{
+	tempExecCtx := ExecCtx{
 		reqCtx: ctx,
 		ses:    sess,
 	}
-	err := doComQuery(sess, &execCtx, &UserInput{sql: sql})
+	err := doComQuery(sess, &tempExecCtx, &UserInput{sql: sql})
 	res := ie.proto.swapOutResult()
 	res.err = err
 	return res

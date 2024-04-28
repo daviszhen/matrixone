@@ -1030,7 +1030,11 @@ func handleAnalyzeStmt(ses *Session, execCtx *ExecCtx, stmt *tree.AnalyzeStmt) e
 		//restore the inside statement
 		ses.ReplaceDerivedStmt(prevInsideStmt)
 	}()
-	return doComQuery(ses, execCtx, &UserInput{sql: sql})
+	tempExecCtx := ExecCtx{
+		ses:    ses,
+		reqCtx: execCtx.reqCtx,
+	}
+	return doComQuery(ses, &tempExecCtx, &UserInput{sql: sql})
 }
 
 func doExplainStmt(reqCtx context.Context, ses *Session, stmt *tree.ExplainStmt) error {
@@ -2338,9 +2342,6 @@ func executeStmtWithResponse(ses *Session,
 	defer ses.SetQueryEnd(time.Now())
 	defer ses.SetQueryInProgress(false)
 
-	execCtx.proto.DisableAutoFlush()
-	defer execCtx.proto.EnableAutoFlush()
-
 	err = executeStmtWithTxn(ses, execCtx)
 	if err != nil {
 		return err
@@ -2365,7 +2366,6 @@ func executeStmtWithResponse(ses *Session,
 		return err
 	}
 
-	err = execCtx.proto.Flush()
 	return
 }
 

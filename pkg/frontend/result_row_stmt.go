@@ -265,6 +265,11 @@ func respStreamResultRow(ses *Session,
 			if err != nil {
 				return
 			}
+
+			err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
+			if err != nil {
+				return
+			}
 		}
 	default:
 		err = execCtx.proto.sendEOFOrOkPacket(0, ses.GetTxnHandler().GetServerStatus())
