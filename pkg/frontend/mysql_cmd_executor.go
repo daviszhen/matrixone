@@ -2351,7 +2351,11 @@ func executeStmtWithResponse(ses *Session,
 	if ses.createAsSelectSql != "" {
 		sql := ses.createAsSelectSql
 		ses.createAsSelectSql = ""
-		if err = doComQuery(ses, execCtx, &UserInput{sql: sql}); err != nil {
+		tempExecCtx := ExecCtx{
+			ses:    ses,
+			reqCtx: execCtx.reqCtx,
+		}
+		if err = doComQuery(ses, &tempExecCtx, &UserInput{sql: sql}); err != nil {
 			return err
 		}
 	}

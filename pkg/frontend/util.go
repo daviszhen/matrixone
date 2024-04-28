@@ -307,11 +307,11 @@ func getExprValue(e tree.Expr, ses *Session, execCtx *ExecCtx) (interface{}, err
 	//run the statement in the same session
 	ses.ClearResultBatches()
 	//!!!different ExecCtx
-	newExecCtx := ExecCtx{
+	tempExecCtx := ExecCtx{
 		reqCtx: execCtx.reqCtx,
 		ses:    ses,
 	}
-	err = executeStmtInSameSession(newExecCtx.reqCtx, ses, &newExecCtx, compositedSelect)
+	err = executeStmtInSameSession(tempExecCtx.reqCtx, ses, &tempExecCtx, compositedSelect)
 	if err != nil {
 		return nil, err
 	}
