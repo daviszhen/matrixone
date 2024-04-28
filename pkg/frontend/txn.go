@@ -76,11 +76,11 @@ func commitTxnFunc(ses FeSession,
 	execCtx *ExecCtx) (retErr error) {
 	// Call a defer function -- if TxnCommitSingleStatement paniced, we
 	// want to catch it and convert it to an error.
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		retErr = moerr.ConvertPanicError(requestCtx, r)
-	//	}
-	//}()
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = moerr.ConvertPanicError(execCtx.reqCtx, r)
+		}
+	}()
 
 	//load data handle txn failure internally
 	retErr = ses.GetTxnHandler().Commit(execCtx)
@@ -93,23 +93,23 @@ func commitTxnFunc(ses FeSession,
 // finish the transaction
 func finishTxnFunc(ses FeSession, execErr error, execCtx *ExecCtx) (err error) {
 	// First recover all panics.   If paniced, we will abort.
-	//if r := recover(); r != nil {
-	//	recoverErr := moerr.ConvertPanicError(reqCtx, r)
-	//	logError(ses, ses.GetDebugString(), "recover from panic", zap.Error(recoverErr), zap.Error(execErr))
-	//}
+	if r := recover(); r != nil {
+		recoverErr := moerr.ConvertPanicError(execCtx.reqCtx, r)
+		logError(ses, ses.GetDebugString(), "recover from panic", zap.Error(recoverErr), zap.Error(execErr))
+	}
 
 	if execCtx.txnOpt.byCommit {
 		//commit the txn by the COMMIT statement
-		txnErr := ses.GetTxnHandler().Commit(execCtx)
-		if txnErr != nil {
-			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, txnErr)
+		err = ses.GetTxnHandler().Commit(execCtx)
+		if err != nil {
+			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, err)
 		}
 	} else if execCtx.txnOpt.byRollback {
 		//roll back the txn by the ROLLBACK statement
-		txnErr := ses.GetTxnHandler().Rollback(execCtx)
-		if txnErr != nil {
-			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, txnErr)
-			return txnErr
+		err = ses.GetTxnHandler().Rollback(execCtx)
+		if err != nil {
+			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, err)
+			return err
 		}
 	} else {
 		if execErr == nil {

@@ -3992,7 +3992,7 @@ func doCreatePublication(ctx context.Context, ses *Session, cp *tree.CreatePubli
 		return err
 	}
 	err = bh.Exec(ctx, sql)
-	if err != nil {
+ 	if err != nil {
 		return err
 	}
 	return err
