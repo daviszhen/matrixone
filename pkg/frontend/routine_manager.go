@@ -420,6 +420,8 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 
 	// finish handshake process
 	if !protocol.IsEstablished() {
+		tempCtx, tempCancel := context.WithTimeout(ctx, getGlobalPu().SV.SessionTimeout.Duration)
+		defer tempCancel()
 		ts[TSEstablishStart] = time.Now()
 		logDebugf(protoInfo, "HANDLE HANDSHAKE")
 
@@ -429,7 +431,7 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 		*/
 		if protocol.GetCapability()&CLIENT_SSL != 0 && !protocol.IsTlsEstablished() {
 			logDebugf(protoInfo, "setup ssl")
-			isTlsHeader, err = protocol.HandleHandshake(ctx, payload)
+			isTlsHeader, err = protocol.HandleHandshake(tempCtx, payload)
 			if err != nil {
 				logError(routine.ses, routine.ses.GetDebugString(),
 					"An error occurred",
@@ -442,8 +444,8 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 				// do upgradeTls
 				tlsConn := tls.Server(rs.RawConn(), rm.getTlsConfig())
 				logDebugf(protoInfo, "get TLS conn ok")
-				newCtx, cancelFun := context.WithTimeout(ctx, 20*time.Second)
-				if err = tlsConn.HandshakeContext(newCtx); err != nil {
+				tlsCtx, cancelFun := context.WithTimeout(tempCtx, 20*time.Second)
+				if err = tlsConn.HandshakeContext(tlsCtx); err != nil {
 					logError(routine.ses, routine.ses.GetDebugString(),
 						"Error occurred before cancel()",
 						zap.Error(err))
@@ -464,7 +466,7 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 				v2.UpgradeTLSDurationHistogram.Observe(ts[TSUpgradeTLSEnd].Sub(ts[TSUpgradeTLSStart]).Seconds())
 			} else {
 				// client don't ask server to upgrade TLS
-				if err := protocol.Authenticate(ctx); err != nil {
+				if err := protocol.Authenticate(tempCtx); err != nil {
 					return err
 				}
 				protocol.SetTlsEstablished()
@@ -472,14 +474,14 @@ func (rm *RoutineManager) Handler(rs goetty.IOSession, msg interface{}, received
 			}
 		} else {
 			logDebugf(protoInfo, "handleHandshake")
-			_, err = protocol.HandleHandshake(ctx, payload)
+			_, err = protocol.HandleHandshake(tempCtx, payload)
 			if err != nil {
 				logError(routine.ses, routine.ses.GetDebugString(),
 					"Error occurred",
 					zap.Error(err))
 				return err
 			}
-			if err = protocol.Authenticate(ctx); err != nil {
+			if err = protocol.Authenticate(tempCtx); err != nil {
 				return err
 			}
 			protocol.SetEstablished()
