@@ -344,12 +344,11 @@ func (rt *Routine) killQuery(killMyself bool, statementId string) {
 	if !killMyself {
 		//1,cancel request ctx
 		rt.cancelRequestCtx()
-		//2.cancel txn ctx
+		//2.update execute state
 		ses := rt.getSession()
 		if ses != nil {
 			ses.SetQueryInExecute(false)
 			logutil.Infof("set query status on the connection %d", rt.getConnectionID())
-			//TODO: cancel the execCtx
 		}
 	}
 }
