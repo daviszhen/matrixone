@@ -310,7 +310,7 @@ func splitAndBindCondition(astExpr tree.Expr, expandAlias ExpandAliasMode, ctx *
 		// expr must be bool type, if not, try to do type convert
 		// but just ignore the subQuery. It will be solved at optimizer.
 		if expr.GetSub() == nil {
-			expr, err = makePlan2CastExpr(ctx.binder.GetContext(), expr, &plan.Type{Id: int32(types.T_bool)})
+			expr, err = makePlan2CastExpr(ctx.binder.GetContext(), expr, plan.Type{Id: int32(types.T_bool)})
 			if err != nil {
 				return nil, err
 			}
@@ -1998,6 +1998,21 @@ func MakeRuntimeFilter(tag int32, matchPrefix bool, upperlimit int32, expr *Expr
 	}
 }
 
+func MakeIntervalExpr(num int64, str string) *Expr {
+	arg0 := makePlan2Int64ConstExprWithType(num)
+	arg1 := makePlan2StringConstExprWithType(str, false)
+	return &plan.Expr{
+		Typ: plan.Type{
+			Id: int32(types.T_interval),
+		},
+		Expr: &plan.Expr_List{
+			List: &plan.ExprList{
+				List: []*Expr{arg0, arg1},
+			},
+		},
+	}
+}
+
 func MakeInExpr(ctx context.Context, left *Expr, length int32, data []byte, matchPrefix bool) *Expr {
 	rightArg := &plan.Expr{
 		Typ: plan.Type{
@@ -2086,4 +2101,11 @@ func replaceParamVals(ctx context.Context, plan0 *Plan, paramVals []any) error {
 		return err
 	}
 	return nil
+}
+
+// XXX: Any code relying on Name in ColRef, except for "explain", is bad design and practically buggy.
+func (builder *QueryBuilder) addNameByColRef(tag int32, tableDef *plan.TableDef) {
+	for i, col := range tableDef.Cols {
+		builder.nameByColRef[[2]int32{tag, int32(i)}] = tableDef.Name + "." + col.Name
+	}
 }

@@ -56,7 +56,6 @@ func (back *backExec) Close() {
 
 func (back *backExec) Exec(ctx context.Context, sql string) error {
 	if ctx == nil {
-		//ctx = back.backSes.GetRequestContext()
 		return moerr.NewInternalError(context.Background(), "context is nil")
 	}
 	_, err := defines.GetAccountId(ctx)
@@ -197,8 +196,6 @@ func doComQueryInBack(backSes *backSession, execCtx *ExecCtx,
 	defer span.End()
 
 	proc.SessionInfo.User = userNameOnly
-	//backSes.txnCompileCtx.SetProcess(proc)
-
 	cws, err := GetComputationWrapperInBack(execCtx, backSes.proto.GetDatabaseName(),
 		input,
 		backSes.proto.GetUserName(),
@@ -488,12 +485,10 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, execCtx *ExecCt
 		if ses.GetTxnHandler() == nil {
 			panic("need txn handler 4")
 		}
-
 	}()
 	logDebug(ses, ses.GetDebugString(), "query trace(ExecStmtInSameSession)",
 		logutil.ConnectionIdField(ses.GetConnectionID()))
 	//3. execute the statement
-
 	return doComQuery(ses, execCtx, &UserInput{stmt: stmt})
 }
 

@@ -81,7 +81,6 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 			return
 		}
 	case *tree.PrepareString:
-
 		execCtx.prepareStmt, err = handlePrepareString(ses, execCtx, st)
 		if err != nil {
 			return
@@ -337,7 +336,6 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 			return
 		}
 	case *tree.ShowBackendServers:
-
 		if err = handleShowBackendServers(ses, execCtx, execCtx.isLastStmt); err != nil {
 			return
 		}

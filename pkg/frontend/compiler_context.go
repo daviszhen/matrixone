@@ -45,8 +45,7 @@ import (
 )
 
 type TxnCompilerContext struct {
-	dbName string
-	//txnHandler           *TxnHandler
+	dbName               string
 	buildAlterView       bool
 	dbOfView, nameOfView string
 	sub                  *plan.SubscriptionMeta
@@ -279,6 +278,29 @@ func (tcc *TxnCompilerContext) ResolveById(tableId uint64) (*plan2.ObjectRef, *p
 		Obj:        int64(tableId),
 	}
 	tableDef := table.CopyTableDef(tcc.execCtx.reqCtx)
+	return obj, tableDef
+}
+
+func (tcc *TxnCompilerContext) ResolveSubscriptionTableById(tableId uint64, pubmeta *plan.SubscriptionMeta) (*plan2.ObjectRef, *plan2.TableDef) {
+	txn := tcc.GetTxnHandler().GetTxn()
+
+	pubContext := tcc.execCtx.reqCtx
+	if pubmeta != nil {
+		pubContext = context.WithValue(pubContext, defines.TenantIDKey{}, uint32(pubmeta.AccountId))
+	}
+
+	dbName, tableName, table, err := tcc.GetTxnHandler().GetStorage().GetRelationById(pubContext, txn, tableId)
+	if err != nil {
+		return nil, nil
+	}
+
+	// convert
+	obj := &plan2.ObjectRef{
+		SchemaName: dbName,
+		ObjName:    tableName,
+		Obj:        int64(tableId),
+	}
+	tableDef := table.CopyTableDef(pubContext)
 	return obj, tableDef
 }
 
@@ -632,9 +654,13 @@ func (tcc *TxnCompilerContext) Stats(obj *plan2.ObjectRef) (*pb.StatsInfo, error
 		return nil, nil
 	}
 	if needUpdate {
-		s := table.Stats(ctx, true)
-		tcc.UpdateStatsInCache(table.GetTableID(ctx), s)
-		return s, nil
+		s, err = table.Stats(ctx, true)
+		if err != nil {
+			return s, err
+		}
+		if s != nil {
+			tcc.UpdateStatsInCache(table.GetTableID(ctx), s)
+		}
 	}
 	return s, nil
 }
@@ -769,4 +795,12 @@ func (tcc *TxnCompilerContext) IsPublishing(dbName string) (bool, error) {
 // makeResultMetaPath gets query result meta path
 func makeResultMetaPath(accountName string, statementId string) string {
 	return fmt.Sprintf("query_result_meta/%s_%s.blk", accountName, statementId)
+}
+
+func (tcc *TxnCompilerContext) ResolveSnapshotTsWithSnapShotName(snapshotName string) (int64, error) {
+	return doResolveSnapshotTsWithSnapShotName(tcc.GetContext(), tcc.GetSession(), snapshotName)
+}
+
+func (tcc *TxnCompilerContext) CheckTimeStampValid(ts int64) (bool, error) {
+	return checkTimeStampValid(tcc.GetContext(), tcc.GetSession(), ts)
 }

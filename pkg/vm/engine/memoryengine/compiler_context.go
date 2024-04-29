@@ -49,7 +49,22 @@ func (c *CompilerContext) CheckSubscriptionValid(subName, accName string, pubNam
 	panic("implement me")
 }
 
+func (c *CompilerContext) ResolveSubscriptionTableById(tableId uint64, pubmeta *plan.SubscriptionMeta) (*plan.ObjectRef, *plan.TableDef) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (c *CompilerContext) IsPublishing(dbName string) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (c *CompilerContext) ResolveSnapshotTsWithSnapShotName(snapshotName string) (int64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (c *CompilerContext) CheckTimeStampValid(ts int64) (bool, error) {
 	//TODO implement me
 	panic("implement me")
 }

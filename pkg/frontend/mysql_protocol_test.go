@@ -1288,7 +1288,12 @@ func (tRM *TestRoutineManager) resultsetHandler(rs goetty.IOSession, msg interfa
 		return moerr.NewInternalError(ctx, "message is not Packet")
 	}
 	setGlobalPu(pu)
+<<<<<<< HEAD
 	ses := NewSession(ctx, pro, nil, nil, false, nil)
+=======
+	ses := NewSession(pro, nil, nil, false, nil)
+	ses.SetRequestContext(ctx)
+>>>>>>> main
 	pro.SetSession(ses)
 
 	length := packet.Length
@@ -1917,7 +1922,12 @@ func Test_openpacket(t *testing.T) {
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
+<<<<<<< HEAD
 		ses := NewSession(context.TODO(), proto, nil, nil, false, nil)
+=======
+		ses := NewSession(proto, nil, nil, false, nil)
+		ses.SetRequestContext(context.TODO())
+>>>>>>> main
 		proto.ses = ses
 
 		err = proto.fillPacket(make([]byte, MaxPayloadSize)...)
@@ -1946,7 +1956,12 @@ func Test_openpacket(t *testing.T) {
 
 		proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 		// fill proto.ses
+<<<<<<< HEAD
 		ses := NewSession(context.TODO(), proto, nil, nil, false, nil)
+=======
+		ses := NewSession(proto, nil, nil, false, nil)
+		ses.SetRequestContext(context.TODO())
+>>>>>>> main
 		proto.ses = ses
 
 		err = proto.openPacket()
@@ -2304,7 +2319,12 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
+<<<<<<< HEAD
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+=======
+		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses.SetRequestContext(ctx)
+>>>>>>> main
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
@@ -2338,7 +2358,12 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
+<<<<<<< HEAD
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+=======
+		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses.SetRequestContext(ctx)
+>>>>>>> main
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
@@ -2372,7 +2397,12 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
+<<<<<<< HEAD
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+=======
+		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses.SetRequestContext(ctx)
+>>>>>>> main
 		proto.ses = ses
 
 		res := make9ColumnsResultSet()
@@ -2409,7 +2439,12 @@ func Test_resultset(t *testing.T) {
 		setGlobalPu(pu)
 		var gSys GlobalSystemVariables
 		InitGlobalSystemVariables(&gSys)
+<<<<<<< HEAD
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
+=======
+		ses := NewSession(proto, nil, &gSys, true, nil)
+		ses.SetRequestContext(ctx)
+>>>>>>> main
 		ses.cmd = COM_STMT_EXECUTE
 		proto.ses = ses
 

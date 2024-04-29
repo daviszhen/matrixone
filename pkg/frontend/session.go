@@ -24,6 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/matrixorigin/matrixone/pkg/logutil"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+
 	"github.com/google/uuid"
 
 	"github.com/matrixorigin/matrixone/pkg/bootstrap/versions"
@@ -114,6 +117,7 @@ type Session struct {
 	data            [][]interface{}
 	ep              *ExportConfig
 	showStmtType    ShowStatementType
+	storage         engine.Engine
 	sysVars         map[string]interface{}
 	userDefinedVars map[string]*UserDefinedVar
 
@@ -489,7 +493,6 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 	ses.isNotBackgroundSession = isNotBackgroundSession
 	ses.sqlHelper = &SqlHelper{ses: ses}
 	ses.uuid, _ = uuid.NewV7()
-	//ses.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 	if ses.pool == nil {
 		// If no mp, we create one for session.  Use GuestMmuLimitation as cap.
 		// fixed pool size can be another param, or should be computed from cap,
@@ -514,7 +517,15 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 		getGlobalPu().HAKeeperClient,
 		getGlobalPu().UdfService,
 		globalAicm)
+
+	ses.proc.Lim.Size = getGlobalPu().SV.ProcessLimitationSize
+	ses.proc.Lim.BatchRows = getGlobalPu().SV.ProcessLimitationBatchRows
+	ses.proc.Lim.MaxMsgSize = getGlobalPu().SV.MaxMessageSize
+	ses.proc.Lim.PartitionRows = getGlobalPu().SV.ProcessLimitationPartitionRows
+
 	ses.proc.SetStmtProfile(&ses.stmtProfile)
+	//ses.txnCompileCtx.SetProcess(ses.proc)
+	// ses.proc.SetResolveVariableFunc(ses.txnCompileCtx.ResolveVariable)
 
 	runtime.SetFinalizer(ses, func(ss *Session) {
 		ss.Close()
@@ -735,7 +746,6 @@ func (ses *Session) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch b
 		},
 	}
 	backSes.uuid, _ = uuid.NewV7()
-	//backSes.GetTxnHandler().SetOptionBits(OPTION_AUTOCOMMIT)
 	bh := &backExec{
 		backSes: backSes,
 	}
@@ -931,6 +941,11 @@ func (ses *Session) GetPrepareStmt(ctx context.Context, name string) (*PrepareSt
 	if prepareStmt, ok := ses.prepareStmts[name]; ok {
 		return prepareStmt, nil
 	}
+	var connID uint32
+	if ses.proto != nil {
+		connID = ses.proto.ConnectionID()
+	}
+	logutil.Errorf("prepared statement '%s' does not exist on connection %d", name, connID)
 	return nil, moerr.NewInvalidState(ctx, "prepared statement '%s' does not exist", name)
 }
 
@@ -1048,6 +1063,18 @@ func (ses *Session) GetSessionVar(ctx context.Context, name string) (interface{}
 		return ses.GetSysVar(ciname), nil
 	} else {
 		return nil, moerr.NewInternalError(ctx, errorSystemVariableDoesNotExist())
+	}
+}
+
+func (ses *Session) GetSessionVarLocked(name string) (interface{}, error) {
+	if def, gVal, ok := ses.gSysVars.GetGlobalSysVar(name); ok {
+		ciname := strings.ToLower(name)
+		if def.GetScope() == ScopeGlobal {
+			return gVal, nil
+		}
+		return ses.sysVars[ciname], nil
+	} else {
+		return nil, moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableDoesNotExist())
 	}
 }
 
@@ -1397,18 +1424,6 @@ func (ses *Session) InitGlobalSystemVariables(ctx context.Context) error {
 		sqlForGetVariables := getSystemVariablesWithAccount(sysAccountID)
 		mp := ses.GetMemPool()
 
-		updateSqls := ses.getUpdateVariableSqlsByToml()
-		for _, sql := range updateSqls {
-			_, err = executeSQLInBackgroundSession(
-				sysTenantCtx,
-				ses,
-				mp,
-				sql)
-			if err != nil {
-				return err
-			}
-		}
-
 		rsset, err = executeSQLInBackgroundSession(
 			sysTenantCtx,
 			ses,
@@ -1453,18 +1468,6 @@ func (ses *Session) InitGlobalSystemVariables(ctx context.Context) error {
 		sqlForGetVariables := getSystemVariablesWithAccount(uint64(tenantInfo.GetTenantID()))
 		mp := ses.GetMemPool()
 
-		updateSqls := ses.getUpdateVariableSqlsByToml()
-		for _, sql := range updateSqls {
-			_, err = executeSQLInBackgroundSession(
-				tenantCtx,
-				ses,
-				mp,
-				sql)
-			if err != nil {
-				return err
-			}
-		}
-
 		rsset, err = executeSQLInBackgroundSession(
 			tenantCtx,
 			ses,
@@ -1503,24 +1506,6 @@ func (ses *Session) InitGlobalSystemVariables(ctx context.Context) error {
 		}
 	}
 	return err
-}
-
-func (ses *Session) getUpdateVariableSqlsByToml() []string {
-	updateSqls := make([]string, 0)
-	tenantInfo := ses.GetTenantInfo()
-	// sql_mode
-	if getVariableValue(getGlobalPu().SV.SqlMode) != gSysVarsDefs["sql_mode"].Default {
-		sqlForUpdate := getSqlForUpdateSystemVariableValue(getGlobalPu().SV.SqlMode, uint64(tenantInfo.GetTenantID()), "sql_mode")
-		updateSqls = append(updateSqls, sqlForUpdate)
-	}
-
-	// lower_case_table_names
-	if getVariableValue(getGlobalPu().SV.LowerCaseTableNames) != gSysVarsDefs["lower_case_table_names"].Default {
-		sqlForUpdate := getSqlForUpdateSystemVariableValue(getVariableValue(getGlobalPu().SV.LowerCaseTableNames), uint64(tenantInfo.GetTenantID()), "lower_case_table_names")
-		updateSqls = append(updateSqls, sqlForUpdate)
-	}
-
-	return updateSqls
 }
 
 func (ses *Session) GetPrivilege() *privilege {
@@ -1699,6 +1684,11 @@ func (ses *Session) StatusSession() *status.Session {
 	}
 }
 
+func (ses *Session) getStatusWithTxnEnd() uint16 {
+	ses.maybeUnsetTxnStatus()
+	return extendStatus(ses.GetTxnHandler().GetServerStatus())
+}
+
 func uuid2Str(uid uuid.UUID) string {
 	if bytes.Equal(uid[:], dumpUUID[:]) {
 		return ""
@@ -1747,21 +1737,78 @@ func checkPlanIsInsertValues(proc *process.Process,
 	return false, nil
 }
 
+func commitAfterMigrate(ses *Session, err error) error {
+	if ses == nil {
+		logutil.Error("session is nil")
+		return moerr.NewInternalErrorNoCtx("session is nil")
+	}
+	txnHandler := ses.GetTxnHandler()
+	if txnHandler == nil {
+		logutil.Error("txn handler is nil")
+		return moerr.NewInternalErrorNoCtx("txn handler is nil")
+	}
+	if txnHandler.GetSession() == nil {
+		logutil.Error("ses in txn handler is nil")
+		return moerr.NewInternalErrorNoCtx("ses in txn handler is nil")
+	}
+	defer func() {
+		txnHandler.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+		txnHandler.ClearOptionBits(OPTION_BEGIN)
+	}()
+	if err != nil {
+		if rErr := txnHandler.RollbackTxn(); rErr != nil {
+			logutil.Errorf("failed to rollback txn: %v", rErr)
+		}
+		return err
+	} else {
+		if cErr := txnHandler.CommitTxn(); cErr != nil {
+			logutil.Errorf("failed to commit txn: %v", cErr)
+			return cErr
+		}
+	}
+	return nil
+}
+
 type dbMigration struct {
-	db string
+	db       string
+	commitFn func(*Session, error) error
+}
+
+func newDBMigration(db string) *dbMigration {
+	return &dbMigration{
+		db:       db,
+		commitFn: commitAfterMigrate,
+	}
 }
 
 func (d *dbMigration) Migrate(ctx context.Context, ses *Session) error {
 	if d.db == "" {
 		return nil
 	}
-	return doUse(ctx, ses, d.db)
+	var err error
+	if err := doUse(ctx, ses, d.db); err != nil {
+		return err
+	}
+	if d.commitFn != nil {
+		return d.commitFn(ses, err)
+	}
+	return nil
 }
 
 type prepareStmtMigration struct {
 	name       string
 	sql        string
 	paramTypes []byte
+	commitFn   func(*Session, error) error
+}
+
+func newPrepareStmtMigration(name string, sql string, paramTypes []byte) *prepareStmtMigration {
+	return &prepareStmtMigration{
+		name:       name,
+		sql:        sql,
+		paramTypes: paramTypes,
+		commitFn:   commitAfterMigrate,
+	}
 }
 
 func (p *prepareStmtMigration) Migrate(ctx context.Context, ses *Session) error {
@@ -1779,13 +1826,23 @@ func (p *prepareStmtMigration) Migrate(ctx context.Context, ses *Session) error 
 	if _, err = doPrepareStmt(ctx, ses, stmts[0].(*tree.PrepareStmt), p.sql, p.paramTypes); err != nil {
 		return err
 	}
+	if p.commitFn != nil {
+		return p.commitFn(ses, err)
+	}
 	return nil
 }
 
 func (ses *Session) Migrate(ctx context.Context, req *query.MigrateConnToRequest) error {
-	dbm := dbMigration{
-		db: req.DB,
+	accountID, err := defines.GetAccountId(ctx)
+	if err != nil {
+		logutil.Errorf("failed to get account ID: %v", err)
+		return err
 	}
+	userID := defines.GetUserId(ctx)
+	logutil.Infof("do migration on connection %d, db: %s, account id: %d, user id: %d",
+		req.ConnID, req.DB, accountID, userID)
+
+	dbm := newDBMigration(req.DB)
 	if err := dbm.Migrate(ctx, ses); err != nil {
 		return err
 	}
@@ -1795,11 +1852,7 @@ func (ses *Session) Migrate(ctx context.Context, req *query.MigrateConnToRequest
 		if p == nil {
 			continue
 		}
-		pm := prepareStmtMigration{
-			name:       p.Name,
-			sql:        p.SQL,
-			paramTypes: p.ParamTypes,
-		}
+		pm := newPrepareStmtMigration(p.Name, p.SQL, p.ParamTypes)
 		if err := pm.Migrate(ctx, ses); err != nil {
 			return err
 		}

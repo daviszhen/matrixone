@@ -271,7 +271,6 @@ var _ FeSession = &Session{}
 var _ FeSession = &backSession{}
 
 type FeSession interface {
-	//GetRequestContext() context.Context
 	GetTimeZone() *time.Location
 	GetStatsCache() *plan2.StatsCache
 	GetUserName() string
@@ -317,7 +316,6 @@ type FeSession interface {
 	getQueryId(internal bool) []string
 	SetMysqlResultSet(mrs *MysqlResultSet)
 	GetConnectionID() uint32
-	//SetRequestContext(ctx context.Context)
 	IsDerivedStmt() bool
 	SetAccountId(uint32)
 	SetPlan(plan *plan.Plan)
@@ -426,7 +424,6 @@ func (ses *feSessionImpl) Close() {
 	ses.proto = nil
 	ses.mrs = nil
 	if ses.txnHandler != nil {
-		//ses.txnHandler.ses = nil
 		ses.txnHandler = nil
 	}
 	if ses.txnCompileCtx != nil {

@@ -85,17 +85,6 @@ type RespType int
 type ExecLocation int
 
 const (
-	OUTPUT_OFFSET = 0
-	OUTPUT_MASK   = 0x3
-
-	RESP_OFFSET = 2
-	RESP_MASK   = 0x7
-
-	LOCATION_OFFSET = 5
-	LOCATION_MASK   = 0x1
-)
-
-const (
 	OUTPUT_UNDEFINED  OutputType = 0x0
 	OUTPUT_RESULT_ROW OutputType = 0x1
 	OUTPUT_STATUS     OutputType = 0x2
@@ -113,20 +102,20 @@ const (
 	EXEC_IN_FRONTEND ExecLocation = 0x1
 )
 
-func MakeStmtKind(outputTyp OutputType, respTyp RespType, locate ExecLocation) StmtKind {
-	return StmtKind((int(outputTyp) << OUTPUT_OFFSET) | (int(respTyp) << RESP_OFFSET) | (int(locate) << LOCATION_OFFSET))
+func MakeStmtKind(resTyp OutputType, respTyp RespType, handleTyp ExecLocation) StmtKind {
+	return StmtKind(int(resTyp) | (int(respTyp) << 2) | (int(handleTyp) << 5))
 }
 
 func (t StmtKind) OutputType() OutputType {
-	return OutputType((int(t) >> OUTPUT_OFFSET) & OUTPUT_MASK)
+	return OutputType((0x3 & int(t)))
 }
 
 func (t StmtKind) RespType() RespType {
-	return RespType((int(t) >> RESP_OFFSET) & RESP_MASK)
+	return RespType((int(t) >> 2) & 0x7)
 }
 
 func (t StmtKind) ExecLocation() ExecLocation {
-	return ExecLocation((int(t) >> LOCATION_OFFSET) & LOCATION_MASK)
+	return ExecLocation((int(t) >> 5) & 0x1)
 }
 
 var (

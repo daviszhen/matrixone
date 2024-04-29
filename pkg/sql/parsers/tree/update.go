@@ -119,6 +119,8 @@ const (
 	LZW        = "lzw"
 	ZLIB       = "zlib"
 	LZ4        = "lz4"
+	TAR_GZ     = "tar.gz"
+	TAR_BZ2    = "tar.bz2"
 )
 
 // load data fotmat

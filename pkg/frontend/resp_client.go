@@ -27,6 +27,26 @@ func setResponse(ses *Session, isLastStmt bool, rspLen uint64) *Response {
 func respClientWhenSuccess(ses *Session,
 	execCtx *ExecCtx) (err error) {
 
+	err = respClientWithoutFlush(ses, execCtx)
+	if err != nil {
+		return err
+	}
+
+	err = ses.GetMysqlProtocol().Flush()
+	if err != nil {
+		return err
+	}
+
+	if ses.GetQueryInExecute() {
+		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, success, nil)
+	} else {
+		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, moerr.NewInternalError(execCtx.reqCtx, "query is killed"))
+	}
+	return err
+}
+
+func respClientWithoutFlush(ses *Session,
+	execCtx *ExecCtx) (err error) {
 	switch execCtx.stmt.StmtKind().RespType() {
 	case tree.RESP_STREAM_RESULT_ROW:
 		err = respStreamResultRow(ses, execCtx)
@@ -38,12 +58,6 @@ func respClientWhenSuccess(ses *Session,
 	case tree.RESP_BY_SITUATION:
 	case tree.RESP_STATUS:
 		err = respStatus(ses, execCtx)
-	}
-
-	if ses.GetQueryInExecute() {
-		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, success, nil)
-	} else {
-		logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, moerr.NewInternalError(execCtx.reqCtx, "query is killed"))
 	}
 	return err
 }

@@ -471,6 +471,9 @@ import (
 // Sample Related.
 %token <str> PERCENT SAMPLE
 
+// Snapshot READ
+%token <str> MO_TS
+
 %type <statement> stmt block_stmt block_type_stmt normal_stmt
 %type <statements> stmt_list stmt_list_return
 %type <statement> create_stmt insert_stmt delete_stmt drop_stmt alter_stmt truncate_table_stmt alter_sequence_stmt upgrade_stmt
@@ -529,7 +532,7 @@ import (
 %type <statement> create_snapshot_stmt drop_snapshot_stmt
 %type <str> urlparams
 %type <str> comment_opt view_list_opt view_opt security_opt view_tail check_type
-%type <subscriptionOption> subcription_opt
+%type <subscriptionOption> subscription_opt
 %type <accountsSetOption> alter_publication_accounts_opt
 %type <str> alter_publication_db_name_opt
 
@@ -6105,15 +6108,34 @@ create_publication_stmt:
         var IfNotExists = $3
         var Name = tree.Identifier($4.Compare())
         var Database = tree.Identifier($6.Compare())
+        var Table = tree.Identifier("")
         var AccountsSet = $7
         var Comment = $8
-	    $$ = tree.NewCreatePublication(
-	        IfNotExists,
-	        Name,
-	        Database,
-	        AccountsSet,
-	        Comment,
-	    )
+        $$ = tree.NewCreatePublication(
+            IfNotExists,
+            Name,
+            Database,
+            Table,
+            AccountsSet,
+            Comment,
+        )
+    }
+|   CREATE PUBLICATION not_exists_opt ident TABLE ident alter_publication_accounts_opt comment_opt
+    {
+        var IfNotExists = $3
+        var Name = tree.Identifier($4.Compare())
+        var Database = tree.Identifier("")
+        var Table = tree.Identifier($6.Compare())
+        var AccountsSet = $7
+        var Comment = $8
+        $$ = tree.NewCreatePublication(
+            IfNotExists,
+            Name,
+            Database,
+            Table,
+            AccountsSet,
+            Comment,
+        )
     }
 
 create_stage_stmt:
@@ -6795,7 +6817,7 @@ using_opt:
     }
 
 create_database_stmt:
-    CREATE database_or_schema not_exists_opt ident subcription_opt create_option_list_opt
+    CREATE database_or_schema not_exists_opt ident subscription_opt create_option_list_opt
     {
         var IfNotExists = $3
         var Name = tree.Identifier($4.Compare())
@@ -6810,7 +6832,7 @@ create_database_stmt:
     }
 // CREATE comment_opt database_or_schema comment_opt not_exists_opt ident
 
-subcription_opt:
+subscription_opt:
     {
 	$$ = nil
     }
@@ -7079,6 +7101,15 @@ create_table_stmt:
         t.IsAsLike = true
         t.Table = *$5
         t.LikeTableName = *$7
+        $$ = t
+    }
+|   CREATE temporary_opt TABLE not_exists_opt table_name subscription_opt
+    {
+        t := tree.NewCreateTable()
+        t.Temporary = $2
+        t.IfNotExists = $4
+        t.Table = *$5
+        t.SubscriptionOption = $6
         $$ = t
     }
 
@@ -8014,19 +8045,57 @@ table_name:
         prefix := tree.ObjectNamePrefix{SchemaName: tree.Identifier($1.Compare()), ExplicitSchema: true}
         $$ = tree.NewTableName(tree.Identifier($3.Compare()), prefix, nil)
     }
-|   ident '{' expression '}'
+|   ident '{' TIMESTAMP '=' expression '}'
     {
         prefix := tree.ObjectNamePrefix{ExplicitSchema: false}
         atTs := &tree.AtTimeStamp{
-            Expr: $3,
+            Type: tree.ATTIMESTAMPTIME,
+            Expr: $5,
         }
         $$ = tree.NewTableName(tree.Identifier($1.Compare()), prefix, atTs)
     }
-|   ident '.' ident '{' expression '}'
+|   ident '{' SNAPSHOT '=' expression '}'
+    {
+        prefix := tree.ObjectNamePrefix{ExplicitSchema: false}
+        atTs := &tree.AtTimeStamp{
+            Type: tree.ATTIMESTAMPSNAPSHOT,
+            Expr: $5,
+        }
+        $$ = tree.NewTableName(tree.Identifier($1.Compare()), prefix, atTs)
+    }
+|   ident '{' MO_TS '=' expression '}'
+    {
+        prefix := tree.ObjectNamePrefix{ExplicitSchema: false}
+        atTs := &tree.AtTimeStamp{
+            Type: tree.ATMOTIMESTAMP,
+            Expr: $5,
+        }
+        $$ = tree.NewTableName(tree.Identifier($1.Compare()), prefix, atTs)
+    }
+|   ident '.' ident '{' TIMESTAMP '=' expression '}'
     {
         prefix := tree.ObjectNamePrefix{SchemaName: tree.Identifier($1.Compare()), ExplicitSchema: true}
         atTs := &tree.AtTimeStamp{
-            Expr: $5,
+            Type: tree.ATTIMESTAMPTIME,
+            Expr: $7,
+        }
+        $$ = tree.NewTableName(tree.Identifier($3.Compare()), prefix, atTs)
+    }
+|   ident '.' ident '{' SNAPSHOT '=' expression '}'
+    {
+        prefix := tree.ObjectNamePrefix{SchemaName: tree.Identifier($1.Compare()), ExplicitSchema: true}
+        atTs := &tree.AtTimeStamp{
+            Type: tree.ATTIMESTAMPSNAPSHOT,
+            Expr: $7,
+        }
+        $$ = tree.NewTableName(tree.Identifier($3.Compare()), prefix, atTs)
+    }
+|   ident '.' ident '{' MO_TS '=' expression '}'
+    {
+        prefix := tree.ObjectNamePrefix{SchemaName: tree.Identifier($1.Compare()), ExplicitSchema: true}
+        atTs := &tree.AtTimeStamp{
+            Type: tree.ATMOTIMESTAMP,
+            Expr: $7,
         }
         $$ = tree.NewTableName(tree.Identifier($3.Compare()), prefix, atTs)
     }
@@ -11846,6 +11915,7 @@ non_reserved_keyword:
 |	SAMPLE
 |	PERCENT
 |	OWNERSHIP
+|   MO_TS
 
 func_not_keyword:
     DATE_ADD

@@ -739,6 +739,12 @@ func doSetVar(ses *Session, execCtx *ExecCtx, sv *tree.SetVar, sql string) error
 			if err != nil {
 				return err
 			}
+		} else if name == "optimizer_hints" {
+			err = setVarFunc(assign.System, assign.Global, name, value, sql)
+			if err != nil {
+				return err
+			}
+			runtime.ProcessLevelRuntime().SetGlobalVariables("optimizer_hints", value)
 		} else if name == "runtime_filter_limit_in" {
 			err = setVarFunc(assign.System, assign.Global, name, value, sql)
 			if err != nil {
@@ -888,7 +894,7 @@ func doShowVariables(ses *Session, execCtx *ExecCtx, sv *tree.ShowVariables) err
 		if err != nil {
 			return err
 		}
-		binder := plan2.NewDefaultBinder(execCtx.reqCtx, nil, nil, &plan2.Type{Id: int32(types.T_varchar), Width: types.MaxVarcharLen}, []string{"variable_name", "value"})
+		binder := plan2.NewDefaultBinder(execCtx.reqCtx, nil, nil, plan2.Type{Id: int32(types.T_varchar), Width: types.MaxVarcharLen}, []string{"variable_name", "value"})
 		planExpr, err := binder.BindExpr(sv.Where.Expr, 0, false)
 		if err != nil {
 			return err
@@ -1401,13 +1407,33 @@ func handleAlterUser(ses FeSession, execCtx *ExecCtx, st *tree.AlterUser) error 
 
 	au := &alterUser{
 		IfExists: st.IfExists,
-		User:     u,
+		Users:    make([]*user, 0, len(st.Users)),
 		Role:     st.Role,
 		MiscOpt:  st.MiscOpt,
 
 		CommentOrAttribute: st.CommentOrAttribute,
 	}
 
+	for _, su := range st.Users {
+		u := &user{
+			Username: su.Username,
+			Hostname: su.Hostname,
+		}
+		if su.AuthOption != nil {
+			u.AuthExist = true
+			u.IdentTyp = su.AuthOption.Typ
+			switch u.IdentTyp {
+			case tree.AccountIdentifiedByPassword,
+				tree.AccountIdentifiedWithSSL:
+				var err error
+				u.IdentStr, err = unboxExprStr(execCtx.reqCtx, su.AuthOption.Str)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		au.Users = append(au.Users, u)
+	}
 	return doAlterUser(execCtx.reqCtx, ses.(*Session), au)
 }
 
@@ -1620,7 +1646,7 @@ func doShowCollation(ses *Session, execCtx *ExecCtx, proc *process.Process, sc *
 	}
 
 	if sc.Where != nil {
-		binder := plan2.NewDefaultBinder(execCtx.reqCtx, nil, nil, &plan2.Type{Id: int32(types.T_varchar), Width: types.MaxVarcharLen}, []string{"collation", "charset", "id", "default", "compiled", "sortlen", "pad_attribute"})
+		binder := plan2.NewDefaultBinder(execCtx.reqCtx, nil, nil, plan2.Type{Id: int32(types.T_varchar), Width: types.MaxVarcharLen}, []string{"collation", "charset", "id", "default", "compiled", "sortlen", "pad_attribute"})
 		planExpr, err := binder.BindExpr(sc.Where.Expr, 0, false)
 		if err != nil {
 			return err
@@ -2592,7 +2618,6 @@ func executeStmt(ses *Session,
 		if string(st.Name) == ses.GetDatabaseName() {
 			ses.SetDatabaseName("")
 		}
-
 	case *tree.ExplainAnalyze:
 		ses.SetData(nil)
 	case *tree.ShowTableStatus:
@@ -2701,17 +2726,20 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 	//here,we only need the user_name.
 	userNameOnly := rootName
 
-	proc := process.New(
-		execCtx.reqCtx,
-		ses.GetMemPool(),
-		getGlobalPu().TxnClient,
-		nil,
-		getGlobalPu().FileService,
-		getGlobalPu().LockService,
-		getGlobalPu().QueryClient,
-		getGlobalPu().HAKeeperClient,
-		getGlobalPu().UdfService,
-		globalAicm)
+	// proc := process.New(
+	// 	requestCtx,
+	// 	ses.GetMemPool(),
+	// 	getGlobalPu().TxnClient,
+	// 	nil,
+	// 	getGlobalPu().FileService,
+	// 	getGlobalPu().LockService,
+	// 	getGlobalPu().QueryClient,
+	// 	getGlobalPu().HAKeeperClient,
+	// 	getGlobalPu().UdfService,
+	// 	globalAicm)
+	proc := ses.proc
+	proc.Ctx = execCtx.reqCtx
+
 	proc.CopyVectorPool(ses.proc)
 	proc.CopyValueScanBatch(ses.proc)
 	proc.Id = ses.getNextProcessId()
@@ -2732,7 +2760,7 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 		Buf:                  ses.GetBuffer(),
 		SourceInMemScanBatch: inMemStreamScan,
 	}
-	proc.SetStmtProfile(&ses.stmtProfile)
+	// proc.SetStmtProfile(&ses.stmtProfile)
 	proc.SetResolveVariableFunc(ses.txnCompileCtx.ResolveVariable)
 	proc.InitSeq()
 	// Copy curvalues stored in session to this proc.
@@ -2766,8 +2794,8 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 
 	proc.SessionInfo.User = userNameOnly
 	proc.SessionInfo.QueryId = ses.getQueryId(input.isInternal())
-	//ses.txnCompileCtx.SetProcess(proc)
-	ses.proc.SessionInfo = proc.SessionInfo
+	// ses.txnCompileCtx.SetProcess(proc)
+	// ses.proc.SessionInfo = proc.SessionInfo
 
 	statsInfo := statistic.StatsInfo{ParseStartTime: beginInstant}
 	execCtx.reqCtx = statistic.ContextWithStatsInfo(execCtx.reqCtx, &statsInfo)
@@ -2879,18 +2907,6 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 		if ses.proc != nil {
 			ses.proc.UnixTime = proc.UnixTime
 		}
-		//execCtx := ExecCtx{
-		//	stmt:       stmt,
-		//	isLastStmt: i >= len(cws)-1,
-		//	tenant:     tenant,
-		//	userName:   userNameOnly,
-		//	sqlOfStmt:  sqlRecord[i],
-		//	cw:         cw,
-		//	proc:       proc,
-		//	proto:      proto,
-		//	ses:        ses,
-		//	cws:        cws,
-		//}
 		execCtx.stmt = stmt
 		execCtx.isLastStmt = i >= len(cws)-1
 		execCtx.tenant = tenant
@@ -3411,7 +3427,7 @@ func (h *marshalPlanHandler) Stats(ctx context.Context) (statsByte statistic.Sta
 		val := int64(statsByte.GetTimeConsumed()) +
 			int64(statsInfo.ParseDuration+
 				statsInfo.CompileDuration+
-				statsInfo.PlanDuration) - (statsInfo.IOAccessTimeConsumption + statsInfo.IOLockTimeConsumption())
+				statsInfo.PlanDuration) - (statsInfo.IOAccessTimeConsumption + statsInfo.IOMergerTimeConsumption())
 		if val < 0 {
 			logutil.Warnf(" negative cpu (%s) + statsInfo(%d + %d + %d - %d - %d) = %d",
 				uuid.UUID(h.stmt.StatementID).String(),
@@ -3419,7 +3435,7 @@ func (h *marshalPlanHandler) Stats(ctx context.Context) (statsByte statistic.Sta
 				statsInfo.CompileDuration,
 				statsInfo.PlanDuration,
 				statsInfo.IOAccessTimeConsumption,
-				statsInfo.IOLockTimeConsumption(),
+				statsInfo.IOMergerTimeConsumption(),
 				val)
 			v2.GetTraceNegativeCUCounter("cpu").Inc()
 		} else {

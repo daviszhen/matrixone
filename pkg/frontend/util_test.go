@@ -645,6 +645,7 @@ func TestGetExprValue(t *testing.T) {
 
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 		setGlobalPu(pu)
+<<<<<<< HEAD
 		ses := NewSession(ctx, &FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
 		//ses.txnCompileCtx.SetProcess(testutil.NewProc())
 
@@ -656,6 +657,16 @@ func TestGetExprValue(t *testing.T) {
 		ec.proc = testutil.NewProc()
 		ec.ses = ses
 		ses.txnCompileCtx.execCtx = ec
+=======
+		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
+		ses.txnCompileCtx.SetProcess(testutil.NewProc())
+		ses.requestCtx = ctx
+		ses.connectCtx = ctx
+		ses.SetDatabaseName("db")
+		var c clock.Clock
+		_, err := ses.SetTempTableStorage(c)
+		assert.Nil(t, err)
+>>>>>>> main
 		for _, kase := range kases {
 			fmt.Println("++++>", kase.sql)
 			stmt, err := parsers.ParseOne(ctx, dialect.MYSQL, kase.sql, 1, 0)
@@ -663,8 +674,12 @@ func TestGetExprValue(t *testing.T) {
 
 			sv, ok := stmt.(*tree.SetVar)
 			cvey.So(ok, cvey.ShouldBeTrue)
+<<<<<<< HEAD
 
 			value, err := getExprValue(sv.Assignments[0].Value, ses, ec)
+=======
+			value, err := getExprValue(sv.Assignments[0].Value, ses)
+>>>>>>> main
 			if kase.wantErr {
 				cvey.So(err, cvey.ShouldNotBeNil)
 			} else {
@@ -757,6 +772,7 @@ func TestGetExprValue(t *testing.T) {
 
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 		setGlobalPu(pu)
+<<<<<<< HEAD
 		ses := NewSession(ctx, &FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
 		//ses.txnCompileCtx.SetProcess(testutil.NewProc())
 
@@ -766,13 +782,26 @@ func TestGetExprValue(t *testing.T) {
 		ec := newTestExecCtx(ctx, ctrl)
 		ec.reqCtx = ctx
 		ses.txnCompileCtx.execCtx = ec
+=======
+		ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
+		ses.txnCompileCtx.SetProcess(testutil.NewProc())
+		ses.requestCtx = ctx
+		ses.connectCtx = ctx
+		var c clock.Clock
+		_, err := ses.SetTempTableStorage(c)
+		assert.Nil(t, err)
+>>>>>>> main
 		for _, kase := range kases {
 			stmt, err := parsers.ParseOne(ctx, dialect.MYSQL, kase.sql, 1, 0)
 			cvey.So(err, cvey.ShouldBeNil)
 
 			sv, ok := stmt.(*tree.SetVar)
 			cvey.So(ok, cvey.ShouldBeTrue)
+<<<<<<< HEAD
 			value, err := getExprValue(sv.Assignments[0].Value, ses, ec)
+=======
+			value, err := getExprValue(sv.Assignments[0].Value, ses)
+>>>>>>> main
 			if kase.wantErr {
 				cvey.So(err, cvey.ShouldNotBeNil)
 			} else {
@@ -914,7 +943,11 @@ func Test_makeExecuteSql(t *testing.T) {
 	ctx := context.TODO()
 	pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 	setGlobalPu(pu)
+<<<<<<< HEAD
 	ses1 := NewSession(ctx, &FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true,
+=======
+	ses1 := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true,
+>>>>>>> main
 		nil)
 
 	ses1.SetUserDefinedVar("var2", "val2", "set var2 = val2")
