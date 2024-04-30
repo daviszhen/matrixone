@@ -76,15 +76,9 @@ func newTestSession(t *testing.T, ctrl *gomock.Controller) *Session {
 
 	testutil.SetupAutoIncrService()
 	//new session
-<<<<<<< HEAD
 	ses := NewSession(context.TODO(), proto, testPool, GSysVariables, true, nil)
 	var c clock.Clock
 	_ = ses.GetTxnHandler().CreateTempStorage(c)
-=======
-	ses := NewSession(proto, testPool, GSysVariables, true, nil)
-	var c clock.Clock
-	_, _ = ses.SetTempTableStorage(c)
->>>>>>> main
 	return ses
 }
 
@@ -127,18 +121,12 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	ses.SetTenantInfo(tenant)
 	proc := testutil.NewProcess()
 	proc.FileService = getGlobalPu().FileService
-<<<<<<< HEAD
 	//ses.GetTxnCompileCtx().SetProcess(proc)
 	proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 	ses.GetTxnCompileCtx().execCtx = &ExecCtx{
 		reqCtx: context.TODO(),
 		proc:   proc,
 	}
-=======
-	ses.GetTxnCompileCtx().SetProcess(proc)
-	ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
-
->>>>>>> main
 	//three columns
 	typs := []types.Type{
 		types.T_int8.ToType(),

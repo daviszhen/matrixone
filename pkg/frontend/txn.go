@@ -667,16 +667,14 @@ func (th *TxnHandler) GetServerStatus() uint16 {
 	return uint16(th.serverStatus)
 }
 
-func (th *TxnHandler) maybeUnsetTxnStatus() {
+func (th *TxnHandler) unsetTxnStatus(autocommit bool) {
 	th.mu.Lock()
 	defer th.mu.Unlock()
-	if th.serverStatus&SERVER_STATUS_AUTOCOMMIT != 0 {
-		th.serverStatus &= ^SERVER_STATUS_IN_TRANS
+	if bitsIsSet(th.serverStatus, uint32(SERVER_STATUS_AUTOCOMMIT)) {
+		clearBits(&th.serverStatus, uint32(SERVER_STATUS_IN_TRANS))
 	} else {
-		if v, err := ses.GetSessionVarLocked("autocommit"); err == nil {
-			if ac, vErr := valueIsBoolTrue(v); vErr == nil && ac {
-				ses.txnHandler.serve / rStatus &= ^SERVER_STATUS_IN_TRANS
-			}
+		if autocommit {
+			clearBits(&th.serverStatus, uint32(SERVER_STATUS_IN_TRANS))
 		}
 	}
 }

@@ -122,7 +122,7 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 		}
 	case *tree.ShowConnectors:
 
-		if err = handleShowConnectors(execCtx.reqCtx, ses, execCtx.isLastStmt); err != nil {
+		if err = handleShowConnectors(execCtx.reqCtx, ses); err != nil {
 			return
 		}
 	case *tree.Deallocate:
@@ -187,7 +187,7 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 		}
 	case *tree.ShowSubscriptions:
 
-		if err = handleShowSubscriptions(ses, execCtx, st, execCtx.isLastStmt); err != nil {
+		if err = handleShowSubscriptions(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.CreateStage:
@@ -327,16 +327,16 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 		}
 	case *tree.ShowAccounts:
 
-		if err = handleShowAccounts(ses, execCtx, st, execCtx.isLastStmt); err != nil {
+		if err = handleShowAccounts(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.ShowCollation:
 
-		if err = handleShowCollation(ses, execCtx, st, execCtx.proc, execCtx.isLastStmt); err != nil {
+		if err = handleShowCollation(ses, execCtx, st); err != nil {
 			return
 		}
 	case *tree.ShowBackendServers:
-		if err = handleShowBackendServers(ses, execCtx, execCtx.isLastStmt); err != nil {
+		if err = handleShowBackendServers(ses, execCtx); err != nil {
 			return
 		}
 	case *tree.SetTransaction:

@@ -266,7 +266,7 @@ func handleDropDynamicTable(ctx context.Context, ses *Session, st *tree.DropTabl
 	return nil
 }
 
-func handleShowConnectors(ctx context.Context, ses *Session, isLastStmt bool) error {
+func handleShowConnectors(ctx context.Context, ses *Session) error {
 	var err error
 	if err := showConnectors(ctx, ses); err != nil {
 		return err

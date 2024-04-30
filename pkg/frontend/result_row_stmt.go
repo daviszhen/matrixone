@@ -135,6 +135,9 @@ func executeResultRowStmt(ses *Session, execCtx *ExecCtx) (err error) {
 }
 
 func respColumnDefsWithoutFlush(ses *Session, execCtx *ExecCtx, columns []any) (err error) {
+	if execCtx.skipRespClient {
+		return nil
+	}
 	//!!!carefully to use
 	execCtx.proto.DisableAutoFlush()
 	defer execCtx.proto.EnableAutoFlush()
@@ -168,7 +171,7 @@ func respColumnDefsWithoutFlush(ses *Session, execCtx *ExecCtx, columns []any) (
 		mysql COM_QUERY response: End after the column has been sent.
 		send EOF packet
 	*/
-	err = execCtx.proto.SendEOFPacketIf(0, ses.getStatusWithTxnEnd())
+	err = execCtx.proto.SendEOFPacketIf(0, ses.getStatusWithTxnEnd(execCtx.reqCtx))
 	if err != nil {
 		return
 	}
@@ -177,13 +180,16 @@ func respColumnDefsWithoutFlush(ses *Session, execCtx *ExecCtx, columns []any) (
 
 func respStreamResultRow(ses *Session,
 	execCtx *ExecCtx) (err error) {
+	if execCtx.skipRespClient {
+		return nil
+	}
 	switch statement := execCtx.stmt.(type) {
 	case *tree.Select:
 		if len(execCtx.proc.SessionInfo.SeqAddValues) != 0 {
 			ses.AddSeqValues(execCtx.proc)
 		}
 		ses.SetSeqLastValue(execCtx.proc)
-		err2 := execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd())
+		err2 := execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd(execCtx.reqCtx))
 		if err2 != nil {
 			err = moerr.NewInternalError(execCtx.reqCtx, "routine send response failed. error:%v ", err2)
 			logStatementStatus(execCtx.reqCtx, ses, execCtx.stmt, fail, err)
@@ -223,13 +229,13 @@ func respStreamResultRow(ses *Session,
 				return
 			}
 
-			err = execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd())
+			err = execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd(execCtx.reqCtx))
 			if err != nil {
 				return
 			}
 		}
 	default:
-		err = execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd())
+		err = execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd(execCtx.reqCtx))
 		if err != nil {
 			return
 		}
@@ -240,6 +246,9 @@ func respStreamResultRow(ses *Session,
 
 func respPrebuildResultRow(ses *Session,
 	execCtx *ExecCtx) (err error) {
+	if execCtx.skipRespClient {
+		return nil
+	}
 	mer := NewMysqlExecutionResult(0, 0, 0, 0, ses.GetMysqlResultSet())
 	resp := ses.SetNewResponse(ResultResponse, 0, int(COM_QUERY), mer, execCtx.isLastStmt)
 	if err := execCtx.proto.SendResponse(execCtx.reqCtx, resp); err != nil {
@@ -250,6 +259,9 @@ func respPrebuildResultRow(ses *Session,
 
 func respMixedResultRow(ses *Session,
 	execCtx *ExecCtx) (err error) {
+	if execCtx.skipRespClient {
+		return nil
+	}
 	mrs := ses.GetMysqlResultSet()
 	if err := ses.GetMysqlProtocol().SendResultSetTextBatchRowSpeedup(mrs, mrs.GetRowCount()); err != nil {
 		logError(ses, ses.GetDebugString(),
@@ -257,7 +269,7 @@ func respMixedResultRow(ses *Session,
 			zap.Error(err))
 		return err
 	}
-	err = execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd())
+	err = execCtx.proto.sendEOFOrOkPacket(0, ses.getStatusWithTxnEnd(execCtx.reqCtx))
 	if err != nil {
 		return
 	}

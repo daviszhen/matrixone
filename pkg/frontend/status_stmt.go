@@ -174,6 +174,9 @@ func executeStatusStmt(ses *Session, execCtx *ExecCtx) (err error) {
 
 func respStatus(ses *Session,
 	execCtx *ExecCtx) (err error) {
+	if execCtx.skipRespClient {
+		return nil
+	}
 	var rspLen uint64
 	if execCtx.runResult != nil {
 		rspLen = execCtx.runResult.AffectRows

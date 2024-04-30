@@ -429,13 +429,9 @@ func Test_initFunction(t *testing.T) {
 				tenant: tenant,
 			},
 		}
-<<<<<<< HEAD
 		ec := newTestExecCtx(ctx, ctrl)
 		ec.reqCtx = ctx
 		err := InitFunction(ses, newTestExecCtx(ctx, ctrl), tenant, cu)
-=======
-		err := InitFunction(ctx, ses, tenant, cu)
->>>>>>> main
 		convey.So(err, convey.ShouldNotBeNil)
 	})
 }
@@ -5946,16 +5942,11 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-<<<<<<< HEAD
 		//ses.GetTxnCompileCtx().SetProcess(proc)
 		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.GetTxnCompileCtx().execCtx = &ExecCtx{
 			proc: proc,
 		}
-=======
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
->>>>>>> main
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
@@ -5994,22 +5985,13 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-<<<<<<< HEAD
 		//ses.GetTxnCompileCtx().SetProcess(proc)
 		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
-=======
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
->>>>>>> main
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-<<<<<<< HEAD
 		ses.GetTxnCompileCtx().execCtx = &ExecCtx{reqCtx: ctx, proc: proc, ses: ses}
-=======
-
->>>>>>> main
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6056,23 +6038,14 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-<<<<<<< HEAD
 		//ses.GetTxnCompileCtx().SetProcess(proc)
 		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
-=======
-		ses.GetTxnCompileCtx().SetProcess(proc)
-		ses.GetTxnCompileCtx().GetProcess().SessionInfo = process.SessionInfo{Account: sysAccountName}
->>>>>>> main
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
 		pu.SV.SetDefaultValues()
 		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-<<<<<<< HEAD
 		ses.GetTxnCompileCtx().execCtx = &ExecCtx{reqCtx: ctx, proc: proc,
 			ses: ses}
-=======
-
->>>>>>> main
 		rm, _ := NewRoutineManager(ctx)
 		ses.rm = rm
 
@@ -6758,19 +6731,7 @@ func Test_doAlterUser(t *testing.T) {
 			bh.sql2result[sql] = nil
 		}
 
-<<<<<<< HEAD
-		err := doAlterUser(ses.GetTxnHandler().GetTxnCtx(), ses, &alterUser{
-			User: &user{
-				Username:  "u1",
-				Hostname:  "%",
-				AuthExist: true,
-				IdentTyp:  tree.AccountIdentifiedByPassword,
-				IdentStr:  "123456",
-			},
-		})
-=======
-		err := doAlterUser(ses.GetRequestContext(), ses, alterUserFrom(stmt))
->>>>>>> main
+		err := doAlterUser(ctx, ses, alterUserFrom(stmt))
 		convey.So(err, convey.ShouldBeNil)
 	})
 
@@ -6823,19 +6784,7 @@ func Test_doAlterUser(t *testing.T) {
 			bh.sql2result[sql] = nil
 		}
 
-<<<<<<< HEAD
-		err := doAlterUser(ses.GetTxnHandler().GetTxnCtx(), ses, &alterUser{
-			User: &user{
-				Username:  "u1",
-				Hostname:  "%",
-				AuthExist: true,
-				IdentTyp:  tree.AccountIdentifiedByPassword,
-				IdentStr:  "123456",
-			},
-		})
-=======
-		err := doAlterUser(ses.GetRequestContext(), ses, alterUserFrom(stmt))
->>>>>>> main
+		err := doAlterUser(ctx, ses, alterUserFrom(stmt))
 		convey.So(err, convey.ShouldBeError)
 	})
 
@@ -6852,50 +6801,6 @@ func Test_doAlterUser(t *testing.T) {
 		stmt := &tree.AlterUser{
 			Users: []*tree.User{
 				{Username: "u1", Hostname: "%", AuthOption: &tree.AccountIdentified{Typ: tree.AccountIdentifiedByPassword, Str: boxExprStr("123456")}},
-<<<<<<< HEAD
-			},
-		}
-		priv := determinePrivilegeSetOfStatement(stmt)
-		ses := newSes(priv, ctrl)
-
-		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
-		pu.SV.SetDefaultValues()
-		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-
-		rm, _ := NewRoutineManager(ctx)
-		ses.rm = rm
-
-		//no result set
-		bh.sql2result["begin;"] = nil
-		bh.sql2result["commit;"] = nil
-		bh.sql2result["rollback;"] = nil
-
-		for i, user := range stmt.Users {
-			sql, _ := getSqlForPasswordOfUser(context.TODO(), user.Username)
-			mrs := newMrsForPasswordOfUser([][]interface{}{
-				{i, "111", "public"},
-			})
-			bh.sql2result[sql] = mrs
-
-			sql, _ = getSqlForCheckUserHasRole(context.TODO(), user.Username, moAdminRoleID)
-			mrs = newMrsForSqlForCheckUserHasRole([][]interface{}{})
-			bh.sql2result[sql] = mrs
-		}
-
-		for _, user := range stmt.Users {
-			sql, _ := getSqlForUpdatePasswordOfUser(context.TODO(), mustUnboxExprStr(user.AuthOption.Str), user.Username)
-			bh.sql2result[sql] = nil
-		}
-
-		err := doAlterUser(ses.GetTxnHandler().GetTxnCtx(), ses, &alterUser{
-			User: &user{
-				Username:  "u1",
-				Hostname:  "%",
-				AuthExist: true,
-				IdentTyp:  tree.AccountIdentifiedByPassword,
-				IdentStr:  "123456",
-=======
->>>>>>> main
 			},
 		}
 		priv := determinePrivilegeSetOfStatement(stmt)
@@ -6929,7 +6834,7 @@ func Test_doAlterUser(t *testing.T) {
 			bh.sql2result[sql] = nil
 		}
 
-		err := doAlterUser(ses.GetRequestContext(), ses, alterUserFrom(stmt))
+		err := doAlterUser(ctx, ses, alterUserFrom(stmt))
 		convey.So(err, convey.ShouldBeError)
 	})
 }
@@ -7796,11 +7701,7 @@ func newSes(priv *privilege, ctrl *gomock.Controller) *Session {
 	ioses.EXPECT().Ref().AnyTimes()
 	proto := NewMysqlClientProtocol(0, ioses, 1024, pu.SV)
 
-<<<<<<< HEAD
 	ses := NewSession(ctx, proto, nil, GSysVariables, true, nil)
-=======
-	ses := NewSession(proto, nil, GSysVariables, true, nil)
->>>>>>> main
 	tenant := &TenantInfo{
 		Tenant:        sysAccountName,
 		User:          rootName,
@@ -11136,11 +11037,7 @@ func TestUpload(t *testing.T) {
 		proto := &FakeProtocol{
 			ioses: ioses,
 		}
-<<<<<<< HEAD
 		fs, err := fileservice.NewLocalFS(context.TODO(), defines.SharedFileServiceName, t.TempDir(), fileservice.DisabledCacheConfig, nil)
-=======
-		fs, err := fileservice.NewLocalFS(proc.Ctx, defines.SharedFileServiceName, t.TempDir(), fileservice.DisabledCacheConfig, nil)
->>>>>>> main
 		convey.So(err, convey.ShouldBeNil)
 		proc.FileService = fs
 
@@ -11162,12 +11059,8 @@ func TestUpload(t *testing.T) {
 			},
 			proc: proc,
 		}
-<<<<<<< HEAD
 		ec := newTestExecCtx(context.TODO(), ctrl)
 		fp, err := Upload(ses, ec, "test.py", "test")
-=======
-		fp, err := Upload(proc.Ctx, ses, "test.py", "test")
->>>>>>> main
 		convey.So(err, convey.ShouldBeNil)
 		iovec := &fileservice.IOVector{
 			FilePath: fp,

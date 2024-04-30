@@ -360,6 +360,8 @@ type ExecCtx struct {
 	txnOpt          FeTxnOption
 	cws             []ComputationWrapper
 	input           *UserInput
+	//In the session migration, skip the response to the client
+	skipRespClient bool
 }
 
 // outputCallBackFunc is the callback function to send the result to the client.

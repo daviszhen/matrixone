@@ -39,7 +39,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/pb/query"
 	"github.com/matrixorigin/matrixone/pkg/pb/status"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec"
-	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect/mysql"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/util/errutil"
@@ -1066,7 +1065,19 @@ func (ses *Session) GetSessionVar(ctx context.Context, name string) (interface{}
 	}
 }
 
-func (ses *Session) GetSessionVarLocked(name string) (interface{}, error) {
+func (ses *Session) maybeUnsetTxnStatus(ctx context.Context) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	autocommit := false
+	if v, err := ses.getSessionVarUnsafe(ctx, "autocommit"); err == nil {
+		if ac, vErr := valueIsBoolTrue(v); vErr == nil && ac {
+			autocommit = ac
+		}
+	}
+	ses.txnHandler.unsetTxnStatus(autocommit)
+}
+
+func (ses *Session) getSessionVarUnsafe(ctx context.Context, name string) (interface{}, error) {
 	if def, gVal, ok := ses.gSysVars.GetGlobalSysVar(name); ok {
 		ciname := strings.ToLower(name)
 		if def.GetScope() == ScopeGlobal {
@@ -1074,7 +1085,7 @@ func (ses *Session) GetSessionVarLocked(name string) (interface{}, error) {
 		}
 		return ses.sysVars[ciname], nil
 	} else {
-		return nil, moerr.NewInternalError(ses.GetRequestContext(), errorSystemVariableDoesNotExist())
+		return nil, moerr.NewInternalError(ctx, errorSystemVariableDoesNotExist())
 	}
 }
 
@@ -1684,8 +1695,8 @@ func (ses *Session) StatusSession() *status.Session {
 	}
 }
 
-func (ses *Session) getStatusWithTxnEnd() uint16 {
-	ses.maybeUnsetTxnStatus()
+func (ses *Session) getStatusWithTxnEnd(ctx context.Context) uint16 {
+	ses.maybeUnsetTxnStatus(ctx)
 	return extendStatus(ses.GetTxnHandler().GetServerStatus())
 }
 
@@ -1738,34 +1749,34 @@ func checkPlanIsInsertValues(proc *process.Process,
 }
 
 func commitAfterMigrate(ses *Session, err error) error {
-	if ses == nil {
-		logutil.Error("session is nil")
-		return moerr.NewInternalErrorNoCtx("session is nil")
-	}
-	txnHandler := ses.GetTxnHandler()
-	if txnHandler == nil {
-		logutil.Error("txn handler is nil")
-		return moerr.NewInternalErrorNoCtx("txn handler is nil")
-	}
-	if txnHandler.GetSession() == nil {
-		logutil.Error("ses in txn handler is nil")
-		return moerr.NewInternalErrorNoCtx("ses in txn handler is nil")
-	}
-	defer func() {
-		txnHandler.ClearServerStatus(SERVER_STATUS_IN_TRANS)
-		txnHandler.ClearOptionBits(OPTION_BEGIN)
-	}()
-	if err != nil {
-		if rErr := txnHandler.RollbackTxn(); rErr != nil {
-			logutil.Errorf("failed to rollback txn: %v", rErr)
-		}
-		return err
-	} else {
-		if cErr := txnHandler.CommitTxn(); cErr != nil {
-			logutil.Errorf("failed to commit txn: %v", cErr)
-			return cErr
-		}
-	}
+	//if ses == nil {
+	//	logutil.Error("session is nil")
+	//	return moerr.NewInternalErrorNoCtx("session is nil")
+	//}
+	//txnHandler := ses.GetTxnHandler()
+	//if txnHandler == nil {
+	//	logutil.Error("txn handler is nil")
+	//	return moerr.NewInternalErrorNoCtx("txn handler is nil")
+	//}
+	//if txnHandler.GetSession() == nil {
+	//	logutil.Error("ses in txn handler is nil")
+	//	return moerr.NewInternalErrorNoCtx("ses in txn handler is nil")
+	//}
+	//defer func() {
+	//	txnHandler.ClearServerStatus(SERVER_STATUS_IN_TRANS)
+	//	txnHandler.ClearOptionBits(OPTION_BEGIN)
+	//}()
+	//if err != nil {
+	//	if rErr := txnHandler.RollbackTxn(); rErr != nil {
+	//		logutil.Errorf("failed to rollback txn: %v", rErr)
+	//	}
+	//	return err
+	//} else {
+	//	if cErr := txnHandler.CommitTxn(); cErr != nil {
+	//		logutil.Errorf("failed to commit txn: %v", cErr)
+	//		return cErr
+	//	}
+	//}
 	return nil
 }
 
@@ -1785,14 +1796,19 @@ func (d *dbMigration) Migrate(ctx context.Context, ses *Session) error {
 	if d.db == "" {
 		return nil
 	}
-	var err error
-	if err := doUse(ctx, ses, d.db); err != nil {
-		return err
+	//var err error
+	//if err := doUse(ctx, ses, d.db); err != nil {
+	//	return err
+	//}
+	//if d.commitFn != nil {
+	//	return d.commitFn(ses, err)
+	//}
+	tempExecCtx := &ExecCtx{
+		reqCtx:         ctx,
+		skipRespClient: true,
+		ses:            ses,
 	}
-	if d.commitFn != nil {
-		return d.commitFn(ses, err)
-	}
-	return nil
+	return doComQuery(ses, tempExecCtx, &UserInput{sql: "use " + d.db})
 }
 
 type prepareStmtMigration struct {
@@ -1812,24 +1828,29 @@ func newPrepareStmtMigration(name string, sql string, paramTypes []byte) *prepar
 }
 
 func (p *prepareStmtMigration) Migrate(ctx context.Context, ses *Session) error {
-	v, err := ses.GetGlobalVar(ctx, "lower_case_table_names")
-	if err != nil {
-		return err
-	}
+	//v, err := ses.GetGlobalVar(ctx, "lower_case_table_names")
+	//if err != nil {
+	//	return err
+	//}
 	if !strings.HasPrefix(strings.ToLower(p.sql), "prepare") {
 		p.sql = fmt.Sprintf("prepare %s from %s", p.name, p.sql)
 	}
-	stmts, err := mysql.Parse(ctx, p.sql, v.(int64), 0)
-	if err != nil {
-		return err
+	//stmts, err := mysql.Parse(ctx, p.sql, v.(int64), 0)
+	//if err != nil {
+	//	return err
+	//}
+	//if _, err = doPrepareStmt(ctx, ses, stmts[0].(*tree.PrepareStmt), p.sql, p.paramTypes); err != nil {
+	//	return err
+	//}
+	//if p.commitFn != nil {
+	//	return p.commitFn(ses, err)
+	//}
+	tempExecCtx := &ExecCtx{
+		reqCtx:         ctx,
+		skipRespClient: true,
+		ses:            ses,
 	}
-	if _, err = doPrepareStmt(ctx, ses, stmts[0].(*tree.PrepareStmt), p.sql, p.paramTypes); err != nil {
-		return err
-	}
-	if p.commitFn != nil {
-		return p.commitFn(ses, err)
-	}
-	return nil
+	return doComQuery(ses, tempExecCtx, &UserInput{sql: p.sql})
 }
 
 func (ses *Session) Migrate(ctx context.Context, req *query.MigrateConnToRequest) error {

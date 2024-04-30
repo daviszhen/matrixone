@@ -81,21 +81,6 @@ func (m *MockComputationWrapper) EXPECT() *MockComputationWrapperMockRecorder {
 
 // Clear mocks base method.
 func (m *MockComputationWrapper) Clear() {
-<<<<<<< HEAD
-=======
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Clear")
-}
-
-// Clear indicates an expected call of Clear.
-func (mr *MockComputationWrapperMockRecorder) Clear() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Clear", reflect.TypeOf((*MockComputationWrapper)(nil).Clear))
-}
-
-// Compile mocks base method.
-func (m *MockComputationWrapper) Compile(requestCtx context.Context, fill func(*batch.Batch) error) (interface{}, error) {
->>>>>>> main
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "Clear")
 }

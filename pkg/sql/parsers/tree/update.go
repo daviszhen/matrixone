@@ -85,7 +85,7 @@ type UpdateExpr struct {
 }
 
 func (node *UpdateExpr) Format(ctx *FmtCtx) {
-	if node == nil{
+	if node == nil {
 		return
 	}
 	prefix := ""

@@ -26,7 +26,9 @@ func setResponse(ses *Session, isLastStmt bool, rspLen uint64) *Response {
 // response the client
 func respClientWhenSuccess(ses *Session,
 	execCtx *ExecCtx) (err error) {
-
+	if execCtx.skipRespClient {
+		return nil
+	}
 	err = respClientWithoutFlush(ses, execCtx)
 	if err != nil {
 		return err
@@ -47,6 +49,9 @@ func respClientWhenSuccess(ses *Session,
 
 func respClientWithoutFlush(ses *Session,
 	execCtx *ExecCtx) (err error) {
+	if execCtx.skipRespClient {
+		return nil
+	}
 	switch execCtx.stmt.StmtKind().RespType() {
 	case tree.RESP_STREAM_RESULT_ROW:
 		err = respStreamResultRow(ses, execCtx)

@@ -1545,7 +1545,7 @@ func handleKill(ses *Session, execCtx *ExecCtx, k *tree.Kill) error {
 }
 
 // handleShowAccounts lists the info of accounts
-func handleShowAccounts(ses FeSession, execCtx *ExecCtx, sa *tree.ShowAccounts, isLastStmt bool) error {
+func handleShowAccounts(ses FeSession, execCtx *ExecCtx, sa *tree.ShowAccounts) error {
 	err := doShowAccounts(execCtx.reqCtx, ses.(*Session), sa)
 	if err != nil {
 		return err
@@ -1554,8 +1554,8 @@ func handleShowAccounts(ses FeSession, execCtx *ExecCtx, sa *tree.ShowAccounts, 
 }
 
 // handleShowCollation lists the info of collation
-func handleShowCollation(ses FeSession, execCtx *ExecCtx, sc *tree.ShowCollation, proc *process.Process, isLastStmt bool) error {
-	err := doShowCollation(ses.(*Session), execCtx, proc, sc)
+func handleShowCollation(ses FeSession, execCtx *ExecCtx, sc *tree.ShowCollation) error {
+	err := doShowCollation(ses.(*Session), execCtx, execCtx.proc, sc)
 	if err != nil {
 		return err
 	}
@@ -1722,7 +1722,7 @@ func doShowCollation(ses *Session, execCtx *ExecCtx, proc *process.Process, sc *
 	return err
 }
 
-func handleShowSubscriptions(ses FeSession, execCtx *ExecCtx, ss *tree.ShowSubscriptions, isLastStmt bool) error {
+func handleShowSubscriptions(ses FeSession, execCtx *ExecCtx, ss *tree.ShowSubscriptions) error {
 	err := doShowSubscriptions(execCtx.reqCtx, ses.(*Session), ss)
 	if err != nil {
 		return err
@@ -1808,7 +1808,7 @@ func doShowBackendServers(ses *Session) error {
 	return nil
 }
 
-func handleShowBackendServers(ses FeSession, execCtx *ExecCtx, isLastStmt bool) error {
+func handleShowBackendServers(ses FeSession, execCtx *ExecCtx) error {
 	var err error
 	if err := doShowBackendServers(ses.(*Session)); err != nil {
 		return err
