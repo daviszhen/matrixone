@@ -756,12 +756,6 @@ func (tcc *TxnCompilerContext) GetQueryResultMeta(uuid string) ([]*plan.ColDef, 
 	return r.ResultCols, str, nil
 }
 
-//func (tcc *TxnCompilerContext) SetProcess(proc *process.Process) {
-//	tcc.mu.Lock()
-//	defer tcc.mu.Unlock()
-//	tcc.execCtx.proc = proc
-//}
-
 func (tcc *TxnCompilerContext) GetSubscriptionMeta(dbName string) (*plan.SubscriptionMeta, error) {
 	txn := tcc.GetTxnHandler().GetTxn()
 	sub, err := getSubscriptionMeta(tcc.execCtx.reqCtx, dbName, tcc.GetSession(), txn)

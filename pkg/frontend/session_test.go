@@ -871,7 +871,6 @@ func TestSession_Migrate(t *testing.T) {
 		})
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session := NewSession(ctx, proto, nil, gSysVars, true, nil)
-		//session.txnCompileCtx.SetProcess(testutil.NewProc())
 		session.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx, proc: testutil.NewProc(), ses: session}
 		return session
 	}

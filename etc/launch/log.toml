@@ -3,8 +3,4 @@ service-type = "LOG"
 data-dir = "./mo-data"
 
 [log]
-level = "error"
-
-#[observability]
-#disableTrace = true
-#disableMetric = true
+level = "info"

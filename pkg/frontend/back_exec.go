@@ -476,7 +476,6 @@ func executeStmtInSameSession(ctx context.Context, ses *Session, execCtx *ExecCt
 		//@todo we need to improve: make one session, one proc, one txnOperator
 		p := ses.GetTxnCompileCtx().GetProcess()
 		p.FreeVectors()
-		//ses.GetTxnCompileCtx().SetProcess(proc)
 		execCtx.proc = proc
 		ses.GetTxnHandler().SetOptionBits(prevOptionBits)
 		ses.GetTxnHandler().SetServerStatus(prevServerStatus)

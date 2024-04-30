@@ -435,7 +435,6 @@ func TestGetSimpleExprValue(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		ses := newTestSession(t, ctrl)
 		//ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), config.NewParameterUnit(nil, mock_frontend.NewMockEngine(ctrl), mock_frontend.NewMockTxnClient(ctrl), nil), GSysVariables, false, nil, nil)
-		//ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ec := newTestExecCtx(ctx, ctrl)
 		ec.proc = testutil.NewProc()
 		ec.ses = ses
@@ -476,7 +475,6 @@ func TestGetSimpleExprValue(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		ses := newTestSession(t, ctrl)
 		//ses := NewSession(&FakeProtocol{}, testutil.NewProc().Mp(), config.NewParameterUnit(nil, mock_frontend.NewMockEngine(ctrl), mock_frontend.NewMockTxnClient(ctrl), nil), GSysVariables, false, nil, nil)
-		//ses.txnCompileCtx.SetProcess(testutil.NewProc())
 		ec := newTestExecCtx(ctx, ctrl)
 		ec.proc = testutil.NewProc()
 		ec.ses = ses
@@ -646,8 +644,6 @@ func TestGetExprValue(t *testing.T) {
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 		setGlobalPu(pu)
 		ses := NewSession(ctx, &FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
-		//ses.txnCompileCtx.SetProcess(testutil.NewProc())
-
 		ses.SetDatabaseName("db")
 		var c clock.Clock
 		err := ses.GetTxnHandler().CreateTempStorage(c)
@@ -663,7 +659,6 @@ func TestGetExprValue(t *testing.T) {
 
 			sv, ok := stmt.(*tree.SetVar)
 			cvey.So(ok, cvey.ShouldBeTrue)
-
 			value, err := getExprValue(sv.Assignments[0].Value, ses, ec)
 			if kase.wantErr {
 				cvey.So(err, cvey.ShouldNotBeNil)
@@ -758,8 +753,6 @@ func TestGetExprValue(t *testing.T) {
 		pu := config.NewParameterUnit(sv, eng, txnClient, nil)
 		setGlobalPu(pu)
 		ses := NewSession(ctx, &FakeProtocol{}, testutil.NewProc().Mp(), GSysVariables, true, nil)
-		//ses.txnCompileCtx.SetProcess(testutil.NewProc())
-
 		var c clock.Clock
 		err := ses.GetTxnHandler().CreateTempStorage(c)
 		assert.Nil(t, err)

@@ -429,8 +429,6 @@ func Test_initFunction(t *testing.T) {
 				tenant: tenant,
 			},
 		}
-		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
 		err := InitFunction(ses, newTestExecCtx(ctx, ctrl), tenant, cu)
 		convey.So(err, convey.ShouldNotBeNil)
 	})
@@ -5942,7 +5940,6 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-		//ses.GetTxnCompileCtx().SetProcess(proc)
 		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.GetTxnCompileCtx().execCtx = &ExecCtx{
 			proc: proc,
@@ -5985,7 +5982,6 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-		//ses.GetTxnCompileCtx().SetProcess(proc)
 		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
@@ -6038,7 +6034,6 @@ func Test_doInterpretCall(t *testing.T) {
 		ses := newSes(priv, ctrl)
 		proc := testutil.NewProcess()
 		proc.FileService = getGlobalPu().FileService
-		//ses.GetTxnCompileCtx().SetProcess(proc)
 		proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 		ses.SetDatabaseName("procedure_test")
 		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)

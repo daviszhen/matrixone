@@ -247,9 +247,6 @@ func Test_mce(t *testing.T) {
 
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		proto.SetSession(ses)
-		//ses.txnHandler = &TxnHandler{
-		//	storage: &engine.EntireEngine{Engine: pu.StorageEngine},
-		//}
 
 		ctx = context.WithValue(ctx, config.ParameterUnitKey, pu)
 
@@ -260,7 +257,7 @@ func Test_mce(t *testing.T) {
 		}
 
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		resp, err := ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(resp, convey.ShouldBeNil)
@@ -344,7 +341,7 @@ func Test_mce_selfhandle(t *testing.T) {
 		InitGlobalSystemVariables(&gSys)
 		ses := NewSession(ctx, proto, nil, &gSys, true, nil)
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		err = handleChangeDB(ses, ec, "T")
 		convey.So(err, convey.ShouldBeNil)
 		convey.So(ses.GetDatabaseName(), convey.ShouldEqual, "T")
@@ -403,7 +400,7 @@ func Test_mce_selfhandle(t *testing.T) {
 		cflStmt, err := parseCmdFieldList(ctx, makeCmdFieldListSql(query))
 		convey.So(err, convey.ShouldBeNil)
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		err = handleCmdFieldList(ses, ec, cflStmt)
 		convey.So(err, convey.ShouldBeError)
 
@@ -502,7 +499,7 @@ func Test_getDataFromPipeline(t *testing.T) {
 
 		batchCase1 := genBatch()
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		err = getDataFromPipeline(ses, ec, batchCase1)
 		convey.So(err, convey.ShouldBeNil)
 
@@ -547,7 +544,7 @@ func Test_getDataFromPipeline(t *testing.T) {
 		ses.mrs = &MysqlResultSet{}
 		proto.ses = ses
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		convey.So(getDataFromPipeline(ses, ec, nil), convey.ShouldBeNil)
 
 		genBatch := func() *batch.Batch {
@@ -766,7 +763,7 @@ func Test_handleShowVariables(t *testing.T) {
 		ses.SetDatabaseName("t")
 		proto.SetSession(ses)
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		sv := &tree.ShowVariables{Global: false}
 		convey.So(handleShowVariables(ses, ec, sv), convey.ShouldBeNil)
 
@@ -865,7 +862,7 @@ func Test_HandlePrepareStmt(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	ec := newTestExecCtx(ctx, ctrl)
-	ec.reqCtx = ctx
+
 	runTestHandle("handlePrepareStmt", t, func(ses *Session) error {
 		stmt := stmt.(*tree.PrepareStmt)
 		_, err := handlePrepareStmt(ses, ec, stmt)
@@ -882,7 +879,7 @@ func Test_HandleDeallocate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	ec := newTestExecCtx(ctx, ctrl)
-	ec.reqCtx = ctx
+
 	runTestHandle("handleDeallocate", t, func(ses *Session) error {
 		stmt := stmt.(*tree.Deallocate)
 		return handleDeallocate(ses, ec, stmt)
@@ -962,7 +959,7 @@ func Test_CMD_FIELD_LIST(t *testing.T) {
 		ses.seqLastValue = new(string)
 
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		err = doComQuery(ses, ec, &UserInput{sql: cmdFieldListQuery})
 		convey.So(err, convey.ShouldBeNil)
 	})
@@ -1260,7 +1257,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		err = handleShowBackendServers(ses, ec)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
@@ -1305,7 +1302,7 @@ func TestMysqlCmdExecutor_HandleShowBackendServers(t *testing.T) {
 		ses.SetTenantInfo(&TenantInfo{Tenant: "t1"})
 		proto.connectAttrs = map[string]string{}
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		err = handleShowBackendServers(ses, ec)
 		require.NoError(t, err)
 		rs := ses.GetMysqlResultSet()
@@ -1468,7 +1465,7 @@ func Test_ExecRequest(t *testing.T) {
 			data: []byte("123"),
 		}
 		ec := newTestExecCtx(ctx, ctrl)
-		ec.reqCtx = ctx
+
 		_, err = ExecRequest(ses, ec, req)
 		convey.So(err, convey.ShouldBeNil)
 

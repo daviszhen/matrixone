@@ -1382,29 +1382,6 @@ func handleDropUser(ses FeSession, execCtx *ExecCtx, du *tree.DropUser) error {
 }
 
 func handleAlterUser(ses FeSession, execCtx *ExecCtx, st *tree.AlterUser) error {
-	if len(st.Users) != 1 {
-		return moerr.NewInternalError(execCtx.reqCtx, "can only alter one user at a time")
-	}
-	su := st.Users[0]
-
-	u := &user{
-		Username: su.Username,
-		Hostname: su.Hostname,
-	}
-	if su.AuthOption != nil {
-		u.AuthExist = true
-		u.IdentTyp = su.AuthOption.Typ
-		switch u.IdentTyp {
-		case tree.AccountIdentifiedByPassword,
-			tree.AccountIdentifiedWithSSL:
-			var err error
-			u.IdentStr, err = unboxExprStr(execCtx.reqCtx, su.AuthOption.Str)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
 	au := &alterUser{
 		IfExists: st.IfExists,
 		Users:    make([]*user, 0, len(st.Users)),

@@ -121,7 +121,7 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	ses.SetTenantInfo(tenant)
 	proc := testutil.NewProcess()
 	proc.FileService = getGlobalPu().FileService
-	//ses.GetTxnCompileCtx().SetProcess(proc)
+
 	proc.SessionInfo = process.SessionInfo{Account: sysAccountName}
 	ses.GetTxnCompileCtx().execCtx = &ExecCtx{
 		reqCtx: context.TODO(),

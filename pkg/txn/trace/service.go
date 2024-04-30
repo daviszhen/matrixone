@@ -172,24 +172,24 @@ func NewService(
 	s.statementC = make(chan csvEvent, s.options.bufferSize)
 	s.statementBufC = make(chan *buffer, s.options.bufferSize)
 
-	//if err := s.stopper.RunTask(s.handleTxnEvents); err != nil {
-	//	panic(err)
-	//}
-	//if err := s.stopper.RunTask(s.handleTxnActionEvents); err != nil {
-	//	panic(err)
-	//}
-	//if err := s.stopper.RunTask(s.handleDataEvents); err != nil {
-	//	panic(err)
-	//}
-	//if err := s.stopper.RunTask(s.handleLoad); err != nil {
-	//	panic(err)
-	//}
-	//if err := s.stopper.RunTask(s.handleStatements); err != nil {
-	//	panic(err)
-	//}
-	//if err := s.stopper.RunTask(s.watch); err != nil {
-	//	panic(err)
-	//}
+	if err := s.stopper.RunTask(s.handleTxnEvents); err != nil {
+		panic(err)
+	}
+	if err := s.stopper.RunTask(s.handleTxnActionEvents); err != nil {
+		panic(err)
+	}
+	if err := s.stopper.RunTask(s.handleDataEvents); err != nil {
+		panic(err)
+	}
+	if err := s.stopper.RunTask(s.handleLoad); err != nil {
+		panic(err)
+	}
+	if err := s.stopper.RunTask(s.handleStatements); err != nil {
+		panic(err)
+	}
+	if err := s.stopper.RunTask(s.watch); err != nil {
+		panic(err)
+	}
 	return s, nil
 }
 

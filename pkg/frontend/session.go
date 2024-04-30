@@ -523,7 +523,6 @@ func NewSession(connCtx context.Context, proto MysqlProtocol, mp *mpool.MPool, g
 	ses.proc.Lim.PartitionRows = getGlobalPu().SV.ProcessLimitationPartitionRows
 
 	ses.proc.SetStmtProfile(&ses.stmtProfile)
-	//ses.txnCompileCtx.SetProcess(ses.proc)
 	// ses.proc.SetResolveVariableFunc(ses.txnCompileCtx.ResolveVariable)
 
 	runtime.SetFinalizer(ses, func(ss *Session) {

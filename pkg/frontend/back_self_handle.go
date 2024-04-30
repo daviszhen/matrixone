@@ -24,20 +24,8 @@ func execInFrontendInBack(backSes *backSession,
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
 	case *tree.BeginTransaction:
-		//err = backSes.GetTxnHandler().TxnBegin()
-		//if err != nil {
-		//	return
-		//}
 	case *tree.CommitTransaction:
-		//err = backSes.GetTxnHandler().Commit(FeTxnOption{byCommit: true}, execCtx)
-		//if err != nil {
-		//	return
-		//}
 	case *tree.RollbackTransaction:
-		//err = backSes.GetTxnHandler().Rollback(FeTxnOption{byRollback: true}, execCtx)
-		//if err != nil {
-		//	return
-		//}
 	case *tree.Use:
 		err = handleChangeDB(backSes, execCtx, st.Name.Compare())
 		if err != nil {

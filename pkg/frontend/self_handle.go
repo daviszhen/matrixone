@@ -22,21 +22,9 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 	//check transaction states
 	switch st := execCtx.stmt.(type) {
 	case *tree.BeginTransaction:
-		//err = ses.GetTxnHandler().TxnBegin()
-		//if err != nil {
-		//	return
-		//}
 		RecordStatementTxnID(execCtx.reqCtx, ses)
 	case *tree.CommitTransaction:
-		//err = ses.GetTxnHandler().Commit(FeTxnOption{byCommit: true}, execCtx)
-		//if err != nil {
-		//	return
-		//}
 	case *tree.RollbackTransaction:
-		//err = ses.GetTxnHandler().Rollback(FeTxnOption{byRollback: true}, execCtx)
-		//if err != nil {
-		//	return
-		//}
 	case *tree.SetRole:
 
 		ses.InvalidatePrivilegeCache()
