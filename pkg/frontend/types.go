@@ -700,16 +700,3 @@ func (ses *Session) GetDebugString() string {
 	defer ses.mu.Unlock()
 	return ses.debugStr
 }
-
-type CachedStmts struct {
-	//hit means stmts and plans already hit in plan cache
-	hit bool
-	//checked means plans already checked changed
-	checked bool
-	//stmts got from plan cache
-	stmts []tree.Statement
-	//plans got from plan cache
-	plans []*plan.Plan
-	//if one of plans is changed, the checkedPlans is nil
-	checkedPlans []*plan.Plan
-}

@@ -109,7 +109,7 @@ func Test_saveQueryResultMeta(t *testing.T) {
 	var files []resultFileInfo
 	//prepare session
 	ses := newTestSession(t, ctrl)
-	_ = ses.SetGlobalVar(nil, "save_query_result", int8(1))
+	_ = ses.SetGlobalVar(context.TODO(), "save_query_result", int8(1))
 	defer ses.Close()
 
 	const blockCnt int = 3

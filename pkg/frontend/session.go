@@ -24,10 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine"
-
 	"github.com/google/uuid"
+
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 
 	"github.com/matrixorigin/matrixone/pkg/bootstrap/versions"
 	"github.com/matrixorigin/matrixone/pkg/common/buffer"
@@ -116,7 +115,6 @@ type Session struct {
 	data            [][]interface{}
 	ep              *ExportConfig
 	showStmtType    ShowStatementType
-	storage         engine.Engine
 	sysVars         map[string]interface{}
 	userDefinedVars map[string]*UserDefinedVar
 

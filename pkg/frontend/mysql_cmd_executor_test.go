@@ -990,7 +990,7 @@ func Test_statement_type(t *testing.T) {
 		defer ctrl.Finish()
 		ses := newTestSession(t, ctrl)
 		for _, k := range kases {
-			ret, _ := statementCanBeExecutedInUncommittedTransaction(nil, ses, k.stmt)
+			ret, _ := statementCanBeExecutedInUncommittedTransaction(context.TODO(), ses, k.stmt)
 			convey.So(ret, convey.ShouldBeTrue)
 		}
 
@@ -1193,7 +1193,7 @@ func Test_StatementClassify(t *testing.T) {
 		feSessionImpl: feSessionImpl{},
 	}
 	for _, a := range args {
-		ret, err := statementCanBeExecutedInUncommittedTransaction(nil, ses, a.stmt)
+		ret, err := statementCanBeExecutedInUncommittedTransaction(context.TODO(), ses, a.stmt)
 		assert.Nil(t, err)
 		assert.Equal(t, ret, a.want)
 	}

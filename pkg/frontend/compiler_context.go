@@ -136,8 +136,7 @@ func (tcc *TxnCompilerContext) GetContext() context.Context {
 
 func (tcc *TxnCompilerContext) DatabaseExists(name string) bool {
 	var err error
-	var txn TxnOperator
-	txn = tcc.GetTxnHandler().GetTxn()
+	txn := tcc.GetTxnHandler().GetTxn()
 	//open database
 	ses := tcc.GetSession()
 	_, err = tcc.GetTxnHandler().GetStorage().Database(tcc.execCtx.reqCtx, name, txn)

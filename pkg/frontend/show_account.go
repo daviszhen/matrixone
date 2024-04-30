@@ -33,7 +33,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan/function/ctl"
-	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	v2 "github.com/matrixorigin/matrixone/pkg/util/metric/v2"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/db"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/logtail"
@@ -159,8 +158,7 @@ func requestStorageUsage(ctx context.Context, ses *Session, accIds [][]int32) (r
 		return usage, nil
 	}
 
-	var txnOperator client.TxnOperator
-	txnOperator = ses.txnHandler.GetTxn()
+	txnOperator := ses.txnHandler.GetTxn()
 
 	// create a new proc for `handler`
 	proc := process.New(ctx, ses.proc.GetMPool(),

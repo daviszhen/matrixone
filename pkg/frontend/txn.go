@@ -165,7 +165,8 @@ type TxnHandler struct {
 	// the same as the connCtx.
 	// it inherits the connCtx.
 	// it can not be canceled at the KillQuery
-	txnCtx context.Context
+	txnCtx       context.Context
+	txnCtxCancel context.CancelFunc
 
 	shareTxn bool
 
@@ -185,7 +186,7 @@ func InitTxnHandler(storage engine.Engine, connCtx context.Context, txnOp TxnOpe
 		serverStatus: defaultServerStatus,
 		optionBits:   defaultOptionBits,
 	}
-	ret.txnCtx, _ = context.WithCancel(connCtx)
+	ret.txnCtx, ret.txnCtxCancel = context.WithCancel(connCtx)
 	return ret
 }
 
@@ -198,6 +199,9 @@ func (th *TxnHandler) Close() {
 	th.tempEngine = nil
 	th.txnOp = nil
 	th.connCtx = nil
+	if th.txnCtxCancel != nil {
+		th.txnCtxCancel()
+	}
 	th.txnCtx = nil
 }
 

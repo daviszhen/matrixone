@@ -2527,7 +2527,6 @@ func dispatchStmt(ses FeSession,
 	default:
 		return moerr.NewInternalError(execCtx.reqCtx, "no such session implementation")
 	}
-	return
 }
 
 func executeStmt(ses *Session,
