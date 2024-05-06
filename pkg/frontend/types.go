@@ -362,6 +362,9 @@ type ExecCtx struct {
 	input           *UserInput
 	//In the session migration, skip the response to the client
 	skipRespClient bool
+	//In the session migration, executeParamTypes for the EXECUTE stmt should be migrated
+	//from the old session to the new session.
+	executeParamTypes []byte
 }
 
 // outputCallBackFunc is the callback function to send the result to the client.

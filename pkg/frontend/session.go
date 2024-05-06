@@ -1843,14 +1843,28 @@ func (p *prepareStmtMigration) Migrate(ctx context.Context, ses *Session) error 
 	//	return p.commitFn(ses, err)
 	//}
 	tempExecCtx := &ExecCtx{
-		reqCtx:         ctx,
-		skipRespClient: true,
-		ses:            ses,
+		reqCtx:            ctx,
+		skipRespClient:    true,
+		ses:               ses,
+		executeParamTypes: p.paramTypes,
 	}
 	return doComQuery(ses, tempExecCtx, &UserInput{sql: p.sql})
 }
 
-func (ses *Session) Migrate(ctx context.Context, req *query.MigrateConnToRequest) error {
+func (ses *Session) Migrate(_ context.Context, req *query.MigrateConnToRequest) error {
+	parameters := getGlobalPu().SV
+
+	//all offspring related to the request inherit the txnCtx
+	cancelRequestCtx, cancelRequestFunc := context.WithTimeout(ses.GetTxnHandler().GetTxnCtx(), parameters.SessionTimeout.Duration)
+	defer cancelRequestFunc()
+	ses.UpdateDebugString()
+	tenant := ses.GetTenantInfo()
+	nodeCtx := cancelRequestCtx
+	if ses.getRoutineManager().baseService != nil {
+		nodeCtx = context.WithValue(cancelRequestCtx, defines.NodeIDKey{}, ses.getRoutineManager().baseService.ID())
+	}
+	ctx := defines.AttachAccount(nodeCtx, tenant.GetTenantID(), tenant.GetUserID(), tenant.GetDefaultRoleID())
+
 	accountID, err := defines.GetAccountId(ctx)
 	if err != nil {
 		logutil.Errorf("failed to get account ID: %v", err)

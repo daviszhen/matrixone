@@ -1166,7 +1166,7 @@ func doPrepareStmt(ctx context.Context, ses *Session, st *tree.PrepareStmt, sql 
 
 // handlePrepareStmt
 func handlePrepareStmt(ses FeSession, execCtx *ExecCtx, st *tree.PrepareStmt) (*PrepareStmt, error) {
-	return doPrepareStmt(execCtx.reqCtx, ses.(*Session), st, execCtx.sqlOfStmt, nil)
+	return doPrepareStmt(execCtx.reqCtx, ses.(*Session), st, execCtx.sqlOfStmt, execCtx.executeParamTypes)
 }
 
 func doPrepareString(ses *Session, execCtx *ExecCtx, st *tree.PrepareString) (*PrepareStmt, error) {
