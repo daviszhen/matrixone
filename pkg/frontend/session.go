@@ -1793,13 +1793,6 @@ func (d *dbMigration) Migrate(ctx context.Context, ses *Session) error {
 	if d.db == "" {
 		return nil
 	}
-	//var err error
-	//if err := doUse(ctx, ses, d.db); err != nil {
-	//	return err
-	//}
-	//if d.commitFn != nil {
-	//	return d.commitFn(ses, err)
-	//}
 	tempExecCtx := &ExecCtx{
 		reqCtx:         ctx,
 		skipRespClient: true,
@@ -1825,23 +1818,9 @@ func newPrepareStmtMigration(name string, sql string, paramTypes []byte) *prepar
 }
 
 func (p *prepareStmtMigration) Migrate(ctx context.Context, ses *Session) error {
-	//v, err := ses.GetGlobalVar(ctx, "lower_case_table_names")
-	//if err != nil {
-	//	return err
-	//}
 	if !strings.HasPrefix(strings.ToLower(p.sql), "prepare") {
 		p.sql = fmt.Sprintf("prepare %s from %s", p.name, p.sql)
 	}
-	//stmts, err := mysql.Parse(ctx, p.sql, v.(int64), 0)
-	//if err != nil {
-	//	return err
-	//}
-	//if _, err = doPrepareStmt(ctx, ses, stmts[0].(*tree.PrepareStmt), p.sql, p.paramTypes); err != nil {
-	//	return err
-	//}
-	//if p.commitFn != nil {
-	//	return p.commitFn(ses, err)
-	//}
 	tempExecCtx := &ExecCtx{
 		reqCtx:            ctx,
 		skipRespClient:    true,
