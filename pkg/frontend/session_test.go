@@ -841,6 +841,7 @@ func TestSession_Migrate(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		sv.SkipCheckPrivilege = true
 		proto := NewMysqlClientProtocol(0, ioses, 1024, sv)
 
 		txnClient := mock_frontend.NewMockTxnClient(ctrl)
@@ -872,7 +873,12 @@ func TestSession_Migrate(t *testing.T) {
 		})
 		ctx := defines.AttachAccountId(context.Background(), sysAccountID)
 		session := NewSession(ctx, proto, nil, gSysVars, true, nil)
+		session.tenant = &TenantInfo{
+			Tenant:   GetDefaultTenant(),
+			TenantID: GetSysTenantId(),
+		}
 		session.txnCompileCtx.execCtx = &ExecCtx{reqCtx: ctx, proc: testutil.NewProc(), ses: session}
+		proto.ses = session
 		return session
 	}
 	ctrl := gomock.NewController(t)

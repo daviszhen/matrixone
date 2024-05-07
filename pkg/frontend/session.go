@@ -1839,7 +1839,7 @@ func (ses *Session) Migrate(_ context.Context, req *query.MigrateConnToRequest) 
 	ses.UpdateDebugString()
 	tenant := ses.GetTenantInfo()
 	nodeCtx := cancelRequestCtx
-	if ses.getRoutineManager().baseService != nil {
+	if ses.getRoutineManager() != nil && ses.getRoutineManager().baseService != nil {
 		nodeCtx = context.WithValue(cancelRequestCtx, defines.NodeIDKey{}, ses.getRoutineManager().baseService.ID())
 	}
 	ctx := defines.AttachAccount(nodeCtx, tenant.GetTenantID(), tenant.GetUserID(), tenant.GetDefaultRoleID())
