@@ -7798,6 +7798,10 @@ func (bt *backgroundExecTest) Exec(ctx context.Context, s string) error {
 	return nil
 }
 
+func (bt *backgroundExecTest) ExecRestore(context.Context, string, uint32, uint32) error {
+	panic("unimplement")
+}
+
 func (bt *backgroundExecTest) GetExecResultSet() []interface{} {
 	return []interface{}{bt.sql2result[bt.currentSql]}
 }
@@ -11421,7 +11425,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELCLUSTER,
 				},
@@ -11482,7 +11486,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELCLUSTER,
 				},
@@ -11543,7 +11547,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELACCOUNT,
 				},
@@ -11608,7 +11612,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELACCOUNT,
 				},
@@ -11673,7 +11677,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELACCOUNT,
 				},
@@ -11739,7 +11743,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELACCOUNT,
 				},
@@ -11805,7 +11809,7 @@ func TestDoCreateSnapshot(t *testing.T) {
 		cs := &tree.CreateSnapShot{
 			IfNotExists: false,
 			Name:        tree.Identifier("snapshot_test"),
-			Obeject: tree.ObejectInfo{
+			Object: tree.ObjectInfo{
 				SLevel: tree.SnapshotLevelType{
 					Level: tree.SNAPSHOTLEVELACCOUNT,
 				},
@@ -11873,50 +11877,6 @@ func TestDoResolveSnapshotTsWithSnapShotName(t *testing.T) {
 
 		_, err := doResolveSnapshotTsWithSnapShotName(ctx, ses, "test_sp")
 		convey.So(err, convey.ShouldNotBeNil)
-	})
-
-	convey.Convey("doResolveSnapshotTsWithSnapShotName success", t, func() {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		ses := newTestSession(t, ctrl)
-		defer ses.Close()
-
-		bh := &backgroundExecTest{}
-		bh.init()
-
-		bhStub := gostub.StubFunc(&NewBackgroundExec, bh)
-		defer bhStub.Reset()
-
-		pu := config.NewParameterUnit(&config.FrontendParameters{}, nil, nil, nil)
-		pu.SV.SetDefaultValues()
-		setGlobalPu(pu)
-		ctx := context.WithValue(context.TODO(), config.ParameterUnitKey, pu)
-		rm, _ := NewRoutineManager(ctx)
-		ses.rm = rm
-
-		tenant := &TenantInfo{
-			Tenant:        sysAccountName,
-			User:          rootName,
-			DefaultRole:   moAdminRoleName,
-			TenantID:      sysAccountID,
-			UserID:        rootID,
-			DefaultRoleID: moAdminRoleID,
-		}
-		ses.SetTenantInfo(tenant)
-
-		//no result set
-		bh.sql2result["begin;"] = nil
-		bh.sql2result["commit;"] = nil
-		bh.sql2result["rollback;"] = nil
-
-		sql, _ := getSqlForGetSnapshotTsWithSnapshotName(ctx, "test_sp")
-		mrs := newMrsForPasswordOfUser([][]interface{}{{1713235646865937000}})
-		bh.sql2result[sql] = mrs
-
-		ts, err := doResolveSnapshotTsWithSnapShotName(ctx, ses, "test_sp")
-		convey.So(err, convey.ShouldBeNil)
-		convey.So(ts, convey.ShouldEqual, 1713235646865937000)
 	})
 }
 

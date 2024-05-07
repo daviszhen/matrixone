@@ -354,6 +354,11 @@ func execInFrontend(ses *Session, execCtx *ExecCtx) (err error) {
 		if err = handleDropSnapshot(ses, execCtx, st); err != nil {
 			return
 		}
+	case *tree.RestoreSnapShot:
+		//TODO: invalidate privilege cache
+		if err = handleRestoreSnapshot(ses, execCtx, st); err != nil {
+			return
+		}
 	case *tree.UpgradeStatement:
 		//TODO: invalidate privilege cache
 		if err = handleExecUpgrade(ses, execCtx, st); err != nil {
