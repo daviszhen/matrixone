@@ -200,10 +200,13 @@ func (tcc *TxnCompilerContext) GetDatabaseId(dbName string, snapshot plan2.Snaps
 
 	database, err := tcc.GetTxnHandler().GetStorage().Database(tempCtx, dbName, txn)
 	if err != nil {
+		return 0, err
+	}
+	databaseId, err := strconv.ParseUint(database.GetDatabaseId(tempCtx), 10, 64)
+	if err != nil {
 		return 0, moerr.NewInternalError(tempCtx, "The databaseid of '%s' is not a valid number", dbName)
 	}
-	databaseId, err := strconv.ParseUint(database.GetDatabaseId(tcc.execCtx.reqCtx), 10, 64)
-	return databaseId, err
+	return databaseId, nil
 }
 
 // getRelation returns the context (maybe updated) and the relation
@@ -345,7 +348,7 @@ func (tcc *TxnCompilerContext) ResolveById(tableId uint64, snapshot plan2.Snapsh
 		ObjName:    tableName,
 		Obj:        int64(tableId),
 	}
-	tableDef := table.CopyTableDef(tcc.execCtx.reqCtx)
+	tableDef := table.CopyTableDef(tempCtx)
 	return obj, tableDef
 }
 
