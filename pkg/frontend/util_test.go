@@ -19,10 +19,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fagongzi/goetty/v2"
+	"github.com/fagongzi/goetty/v2/buf"
 
 	"github.com/matrixorigin/matrixone/pkg/txn/clock"
 
@@ -1194,4 +1199,197 @@ func TestTopsort(t *testing.T) {
 		_, ok := g.sort()
 		cvey.So(ok, cvey.ShouldBeFalse)
 	})
+}
+
+var _ goetty.IOSession = &testIoSess{}
+
+type testIoSess struct {
+	buf *buf.ByteBuf
+}
+
+func (t *testIoSess) ID() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Connect(addr string, timeout time.Duration) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Connected() bool {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Disconnect() error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Close() error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Ref() {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Read(option goetty.ReadOptions) (any, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Write(msg any, options goetty.WriteOptions) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) Flush(timeout time.Duration) error {
+	return nil
+}
+
+func (t *testIoSess) RemoteAddress() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) RawConn() net.Conn {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) UseConn(conn net.Conn) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (t *testIoSess) OutBuf() *buf.ByteBuf {
+	if t.buf == nil {
+		t.buf = buf.NewByteBuf(1024)
+	}
+	return t.buf
+}
+
+func Test_x(t *testing.T) {
+	mp := &MysqlProtocolImpl{
+		ProtocolImpl: ProtocolImpl{
+			io:      NewIOPackage(true),
+			tcpConn: &testIoSess{},
+		},
+		capability:   CLIENT_PROTOCOL_41,
+		lenEncBuffer: make([]byte, 512),
+	}
+	mp.sequenceId.Store(1)
+	res := mp.makeOKPayload(0, 0, extendStatus(0), 0, "")
+	res = append([]byte{0, 0, 0, 1}, res...)
+	inTxn := checkTxnStatus(res)
+	assert.False(t, inTxn)
+	fmt.Printf("%v\n", res)
+	mrs := &MysqlResultSet{}
+	row := make([]any, 7)
+	for i := 0; i < 7; i++ {
+		col := new(MysqlColumn)
+		col.SetColumnType(defines.MYSQL_TYPE_SHORT)
+		col.SetName("col" + strconv.Itoa(i))
+		mrs.AddColumn(col)
+		row[i] = int16(8<<8 | 16)
+	}
+	//only one column
+	mrs.AddRow(row)
+	mp.openRow(nil)
+	_, err := mp.makeResultSetBinaryRow(nil, mrs, 0)
+	assert.NoError(t, err)
+	mp.closeRow(nil)
+	buf := mp.tcpConn.OutBuf()
+	res2 := buf.RawBuf()[buf.GetReadIndex():buf.GetWriteIndex()]
+	fmt.Printf("%v\n", res2)
+	inTxn2 := checkTxnStatus(res2)
+	assert.False(t, inTxn2)
+	fmt.Printf("0x%x\n", 2840601)
+}
+
+func checkTxnStatus(msg []byte) bool {
+	inTxn := true
+	// For the server->client pipe, we get the transaction status from the
+	// OK and EOF packet, which is used in connection transfer. If the session
+	// is in a transaction, a transfer should not start.
+	if isOKPacket(msg) {
+		inTxn = handleOKPacket(msg)
+	} else if isEOFPacket(msg) {
+		inTxn = handleEOFPacket(msg)
+	}
+	return inTxn
+}
+
+// isOKPacket returns true if []byte is a MySQL OK packet.
+func isOKPacket(p []byte) bool {
+	if len(p) > 4 && p[4] == 0 {
+		return true
+	}
+	return false
+}
+
+// isOKPacket returns true if []byte is a MySQL EOF packet.
+func isEOFPacket(p []byte) bool {
+	if len(p) > 4 && p[4] == 0xFE {
+		return true
+	}
+	return false
+}
+
+// isErrPacket returns true if []byte is a MySQL Err packet.
+func isErrPacket(p []byte) bool {
+	if len(p) > 4 && p[4] == 0xFF {
+		return true
+	}
+	return false
+}
+
+// txnStatus return if the session is within a transaction.
+// first, we consider it as true and check the three conditions:
+// 1. SERVER_STATUS_IN_TRANS is not set
+// 2. SERVER_QUERY_WAS_SLOW and SERVER_STATUS_NO_GOOD_INDEX_USED is set
+func txnStatus(status uint16) bool {
+	// assume it is in txn by priority.
+	v := true
+	if status&SERVER_QUERY_WAS_SLOW != 0 &&
+		status&SERVER_STATUS_NO_GOOD_INDEX_USED != 0 &&
+		status&SERVER_STATUS_IN_TRANS == 0 {
+		v = false
+	}
+	return v
+}
+
+// handleOKPacket handles the OK packet from server to update the txn state.
+func handleOKPacket(msg []byte) bool {
+	var mp *MysqlProtocolImpl
+	// the sequence ID should be 1 for OK packet.
+	if msg[3] != 1 {
+		return txnStatus(0)
+	}
+	pos := 5
+	_, pos, ok := mp.ReadIntLenEnc(msg, pos)
+	if !ok {
+		return txnStatus(0)
+	}
+	_, pos, ok = mp.ReadIntLenEnc(msg, pos)
+	if !ok {
+		return txnStatus(0)
+	}
+	if len(msg[pos:]) < 2 {
+		return txnStatus(0)
+	}
+	status := binary.LittleEndian.Uint16(msg[pos:])
+	return txnStatus(status)
+}
+
+// handleEOFPacket handles the EOF packet from server to update the txn state.
+func handleEOFPacket(msg []byte) bool {
+	if len(msg) < 9 {
+		return txnStatus(0)
+	}
+	return txnStatus(binary.LittleEndian.Uint16(msg[7:]))
 }
