@@ -158,6 +158,7 @@ type Session struct {
 	packetCounter atomic.Int64
 	// payloadCounter count the payload send by `load data`
 	payloadCounter int64
+	savedRows      atomic.Int64
 
 	createdTime time.Time
 

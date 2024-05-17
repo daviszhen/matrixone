@@ -126,6 +126,7 @@ func saveQueryResult(ctx context.Context, ses *Session, bat *batch.Batch) error 
 		return err
 	}
 	ses.curResultSize = s
+	ses.savedRows.Add(int64(bat.Vecs[0].Length()))
 	return err
 }
 

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	gotrace "runtime/trace"
 	"sort"
 	"strconv"
@@ -2675,6 +2676,7 @@ func executeStmt(ses *Session,
 
 // execute query
 func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error) {
+	fmt.Fprintln(os.Stderr, input.getSql())
 	ses.GetTxnCompileCtx().SetExecCtx(execCtx)
 	// set the batch buf for stream scan
 	var inMemStreamScan []*kafka.Message
@@ -2814,6 +2816,7 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 
 		ses.SetMysqlResultSet(&MysqlResultSet{})
 		ses.sentRows.Store(int64(0))
+		ses.savedRows.Store(int64(0))
 		ses.writeCsvBytes.Store(int64(0))
 		proto.ResetStatistics() // move from getDataFromPipeline, for record column fields' data
 		stmt := cw.GetAst()
@@ -2880,7 +2883,7 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 		if err != nil {
 			return err
 		}
-
+		fmt.Fprintln(os.Stderr, "save rows count ", ses.GetStmtId(), ses.savedRows.Load())
 	} // end of for
 
 	if canCache && !ses.isCached(input.getSql()) {
