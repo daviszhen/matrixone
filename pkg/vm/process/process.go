@@ -87,13 +87,15 @@ func NewWithAnalyze(p *Process, ctx context.Context, regNumber int, anals []*Ana
 	proc := NewFromProc(p, ctx, regNumber)
 	proc.AnalInfos = make([]*AnalyzeInfo, len(anals))
 	copy(proc.AnalInfos, anals)
+	proc.TestKill = p.TestKill
 	return proc
 }
 
 // NewFromProc create a new Process based on another process.
 func NewFromProc(p *Process, ctx context.Context, regNumber int) *Process {
 	proc := new(Process)
-	newctx, cancel := context.WithCancel(ctx)
+	//newctx, cancel := context.WithCancel(ctx)
+	newctx, cancel := context.WithCancel(p.Ctx)
 	proc.Id = p.Id
 	proc.vp = p.vp
 	proc.mp = p.Mp()
@@ -134,6 +136,7 @@ func NewFromProc(p *Process, ctx context.Context, regNumber int) *Process {
 	proc.DispatchNotifyCh = make(chan WrapCs)
 	proc.LoadLocalReader = p.LoadLocalReader
 	proc.WaitPolicy = p.WaitPolicy
+	proc.TestKill = p.TestKill
 	return proc
 }
 

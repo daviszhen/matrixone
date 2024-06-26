@@ -16,6 +16,7 @@ package source
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
@@ -27,9 +28,10 @@ import (
 
 const argName = "source"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": source scan")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

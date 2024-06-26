@@ -16,6 +16,10 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+
+	"github.com/google/uuid"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
@@ -42,6 +46,12 @@ func String(ins Instructions, buf *bytes.Buffer) {
 
 // Prepare range instructions and do init work for each operator's argument by calling its prepare function
 func Prepare(ins Instructions, proc *process.Process) error {
+	if proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Prepare")
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit  Prepare")
+		}()
+	}
 	for _, in := range ins {
 		if err := in.Arg.Prepare(proc); err != nil {
 			return err
@@ -116,6 +126,12 @@ func setAnalyzeInfo(ins Instructions, proc *process.Process) {
 }
 
 func Run(ins Instructions, proc *process.Process) (end bool, err error) {
+	if proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Run")
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit  Run")
+		}()
+	}
 	defer func() {
 		if e := recover(); e != nil {
 			err = moerr.ConvertPanicError(proc.Ctx, e)
@@ -129,14 +145,62 @@ func Run(ins Instructions, proc *process.Process) (end bool, err error) {
 		ins[i].Arg.AppendChild(ins[i-1].Arg)
 	}
 
+	uid, _ := uuid.NewV7()
+	cnt := uint64(0)
+
 	root := ins[len(ins)-1].Arg
 	end = false
+
+	pAddr := fmt.Sprintf("%p", proc.Ctx)
+
+	sBuf := &bytes.Buffer{}
+	regCtx := root.String(sBuf)
+
+	regAddr := fmt.Sprintf("%p", regCtx)
+
+	defer func() {
+		if proc.TestKill {
+			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start xxxx", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+		}
+	}()
+
 	for !end {
+		if proc.TestKill {
+			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+		}
+
+		//if err, isCancel := CancelCheck(proc); isCancel {
+		//	if proc.TestKill {
+		//		fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy1111", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+		//	}
+		//	return true, err
+		//}
+
 		result, err := root.Call(proc)
 		if err != nil {
+			if proc.TestKill {
+				fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start zzzz", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+			}
 			return true, err
 		}
+
+		//if err, isCancel := CancelCheck(proc); isCancel {
+		//	if proc.TestKill {
+		//		fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy2222", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+		//	}
+		//	return true, err
+		//}
+
 		end = result.Status == ExecStop || result.Batch == nil
+		if proc.TestKill {
+			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start uuuu", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx),
+				"end", end,
+				"result.Status == ExecStop || result.Batch == nil", result.Status == ExecStop, result.Batch == nil)
+		}
+		cnt++
+	}
+	if proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start wwww", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
 	}
 	return end, nil
 }

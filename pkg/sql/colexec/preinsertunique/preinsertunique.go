@@ -16,6 +16,7 @@ package preinsertunique
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -35,9 +36,10 @@ const (
 
 const argName = "pre_insert_unique"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": pre processing insert unique key")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

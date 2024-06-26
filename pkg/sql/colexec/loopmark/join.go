@@ -16,6 +16,7 @@ package loopmark
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -28,9 +29,10 @@ import (
 
 const argName = "loop_mark"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": loop mark join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

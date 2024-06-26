@@ -16,6 +16,7 @@ package mergeorder
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/compare"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -164,7 +165,7 @@ func (ctr *container) removeBatch(proc *process.Process, index int) {
 	ctr.orderCols = append(ctr.orderCols[:index], ctr.orderCols[index+1:]...)
 }
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": mergeorder([")
@@ -175,6 +176,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		buf.WriteString(f.String())
 	}
 	buf.WriteString("])")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

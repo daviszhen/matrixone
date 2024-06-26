@@ -16,6 +16,7 @@ package vm
 
 import (
 	"bytes"
+	"context"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -132,7 +133,7 @@ type Operator interface {
 	Free(proc *process.Process, pipelineFailed bool, err error)
 
 	// String returns the string representation of an operator.
-	String(buf *bytes.Buffer)
+	String(buf *bytes.Buffer) context.Context
 
 	//Prepare prepares an operator for execution.
 	Prepare(proc *process.Process) error
@@ -222,6 +223,19 @@ func CancelCheck(proc *process.Process) (error, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func IsCancelled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+	return false
 }
 
 func ChildrenCall(o Operator, proc *process.Process, anal process.Analyze) (CallResult, error) {

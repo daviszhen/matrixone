@@ -16,6 +16,7 @@ package mark
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -30,9 +31,10 @@ import (
 
 const argName = "mark_join"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": mark join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

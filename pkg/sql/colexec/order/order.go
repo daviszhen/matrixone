@@ -16,6 +16,7 @@ package order
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -170,7 +171,7 @@ func (ctr *container) sortAndSend(proc *process.Process, result *vm.CallResult) 
 	return nil
 }
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": τ([")
@@ -181,6 +182,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		buf.WriteString(f.String())
 	}
 	buf.WriteString("])")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

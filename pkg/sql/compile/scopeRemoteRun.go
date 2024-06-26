@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 	"unsafe"
 
@@ -247,6 +248,13 @@ func receiveMessageFromCnServer(c *Compile, s *Scope, sender *messageSenderOnCli
 	var end bool
 	var err error
 
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter receiveMessageFromCnServer", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit receiveMessageFromCnServer", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
+	}
+
 	lastAnalyze := c.proc.GetAnalyze(lastInstruction.Idx, -1, false)
 	if sender.receiveCh == nil {
 		sender.receiveCh, err = sender.streamSender.Receive()
@@ -310,6 +318,12 @@ func receiveMessageFromCnServer(c *Compile, s *Scope, sender *messageSenderOnCli
 // 2. Message with an end flag and analysis result
 // 3. Batch Message with batch data
 func (s *Scope) remoteRun(c *Compile) (sender *messageSenderOnClient, err error) {
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.remoteRun *", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.remoteRun *", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
+	}
 	defer func() {
 		if e := recover(); e != nil {
 			err = moerr.ConvertPanicError(s.Proc.Ctx, e)
@@ -355,6 +369,13 @@ func (s *Scope) remoteRun(c *Compile) (sender *messageSenderOnClient, err error)
 		c.proc.Errorf(s.Proc.Ctx, "Failed to newMessageSenderOnClient sql=%s, txnID=%s, err=%v",
 			c.sql, c.proc.TxnOperator.Txn().DebugString(), err)
 		return nil, err
+	}
+
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.remoteRun * 1", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.remoteRun * 1", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
 	}
 
 	if err = sender.send(sData, pData, pipeline.Method_PipelineMessage); err != nil {
@@ -452,6 +473,7 @@ func encodeProcessInfo(proc *process.Process, sql string) ([]byte, error) {
 			LogLevel: zapLogLevel2EnumLogLevel(proc.SessionInfo.LogLevel),
 		}
 	}
+	procInfo.TestKill = proc.TestKill
 	return procInfo.Marshal()
 }
 

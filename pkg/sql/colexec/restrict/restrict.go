@@ -16,6 +16,7 @@ package restrict
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
@@ -31,10 +32,11 @@ import (
 
 const argName = "restrict"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(fmt.Sprintf("filter(%s)", ap.E))
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

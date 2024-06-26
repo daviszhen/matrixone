@@ -46,7 +46,7 @@ var (
 
 const argName = "lock_op"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": lock-op(")
 	n := len(arg.targets) - 1
@@ -60,6 +60,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		}
 	}
 	buf.WriteString(")")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

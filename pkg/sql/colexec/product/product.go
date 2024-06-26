@@ -16,6 +16,7 @@ package product
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec"
 
@@ -26,9 +27,10 @@ import (
 
 const argName = "product"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": cross join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

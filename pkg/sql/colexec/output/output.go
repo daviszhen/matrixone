@@ -16,6 +16,7 @@ package output
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/vm"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
@@ -23,9 +24,10 @@ import (
 
 const argName = "output"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": sql output")
+	return nil
 }
 
 func (arg *Argument) Prepare(_ *process.Process) error {

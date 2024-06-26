@@ -17,6 +17,7 @@ package compile
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"hash/crc32"
@@ -121,6 +122,12 @@ func (s *Scope) initDataSource(c *Compile) (err error) {
 
 // Run read data from storage engine and run the instructions of scope.
 func (s *Scope) Run(c *Compile) (err error) {
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.Run", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.Run", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
+	}
 	var p *pipeline.Pipeline
 	defer func() {
 		if e := recover(); e != nil {
@@ -206,7 +213,12 @@ func (s *Scope) SetOperatorInfoRecursively(cb func() int32) {
 // MergeRun range and run the scope's pre-scopes by go-routine, and finally run itself to do merge work.
 func (s *Scope) MergeRun(c *Compile) error {
 	var wg sync.WaitGroup
-
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.MergeRun", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.MergeRun", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
+	}
 	errChan := make(chan error, len(s.PreScopes))
 	for i := range s.PreScopes {
 		wg.Add(1)
@@ -289,8 +301,21 @@ func (s *Scope) MergeRun(c *Compile) error {
 
 // RemoteRun send the scope to a remote node for execution.
 func (s *Scope) RemoteRun(c *Compile) error {
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.RemoteRun", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.RemoteRun", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
+	}
 	if !s.canRemote(c, true) || !cnclient.IsCNClientReady() {
 		return s.ParallelRun(c)
+	}
+
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.RemoteRun 1", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.RemoteRun 1", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
 	}
 
 	runtime.ProcessLevelRuntime().Logger().
@@ -322,6 +347,12 @@ func (s *Scope) RemoteRun(c *Compile) error {
 
 // ParallelRun run a pipeline in parallel.
 func (s *Scope) ParallelRun(c *Compile) (err error) {
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Scope.ParallelRun", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit Scope.ParallelRun", "magic", s.Magic, "node info", s.NodeInfo, "remove", s.IsRemote)
+		}()
+	}
 	var parallelScope *Scope
 
 	defer func() {

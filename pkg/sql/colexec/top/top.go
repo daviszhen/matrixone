@@ -17,6 +17,7 @@ package top
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -35,7 +36,7 @@ import (
 
 const argName = "top"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": top([")
@@ -46,6 +47,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		buf.WriteString(f.String())
 	}
 	buf.WriteString(fmt.Sprintf("], %v)", ap.Limit))
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

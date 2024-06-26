@@ -16,6 +16,7 @@ package rightsemi
 
 import (
 	"bytes"
+	"context"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/common/bitmap"
@@ -30,9 +31,10 @@ import (
 
 const argName = "right_semi"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": right semi join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

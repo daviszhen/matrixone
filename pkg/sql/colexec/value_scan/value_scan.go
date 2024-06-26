@@ -16,6 +16,7 @@ package value_scan
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/vm"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
@@ -23,9 +24,10 @@ import (
 
 const argName = "value_scan"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": value_scan ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

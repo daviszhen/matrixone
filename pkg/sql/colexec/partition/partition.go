@@ -16,6 +16,7 @@ package partition
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/compare"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -30,7 +31,7 @@ import (
 
 const argName = "partition"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": partition([")
@@ -41,6 +42,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		buf.WriteString(f.String())
 	}
 	buf.WriteString("])")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

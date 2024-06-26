@@ -16,6 +16,7 @@ package projection
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -27,7 +28,7 @@ import (
 
 const argName = "projection"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	n := arg
 	buf.WriteString(": projection(")
@@ -38,6 +39,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		buf.WriteString(e.String())
 	}
 	buf.WriteString(")")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

@@ -16,6 +16,7 @@ package onduplicatekey
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -31,9 +32,10 @@ import (
 
 const argName = "on_duplicate_key"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": processing on duplicate key before insert")
+	return nil
 }
 
 func (arg *Argument) Prepare(p *process.Process) error {

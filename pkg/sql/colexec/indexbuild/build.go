@@ -16,6 +16,7 @@ package indexbuild
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/vm"
@@ -24,9 +25,10 @@ import (
 
 const argName = "index_build"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": index build ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

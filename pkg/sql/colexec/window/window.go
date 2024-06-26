@@ -16,6 +16,7 @@ package window
 
 import (
 	"bytes"
+	"context"
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec/aggexec"
@@ -35,9 +36,10 @@ import (
 
 const argName = "window"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": window")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

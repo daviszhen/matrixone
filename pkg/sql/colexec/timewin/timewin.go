@@ -16,6 +16,7 @@ package timewin
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
@@ -33,9 +34,10 @@ import (
 
 const argName = "time_window"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": time window")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

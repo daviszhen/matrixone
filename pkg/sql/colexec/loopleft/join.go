@@ -16,6 +16,7 @@ package loopleft
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -26,9 +27,10 @@ import (
 
 const argName = "loop_left"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": loop left join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

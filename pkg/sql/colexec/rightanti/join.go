@@ -16,6 +16,7 @@ package rightanti
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/bitmap"
 
@@ -29,9 +30,10 @@ import (
 
 const argName = "right_anti"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": right anti join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

@@ -16,6 +16,7 @@ package group
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
@@ -32,7 +33,7 @@ import (
 
 const argName = "group"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": group([")
@@ -50,6 +51,7 @@ func (arg *Argument) String(buf *bytes.Buffer) {
 		buf.WriteString(fmt.Sprintf("%v(%v)", function.GetAggFunctionNameByID(ag.GetAggID()), ag.GetArgExpressions()))
 	}
 	buf.WriteString("])")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

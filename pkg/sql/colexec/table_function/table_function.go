@@ -16,6 +16,7 @@ package table_function
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/vm"
@@ -113,9 +114,10 @@ func (arg *Argument) Call(proc *process.Process) (vm.CallResult, error) {
 	return result, e
 }
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(arg.FuncName)
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

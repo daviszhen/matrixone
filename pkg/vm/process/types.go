@@ -380,6 +380,8 @@ type Process struct {
 	MessageBoard *MessageBoard
 
 	logger *log.MOLogger
+
+	TestKill bool
 }
 
 type vectorPool struct {

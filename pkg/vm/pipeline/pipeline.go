@@ -16,6 +16,8 @@ package pipeline
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/perfcounter"
@@ -50,6 +52,12 @@ func (p *Pipeline) String() string {
 }
 
 func (p *Pipeline) Run(r engine.Reader, topValueMsgTag int32, proc *process.Process) (end bool, err error) {
+	if proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Pipeline.Run", "tableid", p.tableID, "attrs", p.attrs)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit  Pipeline.Run", "tableid", p.tableID, "attrs", p.attrs)
+		}()
+	}
 	// performance counter
 	perfCounterSet := new(perfcounter.CounterSet)
 	proc.Ctx = perfcounter.WithCounterSet(proc.Ctx, perfCounterSet)
@@ -98,6 +106,13 @@ func (p *Pipeline) Run(r engine.Reader, topValueMsgTag int32, proc *process.Proc
 }
 
 func (p *Pipeline) ConstRun(bat *batch.Batch, proc *process.Process) (end bool, err error) {
+	if proc.TestKill {
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Pipeline.ConstRun", "tableid", p.tableID, "attrs", p.attrs)
+		defer func() {
+			fmt.Fprintln(os.Stderr, "==testkill", "exit  Pipeline.ConstRun", "tableid", p.tableID, "attrs", p.attrs)
+		}()
+	}
+
 	// used to handle some push-down request
 	if p.reg != nil {
 		select {

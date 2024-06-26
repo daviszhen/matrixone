@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/matrixorigin/matrixone/pkg/common/reuse"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -245,8 +246,8 @@ type Compile struct {
 
 	anal *anaylze
 	// e db engine instance.
-	e   engine.Engine
-	ctx context.Context
+	e engine.Engine
+	//ctx context.Context
 	// proc stores the execution context.
 	proc *process.Process
 
@@ -279,6 +280,10 @@ type Compile struct {
 	disableRetry bool
 
 	lastAllocID int32
+}
+
+func (c *Compile) Ctx() context.Context {
+	return c.proc.Ctx
 }
 
 type RemoteReceivRegInfo struct {

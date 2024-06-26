@@ -15,6 +15,7 @@ package mergeblock
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/vm"
@@ -23,9 +24,10 @@ import (
 
 const argName = "merge_block"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": MergeS3BlocksMetaLoc ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

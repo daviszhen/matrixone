@@ -474,6 +474,7 @@ message ProcessInfo {
   SessionInfo session_info = 7;
   repeated int32 analysis_node_list = 8;
   SessionLoggerInfo session_logger = 9;
+  bool test_kill = 10;
 }
 
 message SessionInfo {

@@ -16,6 +16,7 @@ package join
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -28,9 +29,10 @@ import (
 
 const argName = "join"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": inner join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

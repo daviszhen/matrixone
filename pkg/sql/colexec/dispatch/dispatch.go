@@ -32,9 +32,10 @@ import (
 
 const argName = "dispatch"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": dispatch")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

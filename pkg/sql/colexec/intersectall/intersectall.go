@@ -16,6 +16,7 @@ package intersectall
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -31,9 +32,10 @@ const (
 
 const argName = "intersect_all"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": intersect all ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

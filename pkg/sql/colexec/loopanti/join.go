@@ -16,6 +16,7 @@ package loopanti
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/nulls"
@@ -27,9 +28,10 @@ import (
 
 const argName = "loop_anti"
 
-func (arg *Argument) String(buf *bytes.Buffer) {
+func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	buf.WriteString(argName)
 	buf.WriteString(": loop anti join ")
+	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

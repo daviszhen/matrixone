@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"os"
 	"runtime"
 	gotrace "runtime/trace"
 	"sort"
@@ -325,6 +326,12 @@ func (c *Compile) getAffectedRows() uint64 {
 func (c *Compile) run(s *Scope) error {
 	if s == nil {
 		return nil
+	}
+	if c.proc.TestKill {
+		fmt.Fprintln(os.Stderr, "enter Compile.run")
+		defer func() {
+			fmt.Fprintln(os.Stderr, "exit Compile.run")
+		}()
 	}
 
 	switch s.Magic {
@@ -1031,16 +1038,16 @@ func (c *Compile) compileQuery(ctx context.Context, qry *plan.Query) ([]*Scope, 
 		// 	}
 		// }
 	default:
-		if blkNum < plan2.BlockNumForceOneCN {
-			c.cnList = engine.Nodes{
-				engine.Node{
-					Addr: c.addr,
-					Mcpu: c.generateCPUNumber(ncpu, blkNum),
-				},
-			}
-		} else {
-			c.cnListStrategy()
+		//if blkNum < plan2.BlockNumForceOneCN {
+		c.cnList = engine.Nodes{
+			engine.Node{
+				Addr: c.addr,
+				Mcpu: c.generateCPUNumber(ncpu, blkNum),
+			},
 		}
+		//} else {
+		//	c.cnListStrategy()
+		//}
 	}
 	if c.info.Typ == plan2.ExecTypeTP && len(c.cnList) > 1 {
 		c.cnList = engine.Nodes{
@@ -3917,12 +3924,13 @@ func (c *Compile) generateNodes(n *plan.Node) (engine.Nodes, []any, []types.T, e
 		}
 	}
 
-	if c.determinExpandRanges(n, rel) {
-		ranges, err = c.expandRanges(n, rel, n.BlockFilterList)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	} else {
+	//if c.determinExpandRanges(n, rel) {
+	//	ranges, err = c.expandRanges(n, rel, n.BlockFilterList)
+	//	if err != nil {
+	//		return nil, nil, nil, err
+	//	}
+	//} else
+	{
 		// add current CN
 		nodes = append(nodes, engine.Node{
 			Addr: c.addr,
@@ -4338,7 +4346,8 @@ func (c *Compile) generateNodes(n *plan.Node) (engine.Nodes, []any, []types.T, e
 	// for multi cn in launch mode, put all payloads in current CN, maybe delete this in the future
 	// for an ordered scan, put all paylonds in current CN
 	// or sometimes force on one CN
-	if isLaunchMode(c.cnList) || len(n.OrderBy) > 0 || ranges.Len() < plan2.BlockNumForceOneCN || n.Stats.ForceOneCN {
+	//if isLaunchMode(c.cnList) || len(n.OrderBy) > 0 || ranges.Len() < plan2.BlockNumForceOneCN || n.Stats.ForceOneCN {
+	if true {
 		return putBlocksInCurrentCN(c, ranges.GetAllBytes(), rel, n), partialResults, partialResultTypes, nil
 	}
 	// disttae engine
