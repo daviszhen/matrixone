@@ -30,8 +30,9 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
-	"github.com/matrixorigin/matrixone/pkg/sql/colexec/source"
 	"github.com/stretchr/testify/require"
+
+	"github.com/matrixorigin/matrixone/pkg/sql/colexec/source"
 
 	"github.com/matrixorigin/matrixone/pkg/common/morpc"
 	"github.com/matrixorigin/matrixone/pkg/common/morpc/mock_morpc"
@@ -210,7 +211,7 @@ func Test_refactorScope(t *testing.T) {
 	s.Proc = proc
 	c := reuse.Alloc[Compile](nil)
 	c.anal = newAnaylze()
-	c.ctx = ctx
+	c.Ctx() = ctx
 	c.proc = proc
 	rs := appendWriteBackOperator(c, s)
 	require.Equal(t, rs.Instructions[1].Idx, -1)

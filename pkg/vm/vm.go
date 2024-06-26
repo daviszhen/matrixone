@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
+	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
 )
@@ -158,16 +159,30 @@ func Run(ins Instructions, proc *process.Process) (end bool, err error) {
 
 	regAddr := fmt.Sprintf("%p", regCtx)
 
+	var val, val1 []string
+	if proc.TestKill {
+		if x := proc.Ctx.Value(defines.TestKillKey{}); x != nil {
+			val = x.([]string)
+		}
+		if regCtx != nil {
+			if x := regCtx.Value(defines.TestKillKey{}); x != nil {
+				val1 = x.([]string)
+			}
+		}
+
+		fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start xxxx", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx), "TestKillKey-proc.Ctx", val, "TestKillKey-regCtx", val1)
+	}
+
 	defer func() {
 		if proc.TestKill {
-			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start xxxx", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start xxxx1111", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx), "TestKillKey-proc.Ctx", val, "TestKillKey-regCtx", val1)
 		}
 	}()
 
 	for !end {
-		if proc.TestKill {
-			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
-		}
+		//if proc.TestKill {
+		//	fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+		//}
 
 		//if err, isCancel := CancelCheck(proc); isCancel {
 		//	if proc.TestKill {
@@ -184,19 +199,19 @@ func Run(ins Instructions, proc *process.Process) (end bool, err error) {
 			return true, err
 		}
 
-		//if err, isCancel := CancelCheck(proc); isCancel {
-		//	if proc.TestKill {
-		//		fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy2222", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
-		//	}
-		//	return true, err
-		//}
+		if err, isCancel := CancelCheck(proc); isCancel {
+			if proc.TestKill {
+				fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start yyyy2222", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx))
+			}
+			return true, err
+		}
 
 		end = result.Status == ExecStop || result.Batch == nil
-		if proc.TestKill {
-			fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start uuuu", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx),
-				"end", end,
-				"result.Status == ExecStop || result.Batch == nil", result.Status == ExecStop, result.Batch == nil)
-		}
+		//if proc.TestKill {
+		//	fmt.Fprintln(os.Stderr, "==testkill", "enter Run loop start uuuu", sBuf.String(), uid.String(), cnt, "proc.Ctx", pAddr, IsCancelled(proc.Ctx), "reg.Ctx", regAddr, IsCancelled(regCtx),
+		//		"end", end,
+		//		"result.Status == ExecStop || result.Batch == nil", result.Status == ExecStop, result.Batch == nil)
+		//}
 		cnt++
 	}
 	if proc.TestKill {

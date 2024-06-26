@@ -92,10 +92,9 @@ func NewWithAnalyze(p *Process, ctx context.Context, regNumber int, anals []*Ana
 }
 
 // NewFromProc create a new Process based on another process.
-func NewFromProc(p *Process, ctx context.Context, regNumber int) *Process {
+func NewFromProc(p *Process, _ context.Context, regNumber int) *Process {
 	proc := new(Process)
 	//newctx, cancel := context.WithCancel(ctx)
-	newctx, cancel := context.WithCancel(p.Ctx)
 	proc.Id = p.Id
 	proc.vp = p.vp
 	proc.mp = p.Mp()
@@ -124,12 +123,12 @@ func NewFromProc(p *Process, ctx context.Context, regNumber int) *Process {
 	proc.logger = p.logger
 
 	// reg and cancel
-	proc.Ctx = newctx
-	proc.Cancel = cancel
+	proc.Ctx = p.Ctx
+	proc.Cancel = p.Cancel
 	proc.Reg.MergeReceivers = make([]*WaitRegister, regNumber)
 	for i := 0; i < regNumber; i++ {
 		proc.Reg.MergeReceivers[i] = &WaitRegister{
-			Ctx: newctx,
+			Ctx: p.Ctx,
 			Ch:  make(chan *RegisterMessage, 1),
 		}
 	}

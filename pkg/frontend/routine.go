@@ -17,6 +17,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -193,7 +194,9 @@ func (rt *Routine) setCancelRequestFunc(cf context.CancelFunc) {
 func (rt *Routine) cancelRequestCtx() {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
+	fmt.Fprintln(os.Stderr, "==testkill cancel request context")
 	if rt.cancelRequestFunc != nil {
+		fmt.Fprintln(os.Stderr, "==testkill cancel request context 1111")
 		rt.cancelRequestFunc()
 	}
 }

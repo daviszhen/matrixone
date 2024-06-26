@@ -286,6 +286,12 @@ func (c *Compile) Ctx() context.Context {
 	return c.proc.Ctx
 }
 
+func (c *Compile) SetCtx(ctx context.Context) {
+	if c.proc != nil {
+		c.proc.Ctx = ctx
+	}
+}
+
 type RemoteReceivRegInfo struct {
 	Idx      int
 	Uuid     uuid.UUID

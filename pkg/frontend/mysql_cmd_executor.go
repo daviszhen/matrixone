@@ -2551,9 +2551,11 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 
 	testKill := false
 	if strings.HasPrefix(input.getSql(), "select * from tpch_10g.lineitem") {
-		fmt.Fprintln(os.Stderr, "==testkill", input.getSql())
+		fmt.Fprintln(os.Stderr, "==testkill", input.getSql(), ses.uuid.String(), ses.respr.GetU32(CONNID))
 		testKill = true
 	}
+
+	compile.StartCheckRoutine(execCtx.reqCtx, testKill, "doComQuery")
 
 	beginInstant := time.Now()
 	execCtx.reqCtx = appendStatementAt(execCtx.reqCtx, beginInstant)

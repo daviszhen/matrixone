@@ -210,7 +210,7 @@ func cnMessageHandle(receiver *messageReceiverOnServer) error {
 			return err
 		}
 		s = appendWriteBackOperator(c, s)
-		s.SetContextRecursively(c.ctx)
+		s.SetContextRecursively(c.Ctx())
 
 		err = s.ParallelRun(c)
 		if err == nil {
@@ -280,7 +280,7 @@ func receiveMessageFromCnServer(c *Compile, s *Scope, sender *messageSenderOnCli
 			arg.Children = oldChild
 		}()
 	default:
-		return moerr.NewInvalidInput(c.ctx, "last operator should only be connector or dispatcher")
+		return moerr.NewInvalidInput(c.Ctx(), "last operator should only be connector or dispatcher")
 	}
 
 	// can not reuse
@@ -343,7 +343,7 @@ func (s *Scope) remoteRun(c *Compile) (sender *messageSenderOnClient, err error)
 			return nil, err
 		}
 	} else {
-		return nil, moerr.NewInvalidInput(c.ctx, "last operator should only be connector or dispatcher")
+		return nil, moerr.NewInvalidInput(c.Ctx(), "last operator should only be connector or dispatcher")
 	}
 
 	for _, ins := range s.Instructions[lastIdx+1:] {
