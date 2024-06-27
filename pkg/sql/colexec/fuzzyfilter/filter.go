@@ -16,7 +16,6 @@ package fuzzyfilter
 
 import (
 	"bytes"
-	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/bloomfilter"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -60,10 +59,9 @@ Note:
 
 const argName = "fuzzy_filter"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": fuzzy check duplicate constraint")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

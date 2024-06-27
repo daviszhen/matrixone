@@ -212,7 +212,6 @@ func AttachRoleId(ctx context.Context, roleId uint32) context.Context {
 
 // EngineKey use EngineKey{} to get engine from Context
 type EngineKey struct{}
-type TestKillKey struct{}
 
 // SqlKey use SqlKey{} to get string value from Context
 type SqlKey struct{}

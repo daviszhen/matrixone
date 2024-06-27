@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	gotrace "runtime/trace"
 	"sort"
 	"strconv"
@@ -2549,14 +2548,6 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 		inMemStreamScan = batchValue
 	}
 
-	testKill := false
-	if strings.HasPrefix(input.getSql(), "select * from tpch_10g.lineitem") {
-		fmt.Fprintln(os.Stderr, "==testkill", input.getSql(), ses.uuid.String(), ses.respr.GetU32(CONNID))
-		testKill = true
-	}
-
-	compile.StartCheckRoutine(execCtx.reqCtx, testKill, "doComQuery")
-
 	beginInstant := time.Now()
 	execCtx.reqCtx = appendStatementAt(execCtx.reqCtx, beginInstant)
 	input.genSqlSourceType(ses)
@@ -2578,10 +2569,6 @@ func doComQuery(ses *Session, execCtx *ExecCtx, input *UserInput) (retErr error)
 
 	proc := ses.proc
 	proc.Ctx = execCtx.reqCtx
-	proc.TestKill = testKill
-	defer func() {
-		proc.TestKill = false
-	}()
 
 	proc.CopyVectorPool(ses.proc)
 	proc.CopyValueScanBatch(ses.proc)

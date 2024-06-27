@@ -28,7 +28,7 @@ import (
 
 const argName = "projection"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	n := arg
 	buf.WriteString(": projection(")
@@ -39,7 +39,7 @@ func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 		buf.WriteString(e.String())
 	}
 	buf.WriteString(")")
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

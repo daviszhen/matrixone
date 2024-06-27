@@ -34,7 +34,7 @@ import (
 
 const argName = "sample"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": ")
 	switch arg.Type {
@@ -57,7 +57,7 @@ func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 	default:
 		buf.WriteString("unknown sample type")
 	}
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

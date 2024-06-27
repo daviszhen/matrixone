@@ -16,7 +16,6 @@ package mergedelete
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -27,10 +26,9 @@ import (
 
 const argName = "merge_delete"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": MergeS3DeleteInfo ")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

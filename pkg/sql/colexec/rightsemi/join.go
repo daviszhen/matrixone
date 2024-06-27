@@ -31,10 +31,10 @@ import (
 
 const argName = "right_semi"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": right semi join ")
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

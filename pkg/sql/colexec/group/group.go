@@ -16,11 +16,11 @@ package group
 
 import (
 	"bytes"
-	"context"
 	"fmt"
+	"runtime"
+
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
-	"runtime"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -33,7 +33,7 @@ import (
 
 const argName = "group"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": group([")
@@ -51,7 +51,6 @@ func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 		buf.WriteString(fmt.Sprintf("%v(%v)", function.GetAggFunctionNameByID(ag.GetAggID()), ag.GetArgExpressions()))
 	}
 	buf.WriteString("])")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

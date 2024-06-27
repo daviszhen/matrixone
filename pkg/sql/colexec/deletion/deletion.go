@@ -16,7 +16,6 @@ package deletion
 
 import (
 	"bytes"
-	"context"
 	"sync/atomic"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
@@ -49,10 +48,9 @@ const (
 
 const argName = "deletion"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": delete rows")
-	return nil
 }
 
 func (arg *Argument) Prepare(_ *process.Process) error {

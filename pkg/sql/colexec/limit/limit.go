@@ -16,7 +16,6 @@ package limit
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -28,10 +27,9 @@ import (
 
 const argName = "limit"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(fmt.Sprintf("limit(%v)", arg.LimitExpr))
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

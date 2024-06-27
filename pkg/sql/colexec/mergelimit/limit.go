@@ -16,7 +16,6 @@ package mergelimit
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -28,11 +27,10 @@ import (
 
 const argName = "merge_limit"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(fmt.Sprintf("mergeLimit(%v)", ap.Limit))
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

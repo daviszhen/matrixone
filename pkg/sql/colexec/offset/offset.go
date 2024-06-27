@@ -16,7 +16,6 @@ package offset
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -28,11 +27,10 @@ import (
 
 const argName = "offset"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	n := arg
 	buf.WriteString(fmt.Sprintf("offset(%v)", n.OffsetExpr))
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

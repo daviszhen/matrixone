@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/reuse"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -36,7 +38,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"go.uber.org/zap"
 )
 
 var (
@@ -46,7 +47,7 @@ var (
 
 const argName = "lock_op"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": lock-op(")
 	n := len(arg.targets) - 1
@@ -60,7 +61,6 @@ func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 		}
 	}
 	buf.WriteString(")")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

@@ -16,7 +16,6 @@ package intersect
 
 import (
 	"bytes"
-	"context"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -26,10 +25,9 @@ import (
 
 const argName = "intersect"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": intersect ")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

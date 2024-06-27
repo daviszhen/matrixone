@@ -259,8 +259,6 @@ func (cwft *TxnComputationWrapper) Compile(any any, fill func(*batch.Batch) erro
 	cwft.proc.Ctx = execCtx.reqCtx
 	cwft.proc.FileService = getGlobalPu().FileService
 
-	compile.StartCheckRoutine(execCtx.reqCtx, cwft.proc.TestKill, "doComQuery")
-
 	var tenant string
 	tInfo := cwft.ses.GetTenantInfo()
 	if tInfo != nil {

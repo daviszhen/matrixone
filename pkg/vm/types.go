@@ -133,7 +133,7 @@ type Operator interface {
 	Free(proc *process.Process, pipelineFailed bool, err error)
 
 	// String returns the string representation of an operator.
-	String(buf *bytes.Buffer) context.Context
+	String(buf *bytes.Buffer)
 
 	//Prepare prepares an operator for execution.
 	Prepare(proc *process.Process) error

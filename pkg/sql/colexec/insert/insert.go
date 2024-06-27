@@ -16,7 +16,6 @@ package insert
 
 import (
 	"bytes"
-	"context"
 	"sync/atomic"
 	"time"
 
@@ -31,10 +30,9 @@ import (
 
 const argName = "insert"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": insert")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

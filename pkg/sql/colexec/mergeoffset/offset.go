@@ -16,7 +16,6 @@ package mergeoffset
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -28,10 +27,9 @@ import (
 
 const argName = "merge_offset"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(fmt.Sprintf("mergeOffset(%v)", arg.Offset))
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

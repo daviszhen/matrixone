@@ -16,7 +16,6 @@ package hashbuild
 
 import (
 	"bytes"
-	"context"
 	"runtime"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
@@ -30,10 +29,9 @@ import (
 
 const argName = "hash_build"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": hash build ")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

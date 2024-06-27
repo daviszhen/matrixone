@@ -32,11 +32,11 @@ import (
 
 const argName = "restrict"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(fmt.Sprintf("filter(%s)", ap.E))
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

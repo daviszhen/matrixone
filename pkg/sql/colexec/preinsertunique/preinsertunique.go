@@ -36,10 +36,10 @@ const (
 
 const argName = "pre_insert_unique"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": pre processing insert unique key")
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

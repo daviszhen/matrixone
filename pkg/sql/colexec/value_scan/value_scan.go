@@ -24,10 +24,10 @@ import (
 
 const argName = "value_scan"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": value_scan ")
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

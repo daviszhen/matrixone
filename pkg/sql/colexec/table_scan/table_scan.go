@@ -30,10 +30,10 @@ import (
 const argName = "table_scan"
 const maxBatchMemSize = colexec.DefaultBatchSize * 1024
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": table_scan ")
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {

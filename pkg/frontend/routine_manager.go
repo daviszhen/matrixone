@@ -274,12 +274,10 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 
 	ses.Debugf(cancelCtx, "have done some preparation for the connection %s", rs.RemoteAddress())
 
-	idBefore := pro.connectionID
 	// With proxy module enabled, we try to update salt value and label info from proxy.
 	if getGlobalPu().SV.ProxyEnabled {
 		pro.receiveExtraInfo(rs)
 	}
-	idAfter := pro.connectionID
 
 	err = pro.WriteHandshake()
 	if err != nil {
@@ -292,7 +290,6 @@ func (rm *RoutineManager) Created(rs goetty.IOSession) {
 
 	ses.Debugf(rm.getCtx(), "have sent handshake packet to connection %s", rs.RemoteAddress())
 	rm.setRoutine(rs, pro.connectionID, routine)
-	fmt.Fprintln(os.Stderr, "==testkill", "new session id", ses.uuid, "new connid", pro.connectionID, "hakeeper id", connID, "idBefore", idBefore, "idAfter", idAfter)
 }
 
 /*
@@ -342,7 +339,7 @@ func (rm *RoutineManager) kill(ctx context.Context, killConnection bool, idThatK
 			rt.killConnection(killMyself)
 			rm.accountRoutine.deleteRoutine(int64(rt.ses.GetTenantInfo().GetTenantID()), rt)
 		} else {
-			ses.Infof(ctx, "kill query %s on the connection %d,kill session id %s,kill conn id %d", statementId, id, ses.uuid.String(), ses.respr.GetU32(CONNID))
+			ses.Infof(ctx, "kill query %s on the connection %d", statementId, id)
 			rt.killQuery(killMyself, statementId)
 		}
 	} else {

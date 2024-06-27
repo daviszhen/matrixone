@@ -155,7 +155,7 @@ func Run(ins Instructions, proc *process.Process) (end bool, err error) {
 	pAddr := fmt.Sprintf("%p", proc.Ctx)
 
 	sBuf := &bytes.Buffer{}
-	regCtx := root.String(sBuf)
+	root.String(sBuf)
 
 	regAddr := fmt.Sprintf("%p", regCtx)
 

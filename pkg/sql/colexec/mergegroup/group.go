@@ -16,7 +16,6 @@ package mergegroup
 
 import (
 	"bytes"
-	"context"
 	"runtime"
 
 	"github.com/matrixorigin/matrixone/pkg/common/hashmap"
@@ -28,10 +27,9 @@ import (
 
 const argName = "merge_group"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": mergeroup()")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

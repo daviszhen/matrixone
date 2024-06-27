@@ -32,6 +32,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pierrec/lz4/v4"
+
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/morpc"
@@ -57,7 +59,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/options"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"github.com/pierrec/lz4/v4"
 )
 
 var (
@@ -71,10 +72,9 @@ var (
 
 const argName = "external"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	buf.WriteString(": external output")
-	return nil
 }
 
 func (arg *Argument) Prepare(proc *process.Process) error {

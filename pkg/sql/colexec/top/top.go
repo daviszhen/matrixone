@@ -36,7 +36,7 @@ import (
 
 const argName = "top"
 
-func (arg *Argument) String(buf *bytes.Buffer) context.Context {
+func (arg *Argument) String(buf *bytes.Buffer) {
 	buf.WriteString(argName)
 	ap := arg
 	buf.WriteString(": top([")
@@ -47,7 +47,7 @@ func (arg *Argument) String(buf *bytes.Buffer) context.Context {
 		buf.WriteString(f.String())
 	}
 	buf.WriteString(fmt.Sprintf("], %v)", ap.Limit))
-	return nil
+	return
 }
 
 func (arg *Argument) Prepare(proc *process.Process) (err error) {
