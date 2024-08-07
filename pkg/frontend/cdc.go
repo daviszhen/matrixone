@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +87,8 @@ const (
 		`task_id = "%s"`
 
 	getDbIdAndTableIdFormat = "select reldatabase_id,rel_id from mo_catalog.mo_tables where account_id = %d and reldatabase = '%s' and relname = '%s'"
+
+	getTables = "select account_name, reldatabase, relname from mo_catalog.mo_tables join mo_catalog.mo_account on mo_catalog.mo_tables.account_id = mo_catalog.mo_account.account_id where REGEXP_LIKE(account_name, '^%s$') and REGEXP_LIKE(reldatabase, '^%s$') and REGEXP_LIKE(relname, '^%s$')"
 )
 
 func getSqlForNewCdcTask(
@@ -154,6 +157,12 @@ func getSqlForRetrivingNewCdcTask(
 
 func getSqlForDbIdAndTableId(accId uint64, db, table string) string {
 	return fmt.Sprintf(getDbIdAndTableIdFormat, accId, db, table)
+}
+
+func getSqlForTables(
+	pt *PatternTuple,
+) string {
+	return fmt.Sprintf(getTables, pt.SourceAccount, pt.SourceDatabase, pt.SourceTable)
 }
 
 const (
@@ -256,6 +265,167 @@ func cdcTaskMetadata() pb.TaskMetadata {
 		},
 	}
 }
+func string2uint64(str string) (res uint64, err error) {
+	if str != "" {
+		res, err = strconv.ParseUint(str, 10, 64)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		res = uint64(0)
+	}
+	return res, nil
+}
+
+type PatternTuple struct {
+	SourceAccount  string
+	SourceDatabase string
+	SourceTable    string
+	SinkAccount    string
+	SinkDatabase   string
+	SinkTable      string
+}
+
+func splitPattern(pattern string) (*PatternTuple, error) {
+	pt := &PatternTuple{}
+	if strings.Contains(pattern, ":") {
+		splitRes := strings.Split(pattern, ":")
+		if len(splitRes) != 2 {
+			return nil, fmt.Errorf("invalid pattern format")
+		}
+
+		source := strings.Split(splitRes[0], ".")
+		if len(source) != 2 && len(source) != 3 {
+			return nil, fmt.Errorf("invalid pattern format")
+		}
+		if len(source) == 2 {
+			pt.SourceDatabase, pt.SourceTable = source[0], source[1]
+		} else {
+			pt.SourceAccount, pt.SourceDatabase, pt.SourceTable = source[0], source[1], source[2]
+		}
+
+		sink := strings.Split(splitRes[1], ".")
+		if len(sink) != 2 && len(sink) != 3 {
+			return nil, fmt.Errorf("invalid pattern format")
+		}
+		if len(sink) == 2 {
+			pt.SinkDatabase, pt.SinkTable = sink[0], sink[1]
+		} else {
+			pt.SinkAccount, pt.SinkDatabase, pt.SinkTable = sink[0], sink[1], sink[2]
+		}
+		return pt, nil
+	}
+
+	source := make([]string, 0)
+	current := strings.Builder{}
+	inRegex := false
+	isRegex := false
+	for i := 0; i < len(pattern); i++ {
+		char := pattern[i]
+		if char == '/' {
+			isRegex = true
+			inRegex = !inRegex
+		} else if char == '.' && !inRegex {
+			res := current.String()
+			if !isRegex {
+				strings.ReplaceAll(res, "*", ".*")
+				strings.ReplaceAll(res, ".", "?")
+			}
+			isRegex = false
+			source = append(source)
+			current.Reset()
+		} else {
+			current.WriteByte(char)
+		}
+	}
+	if current.Len() > 0 {
+		source = append(source, current.String())
+	}
+	if (len(source) != 2 && len(source) != 3) || inRegex {
+		return nil, fmt.Errorf("invalid pattern format")
+	}
+	if len(source) == 2 {
+		pt.SourceDatabase, pt.SourceTable = source[0], source[1]
+	} else {
+		pt.SourceAccount, pt.SourceDatabase, pt.SourceTable = source[0], source[1], source[2]
+	}
+	return pt, nil
+}
+
+func (cdc *CdcTask) string2tables(ctx context.Context, ses *Session, pattern string) (map[string]string, error) {
+	pts := make([]*PatternTuple, 0)
+	current := strings.Builder{}
+	inRegex := false
+	for i := 0; i < len(pattern); i++ {
+		char := pattern[i]
+		if char == '/' {
+			inRegex = !inRegex
+		}
+		if char == ',' && !inRegex {
+			pt, err := splitPattern(current.String())
+			if err != nil {
+				return nil, err
+			}
+			pts = append(pts, pt)
+			current.Reset()
+		} else {
+			current.WriteByte(char)
+		}
+	}
+
+	if current.Len() != 0 {
+		pt, err := splitPattern(current.String())
+		if err != nil {
+			return nil, err
+		}
+		pts = append(pts, pt)
+	}
+	resMap := make(map[string]string)
+	for _, pt := range pts {
+		if pt.SourceAccount == "" {
+			pt.SourceAccount = ses.GetTenantName()
+		}
+
+		sql := getSqlForTables(pt)
+		res := cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
+		for rowIdx := range res.RowCount() {
+			sourceString := strings.Builder{}
+			sinkString := strings.Builder{}
+			acc, err := res.StrValue(ctx, rowIdx, 0)
+			if err != nil {
+				return nil, err
+			}
+			db, err := res.StrValue(ctx, rowIdx, 1)
+			if err != nil {
+				return nil, err
+			}
+			tbl, err := res.StrValue(ctx, rowIdx, 2)
+			if err != nil {
+				return nil, err
+			}
+			sourceString.WriteString(acc)
+			sourceString.WriteString(".")
+			sourceString.WriteString(db)
+			sourceString.WriteString(".")
+			sourceString.WriteString(tbl)
+			sourceString.WriteString(":")
+			if pt.SinkTable != "" {
+				if pt.SinkAccount != "" {
+					sinkString.WriteString(pt.SinkAccount)
+					sinkString.WriteString(".")
+				}
+				sinkString.WriteString(pt.SinkDatabase)
+				sinkString.WriteString(".")
+				sinkString.WriteString(pt.SinkTable)
+			} else {
+				sinkString.WriteString(sourceString.String())
+			}
+			resMap[sourceString.String()] = sinkString.String()
+		}
+	}
+
+	return resMap, nil
+}
 
 func saveCdcTask(
 	ctx context.Context,
@@ -263,6 +433,8 @@ func saveCdcTask(
 	cdcId uuid.UUID,
 	create *tree.CreateCDC,
 ) error {
+	var startTs, endTs uint64
+	var err error
 	accInfo := ses.GetTenantInfo()
 
 	fmt.Fprintln(os.Stderr, "====>save cdc task",
@@ -273,6 +445,19 @@ func saveCdcTask(
 		create.SinkUri,
 		create.SinkType,
 	)
+	cdcTaskOptionsMap := make(map[string]string)
+	for i := 0; i < len(create.Option); i += 2 {
+		cdcTaskOptionsMap[create.Option[i]] = create.Option[i+1]
+	}
+
+	startTs, err = string2uint64(cdcTaskOptionsMap["StartTS"])
+	if err != nil {
+		return err
+	}
+	endTs, err = string2uint64(cdcTaskOptionsMap["EndTS"])
+	if err != nil {
+		return err
+	}
 
 	dat := time.Now().UTC()
 
@@ -298,9 +483,9 @@ func saveCdcTask(
 		"FIXME",
 		SASCommon,
 		SASCommon,
-		0, //FIXME
-		0, //FIXME
-		"FIXME",
+		startTs,
+		endTs,
+		cdcTaskOptionsMap["ConfigFile"],
 		dat,
 		SyncLoading,
 		0, //FIXME
@@ -308,7 +493,7 @@ func saveCdcTask(
 		"FIXME",
 	)
 
-	err := bh.Exec(ctx, sql)
+	err = bh.Exec(ctx, sql)
 	if err != nil {
 		return err
 	}
@@ -547,8 +732,6 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		dbId, tableId,
 	)
 	//TODO:
-	
-	
 
 	<-ch
 
