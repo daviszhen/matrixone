@@ -348,18 +348,27 @@ func splitPattern(pattern string) (*PatternTuple, error) {
 		} else if char == '.' && !inRegex {
 			res := current.String()
 			if !isRegex {
-				strings.ReplaceAll(res, "*", ".*")
-				strings.ReplaceAll(res, ".", "?")
+				res = strings.ReplaceAll(res, ".", "?")
+				res = strings.ReplaceAll(res, "*", ".*")
+
 			}
 			isRegex = false
-			source = append(source)
+			source = append(source, res)
 			current.Reset()
 		} else {
 			current.WriteByte(char)
 		}
 	}
 	if current.Len() > 0 {
-		source = append(source, current.String())
+		res := current.String()
+		if !isRegex {
+			res = strings.ReplaceAll(res, ".", "?")
+			res = strings.ReplaceAll(res, "*", ".*")
+
+		}
+		isRegex = false
+		source = append(source, res)
+		current.Reset()
 	}
 	if (len(source) != 2 && len(source) != 3) || inRegex {
 		return nil, fmt.Errorf("invalid pattern format")
@@ -440,7 +449,6 @@ func string2tables(ctx context.Context, ses *Session, pattern string) (map[strin
 				sourceString.WriteString(db)
 				sourceString.WriteString(".")
 				sourceString.WriteString(tbl)
-				sourceString.WriteString(":")
 				if pt.SinkTable != "" {
 					if pt.SinkAccount != "" {
 						sinkString.WriteString(pt.SinkAccount)
@@ -491,7 +499,11 @@ func saveCdcTask(
 	if err != nil {
 		return err
 	}
-	fmt.Println(string2tables(ctx, ses, create.Tables))
+	ssmap, err := string2tables(ctx, ses, create.Tables)
+	if err != nil {
+		return err
+	}
+	fmt.Println("KKKKKKK>", ssmap)
 	dat := time.Now().UTC()
 
 	bh := ses.GetBackgroundExec(ctx)
@@ -841,6 +853,18 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 		if c != 1 {
 			return moerr.NewInternalError(ctx, "no cdc task drop")
 		}
+
+		c, err = ts.DeleteDaemonTask(ctx,
+			taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
+			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+		)
+		if err != nil {
+			return err
+		}
+		if c != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task drop")
+		}
+
 		sql = getSqlForDropCdcMeta(ses, taskId)
 		err = bh.Exec(ctx, sql)
 		if err != nil {
