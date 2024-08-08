@@ -89,6 +89,12 @@ const (
 	getDbIdAndTableIdFormat = "select reldatabase_id,rel_id from mo_catalog.mo_tables where account_id = %d and reldatabase = '%s' and relname = '%s'"
 
 	getTables = "select account_name, reldatabase, relname from mo_catalog.mo_tables join mo_catalog.mo_account on mo_catalog.mo_tables.account_id = mo_catalog.mo_account.account_id where REGEXP_LIKE(account_name, '^%s$') and REGEXP_LIKE(reldatabase, '^%s$') and REGEXP_LIKE(relname, '^%s$')"
+
+	getCdcTaskId = "select task_id from mo_catalog.mo_cdc_task where account_id = %d"
+
+	getCdcTaskIdWhere = "select task_id from mo_catalog.mo_cdc_task where account_id = %d and task_name = %s"
+
+	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where account_id = %d and task_id = %d"
 )
 
 func getSqlForNewCdcTask(
@@ -163,6 +169,18 @@ func getSqlForTables(
 	pt *PatternTuple,
 ) string {
 	return fmt.Sprintf(getTables, pt.SourceAccount, pt.SourceDatabase, pt.SourceTable)
+}
+
+func getSqlForTaskId(ses *Session, all bool, taskName string) string {
+	if all {
+		return fmt.Sprintf(getCdcTaskId, ses.GetAccountId())
+	} else {
+		return fmt.Sprintf(getCdcTaskIdWhere, ses.GetAccountId(), taskName)
+	}
+}
+
+func getSqlForDropCdcMeta(ses *Session, taskId uint64) string {
+	return fmt.Sprintf(dropCdcMeta, ses.GetAccountId(), taskId)
 }
 
 const (
@@ -735,5 +753,49 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 
 	<-ch
 
+	return nil
+}
+
+func handleDropCdc(ses *Session, execCtx *ExecCtx, st *tree.DropCDC) error {
+	return doDropCdc(execCtx.reqCtx, ses, st)
+}
+
+func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
+	bh := ses.GetBackgroundExec(ctx)
+	sql := getSqlForTaskId(ses, drop.Option.All, drop.Option.TaskName)
+	err := bh.Exec(ctx, sql)
+	if err != nil {
+		return err
+	}
+	erArray, err := getResultSet(ctx, bh)
+	if err != nil {
+		return err
+	}
+	var taskIds []uint64
+	if execResultArrayHasData(erArray) {
+		rowCount := erArray[0].GetRowCount()
+		taskIds = make([]uint64, rowCount)
+		for i := uint64(0); i < rowCount; i++ {
+			taskId, err := erArray[0].GetUint64(ctx, i, 0)
+			if err != nil {
+				return err
+			}
+			taskIds = append(taskIds, taskId)
+		}
+	} else {
+		return moerr.NewInternalError(ctx, "no cdc task drop")
+	}
+	bh.ClearExecResultSet()
+	for _, taskId := range taskIds {
+		err = handleCancelDaemonTask(ctx, ses, taskId)
+		if err != nil {
+			return err
+		}
+		sql = getSqlForDropCdcMeta(ses, taskId)
+		err = bh.Exec(ctx, sql)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
