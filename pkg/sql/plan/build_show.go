@@ -955,7 +955,7 @@ func buildShowCdc(stmt *tree.ShowCDC, ctx CompilerContext) (*Plan, error) {
 	if stmt.Option.All {
 		sql = fmt.Sprintf("SELECT task_id, task_name, source_uri, sink_uri, state, checkpoint FROM %s.mo_cdc_task", MO_CATALOG_DB_NAME)
 	} else {
-		sql = fmt.Sprintf("SELECT task_id, task_name, source_uri, sink_uri, state, checkpoint FROM %s.mo_cdc_task WHERE task_name = %s", MO_CATALOG_DB_NAME, stmt.Option.TaskName)
+		sql = fmt.Sprintf("SELECT task_id, task_name, source_uri, sink_uri, state, checkpoint FROM %s.mo_cdc_task WHERE task_name = '%s'", MO_CATALOG_DB_NAME, stmt.Option.TaskName)
 	}
 	return returnByRewriteSQL(ctx, sql, ddlType)
 }

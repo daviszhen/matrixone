@@ -94,9 +94,9 @@ const (
 
 	getCdcTaskId = "select task_id from mo_catalog.mo_cdc_task where account_id = %d"
 
-	getCdcTaskIdWhere = "select task_id from mo_catalog.mo_cdc_task where account_id = %d and task_name = %s"
+	getCdcTaskIdWhere = "select task_id from mo_catalog.mo_cdc_task where account_id = %d and task_name = '%s'"
 
-	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where account_id = %d and task_id = %d"
+	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where account_id = %d and task_id = '%s'"
 )
 
 func getSqlForNewCdcTask(
@@ -181,7 +181,7 @@ func getSqlForTaskId(ses *Session, all bool, taskName string) string {
 	}
 }
 
-func getSqlForDropCdcMeta(ses *Session, taskId uint64) string {
+func getSqlForDropCdcMeta(ses *Session, taskId string) string {
 	return fmt.Sprintf(dropCdcMeta, ses.GetAccountId(), taskId)
 }
 
@@ -267,15 +267,15 @@ func createCdc(
 			},
 		},
 	}
-	if err = ts.CreateDaemonTask(ctx, cdcTaskMetadata(), details); err != nil {
+	if err = ts.CreateDaemonTask(ctx, cdcTaskMetadata(cdcId.String()), details); err != nil {
 		return err
 	}
 	return nil
 }
 
-func cdcTaskMetadata() pb.TaskMetadata {
+func cdcTaskMetadata(cdcId string) pb.TaskMetadata {
 	return pb.TaskMetadata{
-		ID:       "-",
+		ID:       cdcId,
 		Executor: pb.TaskCode_InitCdc,
 		Options: pb.TaskOptions{
 			MaxRetryTimes: defaultConnectorTaskMaxRetryTimes,
@@ -372,7 +372,7 @@ func splitPattern(pattern string) (*PatternTuple, error) {
 	return pt, nil
 }
 
-func (cdc *CdcTask) string2tables(ctx context.Context, ses *Session, pattern string) (map[string]string, error) {
+func string2tables(ctx context.Context, ses *Session, pattern string) (map[string]string, error) {
 	pts := make([]*PatternTuple, 0)
 	current := strings.Builder{}
 	inRegex := false
@@ -400,6 +400,8 @@ func (cdc *CdcTask) string2tables(ctx context.Context, ses *Session, pattern str
 		}
 		pts = append(pts, pt)
 	}
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
 	resMap := make(map[string]string)
 	for _, pt := range pts {
 		if pt.SourceAccount == "" {
@@ -407,40 +409,51 @@ func (cdc *CdcTask) string2tables(ctx context.Context, ses *Session, pattern str
 		}
 
 		sql := getSqlForTables(pt)
-		res := cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
-		for rowIdx := range res.RowCount() {
-			sourceString := strings.Builder{}
-			sinkString := strings.Builder{}
-			acc, err := res.StrValue(ctx, rowIdx, 0)
-			if err != nil {
-				return nil, err
-			}
-			db, err := res.StrValue(ctx, rowIdx, 1)
-			if err != nil {
-				return nil, err
-			}
-			tbl, err := res.StrValue(ctx, rowIdx, 2)
-			if err != nil {
-				return nil, err
-			}
-			sourceString.WriteString(acc)
-			sourceString.WriteString(".")
-			sourceString.WriteString(db)
-			sourceString.WriteString(".")
-			sourceString.WriteString(tbl)
-			sourceString.WriteString(":")
-			if pt.SinkTable != "" {
-				if pt.SinkAccount != "" {
-					sinkString.WriteString(pt.SinkAccount)
-					sinkString.WriteString(".")
+		bh.ClearExecResultSet()
+		err := bh.Exec(ctx, sql)
+		if err != nil {
+			return nil, err
+		}
+		erArray, err := getResultSet(ctx, bh)
+		if err != nil {
+			return nil, err
+		}
+		if execResultArrayHasData(erArray) {
+			res := erArray[0]
+			for rowIdx := range erArray[0].GetRowCount() {
+				sourceString := strings.Builder{}
+				sinkString := strings.Builder{}
+				acc, err := res.GetString(ctx, rowIdx, 0)
+				if err != nil {
+					return nil, err
 				}
-				sinkString.WriteString(pt.SinkDatabase)
-				sinkString.WriteString(".")
-				sinkString.WriteString(pt.SinkTable)
-			} else {
-				sinkString.WriteString(sourceString.String())
+				db, err := res.GetString(ctx, rowIdx, 1)
+				if err != nil {
+					return nil, err
+				}
+				tbl, err := res.GetString(ctx, rowIdx, 2)
+				if err != nil {
+					return nil, err
+				}
+				sourceString.WriteString(acc)
+				sourceString.WriteString(".")
+				sourceString.WriteString(db)
+				sourceString.WriteString(".")
+				sourceString.WriteString(tbl)
+				sourceString.WriteString(":")
+				if pt.SinkTable != "" {
+					if pt.SinkAccount != "" {
+						sinkString.WriteString(pt.SinkAccount)
+						sinkString.WriteString(".")
+					}
+					sinkString.WriteString(pt.SinkDatabase)
+					sinkString.WriteString(".")
+					sinkString.WriteString(pt.SinkTable)
+				} else {
+					sinkString.WriteString(sourceString.String())
+				}
+				resMap[sourceString.String()] = sinkString.String()
 			}
-			resMap[sourceString.String()] = sinkString.String()
 		}
 	}
 
@@ -478,7 +491,7 @@ func saveCdcTask(
 	if err != nil {
 		return err
 	}
-
+	fmt.Println(string2tables(ctx, ses, create.Tables))
 	dat := time.Now().UTC()
 
 	bh := ses.GetBackgroundExec(ctx)
@@ -772,6 +785,7 @@ func handleDropCdc(ses *Session, execCtx *ExecCtx, st *tree.DropCDC) error {
 
 func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
 	sql := getSqlForTaskId(ses, drop.Option.All, drop.Option.TaskName)
 	err := bh.Exec(ctx, sql)
 	if err != nil {
@@ -781,12 +795,12 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 	if err != nil {
 		return err
 	}
-	var taskIds []uint64
+	var taskIds []string
 	if execResultArrayHasData(erArray) {
 		rowCount := erArray[0].GetRowCount()
-		taskIds = make([]uint64, rowCount)
+		taskIds = make([]string, 0, rowCount)
 		for i := uint64(0); i < rowCount; i++ {
-			taskId, err := erArray[0].GetUint64(ctx, i, 0)
+			taskId, err := erArray[0].GetString(ctx, i, 0)
 			if err != nil {
 				return err
 			}
@@ -797,9 +811,35 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 	}
 	bh.ClearExecResultSet()
 	for _, taskId := range taskIds {
-		err = handleCancelDaemonTask(ctx, ses, taskId)
+		ts := getGlobalPu().TaskService
+		if ts == nil {
+			return moerr.NewInternalError(ctx,
+				"task service not ready yet, please try again later.")
+		}
+		tasks, err := ts.QueryDaemonTask(ctx,
+			taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
+			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+		)
 		if err != nil {
 			return err
+		}
+		if len(tasks) != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task drop")
+		}
+		// Already in canceled status.
+		if tasks[0].TaskStatus == task.TaskStatus_Canceled || tasks[0].TaskStatus == task.TaskStatus_CancelRequested {
+			return nil
+		} else if tasks[0].TaskStatus == task.TaskStatus_Error {
+			return moerr.NewInternalError(ctx,
+				"task can not be canceled because it is in %s state", task.TaskStatus_Error)
+		}
+		tasks[0].TaskStatus = task.TaskStatus_CancelRequested
+		c, err := ts.UpdateDaemonTask(ctx, tasks)
+		if err != nil {
+			return err
+		}
+		if c != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task drop")
 		}
 		sql = getSqlForDropCdcMeta(ses, taskId)
 		err = bh.Exec(ctx, sql)
