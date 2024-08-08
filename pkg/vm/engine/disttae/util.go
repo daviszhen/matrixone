@@ -18,8 +18,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/clusterservice"
@@ -32,6 +35,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/objectio"
+	"github.com/matrixorigin/matrixone/pkg/pb/logtail"
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
@@ -46,7 +50,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/options"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
-	"go.uber.org/zap"
 )
 
 func compPkCol(colName string, pkName string) bool {
@@ -1801,4 +1804,24 @@ func isColumnsBatchPerfectlySplitted(bs []*batch.Batch) bool {
 		prevTableId = vector.GetFixedAt[uint64](b.Vecs[tidIdx], b.RowCount()-1)
 	}
 	return true
+}
+
+func printLogtail(tip string, list []logtail.TableLogtail) {
+	fmt.Fprintln(os.Stderr, "&&&&&&> dispatch", tip, " response", "receive logtail list len", len(list))
+	for i, lt := range list {
+		fmt.Fprintln(os.Stderr, "&&&&&&> seq", i, "ckp", lt.CkpLocation, "Ts", lt.Ts, "Table", lt.Table)
+		for j, cmd := range lt.Commands {
+			fmt.Fprintln(os.Stderr, "&&&&&&> seq", i, "cmd", j,
+				cmd.EntryType,
+				cmd.DatabaseName, cmd.TableName, cmd.DatabaseId, cmd.TableId,
+				cmd.FileName, "pkCheckByTn", cmd.PkCheckByTn,
+			)
+			batch, err := batch.ProtoBatchToBatch(cmd.GetBat())
+			if err != nil {
+				panic(err)
+			}
+			fmt.Fprintln(os.Stderr, "&&&&&&> seq", i, "cmd", j, "batch attrs", strings.Join(batch.Attrs, ","))
+			fmt.Fprintln(os.Stderr, "&&&&&&> seq", i, "cmd", j, "batch data", batch.String())
+		}
+	}
 }

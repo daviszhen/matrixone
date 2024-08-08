@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/fagongzi/goetty/v2"
+
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/morpc"
@@ -1460,6 +1461,9 @@ func dispatchSubscribeResponse(
 	receiveAt time.Time) error {
 	lt := response.Logtail
 	tbl := lt.GetTable()
+	{
+		printLogtail("subscribe", []logtail.TableLogtail{lt})
+	}
 
 	notDistribute := ifShouldNotDistribute(tbl.DbId, tbl.TbId)
 	if notDistribute {
@@ -1502,6 +1506,10 @@ func dispatchUpdateResponse(
 	recRoutines []routineController,
 	receiveAt time.Time) error {
 	list := response.GetLogtailList()
+
+	if len(list) > 0 {
+		printLogtail("update", list)
+	}
 
 	// loops for mo_database, mo_tables, mo_columns.
 	for i := 0; i < len(list); i++ {
