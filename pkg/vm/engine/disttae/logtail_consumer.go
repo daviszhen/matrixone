@@ -17,6 +17,7 @@ package disttae
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -1886,7 +1887,10 @@ func updatePartitionOfPush(
 	doneMutate()
 
 	//cdc replay logtail
-	if e.IsCdcEngine() {
+	if e.IsCdcEngine() &&
+		(tblId != catalog.MO_DATABASE_ID &&
+			tblId != catalog.MO_TABLES_ID &&
+			tblId != catalog.MO_COLUMNS_ID) {
 		_ = cdcReplayLogtailUnlock(
 			ctx,
 			e,
@@ -1914,6 +1918,7 @@ func cdcReplayLogtailUnlock(
 	firstCkpConsumed bool,
 ) (err error) {
 
+	//step1 : replay logtail
 	fmt.Fprintf(os.Stderr, "$$$$$$> cdc replay logtail db:table %v:%v %v start lazyload %v firstCkpConsumed %v\n",
 		dbId, tblId, tableInfo.Name,
 		lazyLoad,
@@ -1939,7 +1944,8 @@ func cdcReplayLogtailUnlock(
 			tl,
 		)
 	} else {
-		if !firstCkpConsumed {
+		//if !firstCkpConsumed
+		{
 			fmt.Fprintf(os.Stderr, "$$$$$$> cdc replay logtail db:table %v:%v %v consume ckp\n",
 				dbId, tblId, tableInfo.Name,
 			)
@@ -1951,8 +1957,29 @@ func cdcReplayLogtailUnlock(
 		fmt.Fprintf(os.Stderr, "$$$$$$> cdc %s consume %v:%d-%s log tail error: %v\n", logTag, dbId, tblId, tableInfo.Name, err)
 		return err
 	}
-
 	//!!!NOTE: Cdc ignore updating duration on the partition
+
+	//step2: deliver the partition state to the cdc module
+	//TODO: complement heartbeat
+	schemaCache := e.GetLatestCatalogCache()
+	schemaCache.PrintTables(math.MaxUint64)
+	tblItem := schemaCache.GetTableById(uint32(tableInfo.AccountId), dbId, tblId)
+	if tblItem == nil {
+		return moerr.NewInternalError(ctx, "no table accountid %v %v:%v %v:%v in catalog cache", "",
+			tableInfo.AccountId, tableInfo.Name, dbId, tblId)
+	}
+	tblCtx := TableCtx{
+		table:   tableInfo.Name,
+		dbId:    dbId,
+		tableId: tblId,
+		tblDef:  tblItem.TableDef,
+	}
+	decInput := DecoderInput{
+		ts:    *tl.Ts,
+		state: state,
+	}
+	e.ToCdc(&tblCtx, &decInput)
+
 	return err
 }
 

@@ -21,12 +21,13 @@ import (
 	"time"
 
 	"github.com/matrixorigin/matrixone/pkg/sql/plan/tools"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
 )
 
 func RunDecoder(
 	ctx context.Context,
-	inQueue Queue[tools.Pair[*TableCtx, *DecoderInput]],
-	outQueue Queue[tools.Pair[*TableCtx, *DecoderOutput]],
+	inQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *disttae.DecoderInput]],
+	outQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *DecoderOutput]],
 	codec Decoder) {
 	for {
 		select {
@@ -37,8 +38,10 @@ func RunDecoder(
 			if inQueue.Size() != 0 {
 				head := inQueue.Front()
 				inQueue.Pop()
-				res := codec.Decode(head.Key, head.Value)
-				outQueue.Push(tools.NewPair[*TableCtx, *DecoderOutput](head.Key, res))
+				fmt.Fprintln(os.Stderr, "^^^^^", "get ps of",
+					head.Key.Db(), head.Key.Table(), head.Key.DBId(), head.Key.TableId())
+				res := codec.Decode(ctx, head.Key, head.Value)
+				outQueue.Push(tools.NewPair[*disttae.TableCtx, *DecoderOutput](head.Key, res))
 			} else {
 				time.Sleep(time.Millisecond * 100)
 			}
@@ -48,7 +51,7 @@ func RunDecoder(
 
 func RunSinker(
 	ctx context.Context,
-	inQueue Queue[tools.Pair[*TableCtx, *DecoderOutput]],
+	inQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *DecoderOutput]],
 	sinker Sinker,
 ) {
 	for {
@@ -59,9 +62,11 @@ func RunSinker(
 			if inQueue.Size() != 0 {
 				head := inQueue.Front()
 				inQueue.Pop()
-				err := sinker.Sink(head.Key, head.Value)
+				fmt.Fprintln(os.Stderr, "^^^^^", "get decoded sqls of",
+					head.Key.Db(), head.Key.Table(), head.Key.DBId(), head.Key.TableId())
+				err := sinker.Sink(ctx, head.Key, head.Value)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "sinker.Sink error", err)
+					fmt.Fprintln(os.Stderr, "consoleSinker.Sink error", err)
 				}
 			} else {
 				time.Sleep(time.Millisecond * 100)

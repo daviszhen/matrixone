@@ -14,29 +14,47 @@
 
 package cdc
 
-type sinker struct{}
+import (
+	"context"
+	"fmt"
+	"os"
 
-func (s *sinker) Sink(
-	cdcCtx *TableCtx,
-	data *DecoderOutput,
-) error {
+	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
+)
+
+var _ Sinker = new(consoleSinker)
+
+type consoleSinker struct{}
+
+func NewConsoleSinker() Sinker {
+	return &consoleSinker{}
+}
+
+func (s *consoleSinker) Sink(ctx context.Context, cdcCtx *disttae.TableCtx, data *DecoderOutput) error {
+	fmt.Fprintln(os.Stderr, "====console sinker====")
+	fmt.Fprintln(os.Stderr, cdcCtx.Db(), cdcCtx.DBId(), cdcCtx.Table(), cdcCtx.Table(), data.ts)
+	if value, ok := data.sqlOfRows.Load().([][]byte); !ok {
+		fmt.Fprintln(os.Stderr, "no sqlOfrows")
+	} else {
+		fmt.Fprintln(os.Stderr, "total rows sql", len(value))
+		for i, sqlBytes := range value {
+			fmt.Fprintln(os.Stderr, i, string(sqlBytes))
+		}
+	}
+
 	return nil
 }
 
 type mysqlSink struct {
 }
 
-func (*mysqlSink) Send(
-	data *DecoderOutput,
-) error {
+func (*mysqlSink) Send(ctx context.Context, data *DecoderOutput) error {
 	return nil
 }
 
 type matrixoneSink struct {
 }
 
-func (*matrixoneSink) Send(
-	data *DecoderOutput,
-) error {
+func (*matrixoneSink) Send(ctx context.Context, data *DecoderOutput) error {
 	return nil
 }
