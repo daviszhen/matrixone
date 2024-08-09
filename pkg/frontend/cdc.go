@@ -97,6 +97,8 @@ const (
 	getCdcTaskIdWhere = "select task_id from mo_catalog.mo_cdc_task where account_id = %d and task_name = '%s'"
 
 	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where account_id = %d and task_id = '%s'"
+
+	updateCdcMeta = "update mo_catalog.mo_cdc_task set state = '%s' where account_id = %d and task_id = '%s'"
 )
 
 func getSqlForNewCdcTask(
@@ -183,6 +185,10 @@ func getSqlForTaskId(ses *Session, all bool, taskName string) string {
 
 func getSqlForDropCdcMeta(ses *Session, taskId string) string {
 	return fmt.Sprintf(dropCdcMeta, ses.GetAccountId(), taskId)
+}
+
+func getSqlForUpdateCdcMeta(ses *Session, taskId string, status string) string {
+	return fmt.Sprintf(updateCdcMeta, status, ses.GetAccountId(), taskId)
 }
 
 const (
@@ -873,5 +879,155 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func handlePauseCdc(ses *Session, execCtx *ExecCtx, st *tree.PauseCDC) error {
+	return doPauseCdc(execCtx.reqCtx, ses, st)
+}
+
+func doPauseCdc(ctx context.Context, ses *Session, pause *tree.PauseCDC) error {
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
+	sql := getSqlForTaskId(ses, pause.Option.All, pause.Option.TaskName)
+	err := bh.Exec(ctx, sql)
+	if err != nil {
+		return err
+	}
+	erArray, err := getResultSet(ctx, bh)
+	if err != nil {
+		return err
+	}
+	var taskIds []string
+	if execResultArrayHasData(erArray) {
+		rowCount := erArray[0].GetRowCount()
+		taskIds = make([]string, 0, rowCount)
+		for i := uint64(0); i < rowCount; i++ {
+			taskId, err := erArray[0].GetString(ctx, i, 0)
+			if err != nil {
+				return err
+			}
+			taskIds = append(taskIds, taskId)
+		}
+	} else {
+		return moerr.NewInternalError(ctx, "no cdc task drop")
+	}
+	bh.ClearExecResultSet()
+	for _, taskId := range taskIds {
+		ts := getGlobalPu().TaskService
+		if ts == nil {
+			return moerr.NewInternalError(ctx,
+				"task service not ready yet, please try again later.")
+		}
+		tasks, err := ts.QueryDaemonTask(ctx,
+			taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
+			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+		)
+		if err != nil {
+			return err
+		}
+		if len(tasks) != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task pause")
+		}
+		// Already in paused status.
+		if tasks[0].TaskStatus == task.TaskStatus_Paused || tasks[0].TaskStatus == task.TaskStatus_PauseRequested {
+			return nil
+		} else if tasks[0].TaskStatus != task.TaskStatus_Running {
+			return moerr.NewInternalError(ctx,
+				"task can not be paused only if it is in %s statue, now it is %s",
+				task.TaskStatus_Running,
+				tasks[0].TaskStatus)
+		}
+		tasks[0].TaskStatus = task.TaskStatus_PauseRequested
+		c, err := ts.UpdateDaemonTask(ctx, tasks)
+		if err != nil {
+			return err
+		}
+		if c != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task pause")
+		}
+
+		sql = getSqlForUpdateCdcMeta(ses, taskId, SyncStopped)
+		err = bh.Exec(ctx, sql)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func handleResumeCdc(ses *Session, execCtx *ExecCtx, st *tree.ResumeCDC) error {
+	return doResumeCdc(execCtx.reqCtx, ses, st)
+}
+
+func doResumeCdc(ctx context.Context, ses *Session, resume *tree.ResumeCDC) error {
+	bh := ses.GetBackgroundExec(ctx)
+	defer bh.Close()
+	sql := getSqlForTaskId(ses, false, resume.TaskName)
+	err := bh.Exec(ctx, sql)
+	if err != nil {
+		return err
+	}
+	erArray, err := getResultSet(ctx, bh)
+	if err != nil {
+		return err
+	}
+	var taskIds []string
+	if execResultArrayHasData(erArray) {
+		rowCount := erArray[0].GetRowCount()
+		taskIds = make([]string, 0, rowCount)
+		for i := uint64(0); i < rowCount; i++ {
+			taskId, err := erArray[0].GetString(ctx, i, 0)
+			if err != nil {
+				return err
+			}
+			taskIds = append(taskIds, taskId)
+		}
+	} else {
+		return moerr.NewInternalError(ctx, "no cdc task drop")
+	}
+	bh.ClearExecResultSet()
+	for _, taskId := range taskIds {
+		ts := getGlobalPu().TaskService
+		if ts == nil {
+			return moerr.NewInternalError(ctx,
+				"task service not ready yet, please try again later.")
+		}
+		tasks, err := ts.QueryDaemonTask(ctx,
+			taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
+			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+		)
+		if err != nil {
+			return err
+		}
+		if len(tasks) != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task resume")
+		}
+		// Already in paused status.
+		if tasks[0].TaskStatus == task.TaskStatus_Paused || tasks[0].TaskStatus == task.TaskStatus_PauseRequested {
+			return nil
+		} else if tasks[0].TaskStatus != task.TaskStatus_Running {
+			return moerr.NewInternalError(ctx,
+				"task can not be paused only if it is in %s statue, now it is %s",
+				task.TaskStatus_Running,
+				tasks[0].TaskStatus)
+		}
+		tasks[0].TaskStatus = task.TaskStatus_PauseRequested
+		c, err := ts.UpdateDaemonTask(ctx, tasks)
+		if err != nil {
+			return err
+		}
+		if c != 1 {
+			return moerr.NewInternalError(ctx, "no cdc task resume")
+		}
+
+		sql = getSqlForUpdateCdcMeta(ses, taskId, SyncStopped)
+		err = bh.Exec(ctx, sql)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
