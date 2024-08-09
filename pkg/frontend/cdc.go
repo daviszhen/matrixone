@@ -663,27 +663,30 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		return moerr.NewInternalError(ctx, "duplicate cdc task for %d %s", cdc.cdcTask.AccountId, cdc.cdcTask.TaskId)
 	}
 
-	//
-	val1, err := res.StrValue(ctx, 0, 0)
+	//sink uri
+	sinkUri, err := res.StrValue(ctx, 0, 0)
 	if err != nil {
 		return err
 	}
 
-	val2, err := res.StrValue(ctx, 0, 1)
+	//sink_type
+	sinkTyp, err := res.StrValue(ctx, 0, 1)
 	if err != nil {
 		return err
 	}
 
-	val3, err := res.StrValue(ctx, 0, 2)
+	//sink_password
+	sinkPwd, err := res.StrValue(ctx, 0, 2)
 	if err != nil {
 		return err
 	}
 
+	//tables
 	tables, err := res.StrValue(ctx, 0, 3)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, "====>", "cdc task row", val1, val2, val3, tables)
+	fmt.Fprintln(os.Stderr, "====>", "cdc task row", sinkUri, sinkTyp, sinkPwd, tables)
 
 	//step2 : create cdc engine.
 
@@ -723,10 +726,32 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	)
 	cdcEngine := cdc.cdcEngine.(*disttae.CdcEngine)
 
+	if sinkTyp != MysqlSink && sinkTyp != MatrixoneSink {
+		return moerr.NewInternalError(ctx, "unsupported sink type: %s", sinkTyp)
+	}
+
+	var sinker cdc2.Sinker
+	//TODO: remove console
+	if strings.HasPrefix(strings.ToLower(sinkUri), "console://") {
+		sinker = cdc2.NewConsoleSinker()
+	} else {
+		//extract the info from the sink uri
+		userName, pwd, ip, port, err := extractUriInfo(ctx, sinkUri)
+		if err != nil {
+			return err
+		}
+		mysqlSink, err := cdc2.NewMysqlSink(userName, pwd, ip, port)
+		if err != nil {
+			return err
+		}
+
+		sinker = cdc2.NewMysqlSinker(mysqlSink)
+	}
+
 	//init cdc decoder or sinker
 	go cdc2.RunDecoder(ctx, inQueue, outQueue, cdc2.NewDecoder())
 
-	go cdc2.RunSinker(ctx, outQueue, cdc2.NewConsoleSinker())
+	go cdc2.RunSinker(ctx, outQueue, sinker)
 
 	err = disttae.InitLogTailPushModel(ctx, cdcEngine, cdc.cdcTsWaiter)
 	if err != nil {
@@ -747,51 +772,75 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	}
 
 	//step3 : subscribe the table
-	seps := strings.Split(tables, ":")
-	if len(seps) != 2 {
-		return moerr.NewInternalError(ctx, "invalid tables format")
-	}
-	db := seps[0]
-	table := seps[1]
+	//TODO:add multiple tables
 	var dbId, tableId uint64
+	dbTables := make([]tools.Pair[string, string], 0)
+	dbTablIds := make([]tools.Pair[uint64, uint64], 0)
+	tableList := strings.Split(tables, ",")
+	for _, table := range tableList {
+		//get dbid tableid for the table
+		seps := strings.Split(table, ".")
+		if len(seps) != 2 {
+			return moerr.NewInternalError(ctx, "invalid tables format")
+		}
+		dbTablPair := tools.Pair[string, string]{
+			Key:   seps[0],
+			Value: seps[1],
+		}
+		dbTables = append(dbTables, dbTablPair)
+		sql = getSqlForDbIdAndTableId(cdc.cdcTask.AccountId, dbTablPair.Key, dbTablPair.Value)
+		res = cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
+		if res.Error() != nil {
+			return res.Error()
+		}
 
-	//get dbid tableid for the table
-	sql = getSqlForDbIdAndTableId(cdc.cdcTask.AccountId, db, table)
-	res = cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
-	if res.Error() != nil {
-		return res.Error()
-	}
+		if res.RowCount() < 1 {
+			return moerr.NewInternalError(ctx, "no table %s:%s", dbTablPair.Key, dbTablPair.Value)
+		} else if res.RowCount() > 1 {
+			return moerr.NewInternalError(ctx, "duplicate table %s:%s", dbTablPair.Key, dbTablPair.Value)
+		}
 
-	if res.RowCount() < 1 {
-		return moerr.NewInternalError(ctx, "no table %s:%s", db, table)
-	} else if res.RowCount() > 1 {
-		return moerr.NewInternalError(ctx, "duplicate table %s:%s", db, table)
-	}
+		//
+		dbId, err = res.U64Value(ctx, 0, 0)
+		if err != nil {
+			return err
+		}
 
-	//
-	dbId, err = res.U64Value(ctx, 0, 0)
-	if err != nil {
-		return err
-	}
-
-	tableId, err = res.U64Value(ctx, 0, 1)
-	if err != nil {
-		return err
+		tableId, err = res.U64Value(ctx, 0, 1)
+		if err != nil {
+			return err
+		}
+		dbTablIds = append(dbTablIds, tools.Pair[uint64, uint64]{
+			Key:   dbId,
+			Value: tableId,
+		})
 	}
 
 	ch := make(chan int, 1)
-	cdcTbl := disttae.NewCdcRelation(db, table, cdc.cdcTask.AccountId, dbId, tableId, cdcEngine)
-	fmt.Fprintln(os.Stderr, "====>", "cdc SubscribeTable",
-		dbId, tableId, "before")
-	err = disttae.SubscribeCdcTable(ctx, cdcTbl, dbId, tableId)
-	if err != nil {
-		return err
+	cdcTables := make([]*disttae.CdcRelation, 0)
+	for i, pair := range dbTablIds {
+		cdcTbl := disttae.NewCdcRelation(
+			dbTables[i].Key,
+			dbTables[i].Value,
+			cdc.cdcTask.AccountId,
+			pair.Key,
+			pair.Value,
+			cdcEngine)
+		fmt.Fprintln(os.Stderr, "====>", "cdc SubscribeTable",
+			dbId, tableId, "before")
+		err = disttae.SubscribeCdcTable(ctx, cdcTbl, pair.Key, pair.Value)
+		if err != nil {
+			return err
+		}
+
+		cdcTables = append(cdcTables, cdcTbl)
+
+		//step4 : process partition state
+		fmt.Fprintf(os.Stderr, "====> cdc SubscribeTable %v:%v after\n",
+			dbId, tableId,
+		)
 	}
 
-	//step4 : process partition state
-	fmt.Fprintf(os.Stderr, "====> cdc SubscribeTable %v:%v after\n",
-		dbId, tableId,
-	)
 	//TODO:
 
 	<-ch
