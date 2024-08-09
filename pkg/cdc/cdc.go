@@ -28,13 +28,28 @@ func RunDecoder(
 	ctx context.Context,
 	inQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *disttae.DecoderInput]],
 	outQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *DecoderOutput]],
-	codec Decoder) {
+	codec Decoder,
+	pause <-chan struct{},
+	resume <-chan struct{},
+	cancel <-chan struct{}) {
+	ssss := 1
 	for {
 		select {
-		case <-ctx.Done():
-			break
+		case <-cancel:
+			// TODO: do something
+			return
+		case <-pause:
+			select {
+			case <-ctx.Done():
+				return
+			case <-cancel:
+				return
+			case <-resume:
+			}
 		default:
 			//TODO: refine
+			fmt.Println(ssss)
+			ssss += 1
 			if inQueue.Size() != 0 {
 				head := inQueue.Front()
 				inQueue.Pop()
@@ -53,11 +68,23 @@ func RunSinker(
 	ctx context.Context,
 	inQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *DecoderOutput]],
 	sinker Sinker,
+	pause <-chan struct{},
+	resume <-chan struct{},
+	cancel <-chan struct{},
 ) {
 	for {
 		select {
-		case <-ctx.Done():
-			break
+		case <-cancel:
+			// TODO: do something
+			return
+		case <-pause:
+			select {
+			case <-ctx.Done():
+				return
+			case <-cancel:
+				return
+			case <-resume:
+			}
 		default:
 			if inQueue.Size() != 0 {
 				head := inQueue.Front()

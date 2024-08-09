@@ -598,12 +598,23 @@ func RegisterCdcExecutor(
 			cnTxnClient,
 			cnEngine,
 		)
+		cdc.activeRoutine.Pause = make(chan struct{})
+		cdc.activeRoutine.Resume = make(chan struct{})
+		cdc.activeRoutine.Cancel = make(chan struct{})
+		if err := attachToTask(ctx, T.GetID(), cdc); err != nil {
+			return err
+		}
 		err = cdc.Start(ctx)
 
 		return err
 	}
 }
 
+type CdcActiveRoutine struct {
+	Resume chan struct{}
+	Cancel chan struct{}
+	Pause  chan struct{}
+}
 type CdcTask struct {
 	logger *zap.Logger
 	ie     ie.InternalExecutor
@@ -620,6 +631,8 @@ type CdcTask struct {
 	cdcEngMp     *mpool.MPool
 	cdcEngine    engine.Engine
 	cdcTable     *disttae.CdcRelation
+
+	activeRoutine CdcActiveRoutine
 }
 
 func NewCdcTask(
@@ -749,9 +762,8 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	}
 
 	//init cdc decoder or sinker
-	go cdc2.RunDecoder(ctx, inQueue, outQueue, cdc2.NewDecoder())
-
-	go cdc2.RunSinker(ctx, outQueue, sinker)
+	go cdc2.RunDecoder(ctx, inQueue, outQueue, cdc2.NewDecoder(), cdc.activeRoutine.Pause, cdc.activeRoutine.Resume, cdc.activeRoutine.Cancel)
+	go cdc2.RunSinker(ctx, outQueue, sinker, cdc.activeRoutine.Pause, cdc.activeRoutine.Resume, cdc.activeRoutine.Cancel)
 
 	err = disttae.InitLogTailPushModel(ctx, cdcEngine, cdc.cdcTsWaiter)
 	if err != nil {
@@ -848,6 +860,21 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	return nil
 }
 
+func (cdc *CdcTask) Resume() error {
+	cdc.activeRoutine.Resume <- struct{}{}
+	return nil
+}
+
+func (cdc *CdcTask) Pause() error {
+	cdc.activeRoutine.Pause <- struct{}{}
+	return nil
+}
+
+func (cdc *CdcTask) Cancel() error {
+	close(cdc.activeRoutine.Cancel)
+	return nil
+}
+
 func handleDropCdc(ses *Session, execCtx *ExecCtx, st *tree.DropCDC) error {
 	return doDropCdc(execCtx.reqCtx, ses, st)
 }
@@ -903,6 +930,7 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 				"task can not be canceled because it is in %s state", task.TaskStatus_Error)
 		}
 		tasks[0].TaskStatus = task.TaskStatus_CancelRequested
+
 		c, err := ts.UpdateDaemonTask(ctx, tasks)
 		if err != nil {
 			return err
@@ -911,22 +939,22 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 			return moerr.NewInternalError(ctx, "no cdc task drop")
 		}
 
-		c, err = ts.DeleteDaemonTask(ctx,
-			taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
-			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-		)
-		if err != nil {
-			return err
-		}
-		if c != 1 {
-			return moerr.NewInternalError(ctx, "no cdc task drop")
-		}
-
-		sql = getSqlForDropCdcMeta(ses, taskId)
-		err = bh.Exec(ctx, sql)
-		if err != nil {
-			return err
-		}
+		//c, err = ts.DeleteDaemonTask(ctx,
+		//	taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
+		//	taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+		//)
+		//if err != nil {
+		//	return err
+		//}
+		//if c != 1 {
+		//	return moerr.NewInternalError(ctx, "no cdc task drop")
+		//}
+		//
+		//sql = getSqlForDropCdcMeta(ses, taskId)
+		//err = bh.Exec(ctx, sql)
+		//if err != nil {
+		//	return err
+		//}
 	}
 	return nil
 }
@@ -1054,15 +1082,15 @@ func doResumeCdc(ctx context.Context, ses *Session, resume *tree.ResumeCDC) erro
 			return moerr.NewInternalError(ctx, "no cdc task resume")
 		}
 		// Already in paused status.
-		if tasks[0].TaskStatus == task.TaskStatus_Paused || tasks[0].TaskStatus == task.TaskStatus_PauseRequested {
+		if tasks[0].TaskStatus == task.TaskStatus_Running || tasks[0].TaskStatus == task.TaskStatus_ResumeRequested {
 			return nil
-		} else if tasks[0].TaskStatus != task.TaskStatus_Running {
+		} else if tasks[0].TaskStatus != task.TaskStatus_Paused {
 			return moerr.NewInternalError(ctx,
-				"task can not be paused only if it is in %s statue, now it is %s",
-				task.TaskStatus_Running,
+				"task can be resumed only if it is in %s state, now it is %s",
+				task.TaskStatus_Paused,
 				tasks[0].TaskStatus)
 		}
-		tasks[0].TaskStatus = task.TaskStatus_PauseRequested
+		tasks[0].TaskStatus = task.TaskStatus_ResumeRequested
 		c, err := ts.UpdateDaemonTask(ctx, tasks)
 		if err != nil {
 			return err
@@ -1071,7 +1099,7 @@ func doResumeCdc(ctx context.Context, ses *Session, resume *tree.ResumeCDC) erro
 			return moerr.NewInternalError(ctx, "no cdc task resume")
 		}
 
-		sql = getSqlForUpdateCdcMeta(ses, taskId, SyncStopped)
+		sql = getSqlForUpdateCdcMeta(ses, taskId, SyncRunning)
 		err = bh.Exec(ctx, sql)
 		if err != nil {
 			return err
