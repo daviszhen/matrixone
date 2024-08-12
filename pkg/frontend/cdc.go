@@ -387,7 +387,7 @@ func splitPattern(pattern string) (*PatternTuple, error) {
 	return pt, nil
 }
 
-func string2tables(ctx context.Context, ses *Session, pattern string) (map[string]string, error) {
+func string2patterns(pattern string) ([]*PatternTuple, error) {
 	pts := make([]*PatternTuple, 0)
 	current := strings.Builder{}
 	inRegex := false
@@ -415,14 +415,15 @@ func string2tables(ctx context.Context, ses *Session, pattern string) (map[strin
 		}
 		pts = append(pts, pt)
 	}
-	bh := ses.GetBackgroundExec(ctx)
-	defer bh.Close()
+	return pts, nil
+}
+
+func patterns2tables(ctx context.Context, ses *Session, pts []*PatternTuple, bh BackgroundExec) (map[string]string, error) {
 	resMap := make(map[string]string)
 	for _, pt := range pts {
 		if pt.SourceAccount == "" {
 			pt.SourceAccount = ses.GetTenantName()
 		}
-
 		sql := getSqlForTables(pt)
 		bh.ClearExecResultSet()
 		err := bh.Exec(ctx, sql)
@@ -470,7 +471,6 @@ func string2tables(ctx context.Context, ses *Session, pattern string) (map[strin
 			}
 		}
 	}
-
 	return resMap, nil
 }
 
@@ -505,15 +505,23 @@ func saveCdcTask(
 	if err != nil {
 		return err
 	}
-	ssmap, err := string2tables(ctx, ses, create.Tables)
+	pts, err := string2patterns(create.Tables)
 	if err != nil {
 		return err
 	}
-	fmt.Println("KKKKKKK>", ssmap)
-	dat := time.Now().UTC()
 
 	bh := ses.GetBackgroundExec(ctx)
 	defer bh.Close()
+	err = bh.Exec(ctx, "begin;")
+	defer func() {
+		err = finishTxn(ctx, bh, err)
+	}()
+	tablesMap, err := patterns2tables(ctx, ses, pts, bh)
+	if err != nil {
+		return err
+	}
+	fmt.Println("=============>", tablesMap)
+	dat := time.Now().UTC()
 
 	//TODO: make it better
 	//Currently just for test
@@ -615,6 +623,7 @@ type CdcActiveRoutine struct {
 	Cancel chan struct{}
 	Pause  chan struct{}
 }
+
 type CdcTask struct {
 	logger *zap.Logger
 	ie     ie.InternalExecutor
@@ -906,12 +915,13 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 		return moerr.NewInternalError(ctx, "no cdc task drop")
 	}
 	bh.ClearExecResultSet()
+	ts := getGlobalPu().TaskService
+	if ts == nil {
+		return moerr.NewInternalError(ctx,
+			"task service not ready yet, please try again later.")
+	}
+
 	for _, taskId := range taskIds {
-		ts := getGlobalPu().TaskService
-		if ts == nil {
-			return moerr.NewInternalError(ctx,
-				"task service not ready yet, please try again later.")
-		}
 		tasks, err := ts.QueryDaemonTask(ctx,
 			taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
 			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
@@ -938,23 +948,11 @@ func doDropCdc(ctx context.Context, ses *Session, drop *tree.DropCDC) error {
 		if c != 1 {
 			return moerr.NewInternalError(ctx, "no cdc task drop")
 		}
-
-		//c, err = ts.DeleteDaemonTask(ctx,
-		//	taskservice.WithTaskMetadataId(taskservice.EQ, taskId),
-		//	taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-		//)
-		//if err != nil {
-		//	return err
-		//}
-		//if c != 1 {
-		//	return moerr.NewInternalError(ctx, "no cdc task drop")
-		//}
-		//
-		//sql = getSqlForDropCdcMeta(ses, taskId)
-		//err = bh.Exec(ctx, sql)
-		//if err != nil {
-		//	return err
-		//}
+		sql = getSqlForDropCdcMeta(ses, taskId)
+		err = bh.Exec(ctx, sql)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
