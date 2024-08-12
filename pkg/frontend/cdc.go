@@ -771,7 +771,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	}
 
 	//init cdc decoder or sinker
-	go cdc2.RunDecoder(ctx, inQueue, outQueue, cdc2.NewDecoder(), cdc.activeRoutine.Pause, cdc.activeRoutine.Resume, cdc.activeRoutine.Cancel)
+	go cdc2.RunDecoder(ctx, inQueue, outQueue, cdc2.NewDecoder(cdc.cdcEngMp, fs), cdc.activeRoutine.Pause, cdc.activeRoutine.Resume, cdc.activeRoutine.Cancel)
 	go cdc2.RunSinker(ctx, outQueue, sinker, cdc.activeRoutine.Pause, cdc.activeRoutine.Resume, cdc.activeRoutine.Cancel)
 
 	err = disttae.InitLogTailPushModel(ctx, cdcEngine, cdc.cdcTsWaiter)
