@@ -32,7 +32,6 @@ func RunDecoder(
 	pause <-chan struct{},
 	resume <-chan struct{},
 	cancel <-chan struct{}) {
-	ssss := 1
 	for {
 		select {
 		case <-cancel:
@@ -43,13 +42,12 @@ func RunDecoder(
 			case <-ctx.Done():
 				return
 			case <-cancel:
+				// TODO: do something
 				return
 			case <-resume:
 			}
 		default:
 			//TODO: refine
-			fmt.Println(ssss)
-			ssss += 1
 			if inQueue.Size() != 0 {
 				head := inQueue.Front()
 				inQueue.Pop()
@@ -82,6 +80,7 @@ func RunSinker(
 			case <-ctx.Done():
 				return
 			case <-cancel:
+				// TODO: do something
 				return
 			case <-resume:
 			}

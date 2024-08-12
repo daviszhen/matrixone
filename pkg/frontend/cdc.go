@@ -871,10 +871,12 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 
 func (cdc *CdcTask) Resume() error {
 	cdc.activeRoutine.Resume <- struct{}{}
+	cdc.activeRoutine.Resume <- struct{}{}
 	return nil
 }
 
 func (cdc *CdcTask) Pause() error {
+	cdc.activeRoutine.Pause <- struct{}{}
 	cdc.activeRoutine.Pause <- struct{}{}
 	return nil
 }
