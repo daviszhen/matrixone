@@ -432,15 +432,13 @@ func tryConn(dsn string) (*sql.DB, error) {
 }
 
 type ActiveRoutine struct {
-	Resume chan struct{}
 	Cancel chan struct{}
 	Pause  chan struct{}
 }
 
 func NewCdcActiveRoutine() *ActiveRoutine {
 	activeRoutine := &ActiveRoutine{}
-	activeRoutine.Pause = make(chan struct{})
-	activeRoutine.Resume = make(chan struct{})
 	activeRoutine.Cancel = make(chan struct{})
+	activeRoutine.Pause = make(chan struct{})
 	return activeRoutine
 }

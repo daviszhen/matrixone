@@ -91,9 +91,9 @@ const (
 
 	getTables = "select account_name, reldatabase, relname from mo_catalog.mo_tables join mo_catalog.mo_account on mo_catalog.mo_tables.account_id = mo_catalog.mo_account.account_id where REGEXP_LIKE(account_name, '^%s$') and REGEXP_LIKE(reldatabase, '^%s$') and REGEXP_LIKE(relname, '^%s$')"
 
-	getCdcTaskName = "select task_name from mo_catalog.mo_cdc_task where account_id = %d"
+	getCdcTaskId = "select task_id from mo_catalog.mo_cdc_task where account_id = %d"
 
-	getCdcTaskNameWhere = "select task_name from mo_catalog.mo_cdc_task where account_id = %d and task_name = '%s'"
+	getCdcTaskIdWhere = "select task_id from mo_catalog.mo_cdc_task where account_id = %d and task_name = '%s'"
 
 	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where account_id = %d and task_id = '%s'"
 
@@ -174,11 +174,11 @@ func getSqlForTables(
 	return fmt.Sprintf(getTables, pt.SourceAccount, pt.SourceDatabase, pt.SourceTable)
 }
 
-func getSqlForTaskId(ses *Session, all bool, taskName string) string {
+func getSqlForTaskIdAndName(ses *Session, all bool, taskName string) string {
 	if all {
-		return fmt.Sprintf(getCdcTaskName, ses.GetAccountId())
+		return fmt.Sprintf(getCdcTaskId, ses.GetAccountId())
 	} else {
-		return fmt.Sprintf(getCdcTaskNameWhere, ses.GetAccountId(), taskName)
+		return fmt.Sprintf(getCdcTaskIdWhere, ses.GetAccountId(), taskName)
 	}
 }
 
@@ -604,6 +604,7 @@ func RegisterCdcExecutor(
 			cnTxnClient,
 			cnEngine,
 		)
+		cdc.activeRoutine = cdc2.NewCdcActiveRoutine()
 		if err := attachToTask(ctx, T.GetID(), cdc); err != nil {
 			return err
 		}
@@ -623,13 +624,13 @@ type CdcTask struct {
 	fileService     fileservice.FileService
 	createTxnClient func(bool) (client.TxnClient, client.TimestampWaiter, error)
 
-	cdcTask        *task.CreateCdcDetails
-	cdcTxnClient   client.TxnClient
-	cdcTsWaiter    client.TimestampWaiter
-	cdcEngMp       *mpool.MPool
-	cdcEngine      engine.Engine
-	cdcTable       *disttae.CdcRelation
-	activeRoutines []*cdc2.ActiveRoutine
+	cdcTask       *task.CreateCdcDetails
+	cdcTxnClient  client.TxnClient
+	cdcTsWaiter   client.TimestampWaiter
+	cdcEngMp      *mpool.MPool
+	cdcEngine     engine.Engine
+	cdcTable      *disttae.CdcRelation
+	activeRoutine *cdc2.ActiveRoutine
 }
 
 func NewCdcTask(
@@ -825,7 +826,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 
 	// make partitioner
 	partitioner := cdc2.NewPartitioner(inQueue, inputChs)
-	go partitioner.Run(ctx)
+	go partitioner.Run(ctx, cdc.activeRoutine)
 
 	// make decoders
 	decoders := make(map[uint64]cdc2.Decoder)
@@ -834,7 +835,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		decoder := cdc2.NewDecoder(cdc.cdcEngMp, fs, tableId, inputChs[tableId], interChs[tableId])
 		decoders[tableId] = decoder
 
-		go decoder.Run(ctx)
+		go decoder.Run(ctx, cdc.activeRoutine)
 	}
 
 	// make sinkers
@@ -847,7 +848,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		}
 		sinkers[tableId] = sinker
 
-		go sinker.Run(ctx)
+		go sinker.Run(ctx, cdc.activeRoutine)
 	}
 
 	ch := make(chan int, 1)
@@ -883,23 +884,17 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 }
 
 func (cdc *CdcTask) Resume() error {
-	for _, ar := range cdc.activeRoutines {
-		ar.Resume <- struct{}{}
-	}
+	//TODO: DO SOMETHING
 	return nil
 }
 
 func (cdc *CdcTask) Pause() error {
-	for _, ar := range cdc.activeRoutines {
-		ar.Pause <- struct{}{}
-	}
+	close(cdc.activeRoutine.Pause)
 	return nil
 }
 
 func (cdc *CdcTask) Cancel() error {
-	for _, ar := range cdc.activeRoutines {
-		close(ar.Cancel)
-	}
+	close(cdc.activeRoutine.Cancel)
 	return nil
 }
 
@@ -938,16 +933,16 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) error {
 	}()
 	switch stmt := st.(type) {
 	case *tree.DropCDC:
-		sql = getSqlForTaskId(ses, stmt.Option.All, stmt.Option.TaskName)
+		sql = getSqlForTaskIdAndName(ses, stmt.Option.All, stmt.Option.TaskName)
 		targetTaskStatus, targetTaskRequest = task.TaskStatus_Canceled, task.TaskStatus_CancelRequested
 		targetCdcStatus = SyncStopped
 	case *tree.PauseCDC:
-		sql = getSqlForTaskId(ses, stmt.Option.All, stmt.Option.TaskName)
+		sql = getSqlForTaskIdAndName(ses, stmt.Option.All, stmt.Option.TaskName)
 		targetTaskStatus, targetTaskRequest = task.TaskStatus_Paused, task.TaskStatus_PauseRequested
 		allowedTaskStatus = task.TaskStatus_Running
 		targetCdcStatus = SyncStopped
 	case *tree.ResumeCDC:
-		sql = getSqlForTaskId(ses, false, stmt.TaskName)
+		sql = getSqlForTaskIdAndName(ses, false, stmt.TaskName)
 		targetTaskStatus, targetTaskRequest = task.TaskStatus_Running, task.TaskStatus_ResumeRequested
 		allowedTaskStatus = task.TaskStatus_Paused
 		targetCdcStatus = SyncRunning
@@ -961,16 +956,16 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) error {
 	if err != nil {
 		return err
 	}
-	var taskNames []string
+	var taskIds []string
 	if execResultArrayHasData(erArray) {
 		rowCount := erArray[0].GetRowCount()
-		taskNames = make([]string, 0, rowCount)
+		taskIds = make([]string, 0, rowCount)
 		for i := uint64(0); i < rowCount; i++ {
-			taskName, err := erArray[0].GetString(ctx, i, 0)
+			taskId, err := erArray[0].GetString(ctx, i, 0)
 			if err != nil {
 				return err
 			}
-			taskNames = append(taskNames, taskName)
+			taskIds = append(taskIds, taskId)
 		}
 	} else {
 		return moerr.NewInternalError(ctx, "There is no any cdc task.")
@@ -983,10 +978,10 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) error {
 		return err
 	}
 
-	for _, taskName := range taskNames {
+	for _, taskId := range taskIds {
 		for idx := range daemonTasks {
 			daemonTask := &daemonTasks[idx]
-			if taskName == daemonTask.Details.Details.(*pb.Details_CreateCdc).CreateCdc.TaskName {
+			if taskId == daemonTask.Details.Details.(*pb.Details_CreateCdc).CreateCdc.TaskId {
 				if daemonTask.TaskStatus == targetTaskStatus || daemonTask.TaskStatus == targetTaskRequest {
 					return nil
 				} else if targetTaskStatus != task.TaskStatus_Canceled && daemonTask.TaskStatus != allowedTaskStatus {
@@ -997,9 +992,9 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) error {
 				}
 				daemonTask.TaskStatus = targetTaskRequest
 				if targetTaskStatus == task.TaskStatus_Canceled {
-					sql = getSqlForDropCdcMeta(ses, taskName)
+					sql = getSqlForDropCdcMeta(ses, taskId)
 				} else {
-					sql = getSqlForUpdateCdcMeta(ses, taskName, targetCdcStatus)
+					sql = getSqlForUpdateCdcMeta(ses, taskId, targetCdcStatus)
 				}
 				bh.ClearExecResultSet()
 				err = bh.Exec(ctx, sql)
