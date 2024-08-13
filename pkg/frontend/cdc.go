@@ -991,7 +991,11 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) error {
 		if c != 1 {
 			return moerr.NewInternalError(ctx, "update daemon task status failed.")
 		}
-		sql = getSqlForUpdateCdcMeta(ses, taskId, targetCdcStatus)
+		if targetTaskStatus == task.TaskStatus_Canceled {
+			sql = getSqlForDropCdcMeta(ses, taskId)
+		} else {
+			sql = getSqlForUpdateCdcMeta(ses, taskId, targetCdcStatus)
+		}
 		bh.ClearExecResultSet()
 		err = bh.Exec(ctx, sql)
 		if err != nil {
