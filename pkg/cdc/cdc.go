@@ -24,27 +24,28 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
 )
 
+var sssid = 0
+
 func RunDecoder(
 	ctx context.Context,
 	inQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *disttae.DecoderInput]],
 	outQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *DecoderOutput]],
 	codec Decoder,
-	pause <-chan struct{},
-	resume <-chan struct{},
-	cancel <-chan struct{}) {
+	ar *ActiveRoutine,
+) {
 	for {
 		select {
-		case <-cancel:
+		case <-ar.Cancel:
 			// TODO: do something
 			return
-		case <-pause:
+		case <-ar.Pause:
 			select {
 			case <-ctx.Done():
 				return
-			case <-cancel:
+			case <-ar.Cancel:
 				// TODO: do something
 				return
-			case <-resume:
+			case <-ar.Resume:
 			}
 		default:
 			//TODO: refine
@@ -66,23 +67,21 @@ func RunSinker(
 	ctx context.Context,
 	inQueue disttae.Queue[tools.Pair[*disttae.TableCtx, *DecoderOutput]],
 	sinker Sinker,
-	pause <-chan struct{},
-	resume <-chan struct{},
-	cancel <-chan struct{},
+	ar *ActiveRoutine,
 ) {
 	for {
 		select {
-		case <-cancel:
+		case <-ar.Cancel:
 			// TODO: do something
 			return
-		case <-pause:
+		case <-ar.Pause:
 			select {
 			case <-ctx.Done():
 				return
-			case <-cancel:
+			case <-ar.Cancel:
 				// TODO: do something
 				return
-			case <-resume:
+			case <-ar.Resume:
 			}
 		default:
 			if inQueue.Size() != 0 {
