@@ -50,6 +50,17 @@ type backExec struct {
 
 func (back *backExec) Close() {
 	back.Clear()
+	tempExecCtx := ExecCtx{
+		ses:    back.backSes,
+		txnOpt: FeTxnOption{byRollback: true},
+	}
+	defer tempExecCtx.Close()
+	err := back.backSes.GetTxnHandler().Rollback(&tempExecCtx)
+	if err != nil {
+		back.backSes.Error(tempExecCtx.reqCtx,
+			"Failed to rollback txn in back session",
+			zap.Error(err))
+	}
 	back.backSes.Close()
 	back.backSes.Clear()
 	back.backSes = nil
@@ -819,7 +830,7 @@ func (backSes *backSession) GetDebugString() string {
 	if backSes.upstream != nil {
 		return backSes.upstream.GetDebugString()
 	}
-	return ""
+	return "backSes without upstream"
 }
 
 func (backSes *backSession) GetShareTxnBackgroundExec(ctx context.Context, newRawBatch bool) BackgroundExec {

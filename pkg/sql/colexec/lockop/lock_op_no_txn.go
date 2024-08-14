@@ -98,7 +98,12 @@ func getInternalProcessByUniqueID(
 	if proc, ok := internalProcesses[id]; ok {
 		return proc, nil
 	}
-	op, err := txnClient.New(ctx, timestamp.Timestamp{})
+	createByOpt := client.WithTxnCreateBy(
+		0,
+		"",
+		"getInternalProcessByUniqueID",
+		0)
+	op, err := txnClient.New(ctx, timestamp.Timestamp{}, createByOpt)
 	if err != nil {
 		return nil, err
 	}
