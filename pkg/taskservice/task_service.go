@@ -223,6 +223,9 @@ func (s *taskService) QueryDaemonTask(ctx context.Context, conds ...Condition) (
 	return s.store.QueryDaemonTask(ctx, conds...)
 }
 
+func (s *taskService) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, conds ...Condition) (int, error) {
+	return s.store.UpdateCdcTask(ctx, targetStatus, conds...)
+}
 func (s *taskService) Close() error {
 	s.StopScheduleCronTask()
 	return s.store.Close()

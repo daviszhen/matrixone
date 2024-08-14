@@ -920,106 +920,48 @@ func handleResumeCdc(ses *Session, execCtx *ExecCtx, st *tree.ResumeCDC) error {
 	return updateCdc(execCtx.reqCtx, ses, st)
 }
 
-func updateCdc(ctx context.Context, ses *Session, st tree.Statement) error {
-	var err error
-	var sql string
-	var targetTaskStatus, targetTaskRequest task.TaskStatus
-	var targetCdcStatus string
-	var allowedTaskStatus task.TaskStatus
-
+func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error) {
+	var targetTaskStatus task.TaskStatus
+	var n int
 	ts := getGlobalPu().TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ctx,
 			"task service not ready yet, please try again later.")
 	}
-	bh := ses.GetBackgroundExec(ctx)
-	defer bh.Close()
-	err = bh.Exec(ctx, "begin;")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = finishTxn(ctx, bh, err)
-	}()
 	switch stmt := st.(type) {
 	case *tree.DropCDC:
-		sql = getSqlForTaskIdAndName(ses, stmt.Option.All, stmt.Option.TaskName)
-		targetTaskStatus, targetTaskRequest = task.TaskStatus_Canceled, task.TaskStatus_CancelRequested
-		targetCdcStatus = SyncStopped
-	case *tree.PauseCDC:
-		sql = getSqlForTaskIdAndName(ses, stmt.Option.All, stmt.Option.TaskName)
-		targetTaskStatus, targetTaskRequest = task.TaskStatus_Paused, task.TaskStatus_PauseRequested
-		allowedTaskStatus = task.TaskStatus_Running
-		targetCdcStatus = SyncStopped
-	case *tree.ResumeCDC:
-		sql = getSqlForTaskIdAndName(ses, false, stmt.TaskName)
-		targetTaskStatus, targetTaskRequest = task.TaskStatus_Running, task.TaskStatus_ResumeRequested
-		allowedTaskStatus = task.TaskStatus_Paused
-		targetCdcStatus = SyncRunning
-	}
-	bh.ClearExecResultSet()
-	err = bh.Exec(ctx, sql)
-	if err != nil {
-		return err
-	}
-	erArray, err := getResultSet(ctx, bh)
-	if err != nil {
-		return err
-	}
-	var taskIds []string
-	if execResultArrayHasData(erArray) {
-		rowCount := erArray[0].GetRowCount()
-		taskIds = make([]string, 0, rowCount)
-		for i := uint64(0); i < rowCount; i++ {
-			taskId, err := erArray[0].GetString(ctx, i, 0)
-			if err != nil {
-				return err
-			}
-			taskIds = append(taskIds, taskId)
+		targetTaskStatus = task.TaskStatus_CancelRequested
+		if stmt.Option.All {
+			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+			)
+		} else {
+			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName),
+			)
 		}
-	} else {
+	case *tree.PauseCDC:
+		targetTaskStatus = task.TaskStatus_PauseRequested
+		if stmt.Option.All {
+			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+			)
+		} else {
+			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName),
+			)
+		}
+	case *tree.ResumeCDC:
+		targetTaskStatus = task.TaskStatus_ResumeRequested
+		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName),
+		)
+	}
+	if n < 1 {
 		return moerr.NewInternalError(ctx, "There is no any cdc task.")
 	}
-
-	daemonTasks, err := ts.QueryDaemonTask(ctx,
-		taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-	)
-	if err != nil {
-		return err
-	}
-
-	for _, taskId := range taskIds {
-		for idx := range daemonTasks {
-			daemonTask := &daemonTasks[idx]
-			if taskId == daemonTask.Details.Details.(*pb.Details_CreateCdc).CreateCdc.TaskId {
-				if daemonTask.TaskStatus == targetTaskStatus || daemonTask.TaskStatus == targetTaskRequest {
-					return nil
-				} else if targetTaskStatus != task.TaskStatus_Canceled && daemonTask.TaskStatus != allowedTaskStatus {
-					return moerr.NewInternalError(ctx,
-						"task can be resumed only if it is in %s state, now it is %s",
-						allowedTaskStatus,
-						daemonTask.TaskStatus)
-				}
-				daemonTask.TaskStatus = targetTaskRequest
-				if targetTaskStatus == task.TaskStatus_Canceled {
-					sql = getSqlForDropCdcMeta(ses, taskId)
-				} else {
-					sql = getSqlForUpdateCdcMeta(ses, taskId, targetCdcStatus)
-				}
-				bh.ClearExecResultSet()
-				err = bh.Exec(ctx, sql)
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
-	c, err := ts.UpdateDaemonTask(ctx, daemonTasks)
-	if err != nil {
-		return err
-	}
-	if c < 1 {
-		return moerr.NewInternalError(ctx, "update daemon task status failed.")
-	}
-	return nil
+	return
 }
