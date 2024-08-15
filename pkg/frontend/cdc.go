@@ -192,6 +192,8 @@ func getSqlForUpdateCdcMeta(ses *Session, taskId string, status string) string {
 }
 
 const (
+	AccountLevel  = "account"
+	ClusterLevel  = "cluster"
 	MysqlSink     = "mysql"
 	MatrixoneSink = "matrixone"
 
@@ -309,10 +311,11 @@ type PatternTuple struct {
 	SinkAccount    string
 	SinkDatabase   string
 	SinkTable      string
+	OriginString   string
 }
 
 func splitPattern(pattern string) (*PatternTuple, error) {
-	pt := &PatternTuple{}
+	pt := &PatternTuple{OriginString: pattern}
 	if strings.Contains(pattern, ":") {
 		splitRes := strings.Split(pattern, ":")
 		if len(splitRes) != 2 {
@@ -417,12 +420,9 @@ func string2patterns(pattern string) ([]*PatternTuple, error) {
 	return pts, nil
 }
 
-func patterns2tables(ctx context.Context, ses *Session, pts []*PatternTuple, bh BackgroundExec) (map[string]string, error) {
+func patterns2tables(ctx context.Context, pts []*PatternTuple, bh BackgroundExec) (map[string]string, error) {
 	resMap := make(map[string]string)
 	for _, pt := range pts {
-		if pt.SourceAccount == "" {
-			pt.SourceAccount = ses.GetTenantName()
-		}
 		sql := getSqlForTables(pt)
 		bh.ClearExecResultSet()
 		err := bh.Exec(ctx, sql)
@@ -496,15 +496,34 @@ func saveCdcTask(
 		cdcTaskOptionsMap[create.Option[i]] = create.Option[i+1]
 	}
 
+	pts, err := string2patterns(create.Tables)
+	if err != nil {
+		return err
+	}
+
+	if strings.EqualFold(cdcTaskOptionsMap["Level"], ClusterLevel) {
+		if !ses.tenant.IsMoAdminRole() {
+			return moerr.NewInternalError(ctx, "Only sys account administrator are allowed to create cluster level task")
+		}
+	} else if strings.EqualFold(cdcTaskOptionsMap["Level"], AccountLevel) {
+		if !ses.tenant.IsAccountAdminRole() || ses.GetTenantName() != cdcTaskOptionsMap["Account"] {
+			return moerr.NewInternalError(ctx, "No privilege to create task on %s", cdcTaskOptionsMap["Account"])
+		}
+		for _, pt := range pts {
+			if pt.SourceAccount == "" {
+				pt.SourceAccount = ses.GetTenantName()
+			}
+			if ses.GetTenantName() != pt.SourceAccount {
+				return moerr.NewInternalError(ctx, "No privilege to create task on table %s", pt.OriginString)
+			}
+		}
+	}
+
 	startTs, err = string2uint64(cdcTaskOptionsMap["StartTS"])
 	if err != nil {
 		return err
 	}
 	endTs, err = string2uint64(cdcTaskOptionsMap["EndTS"])
-	if err != nil {
-		return err
-	}
-	pts, err := string2patterns(create.Tables)
 	if err != nil {
 		return err
 	}
@@ -515,7 +534,7 @@ func saveCdcTask(
 	defer func() {
 		err = finishTxn(ctx, bh, err)
 	}()
-	tablesMap, err := patterns2tables(ctx, ses, pts, bh)
+	tablesMap, err := patterns2tables(ctx, pts, bh)
 	if err != nil {
 		return err
 	}
