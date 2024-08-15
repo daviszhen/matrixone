@@ -90,7 +90,7 @@ const (
 
 	getDbIdAndTableIdFormat = "select reldatabase_id,rel_id from mo_catalog.mo_tables where account_id = %d and reldatabase = '%s' and relname = '%s'"
 
-	getTables = "select account_name, reldatabase, relname from mo_catalog.mo_tables join mo_catalog.mo_account on mo_catalog.mo_tables.account_id = mo_catalog.mo_account.account_id where REGEXP_LIKE(account_name, '^%s$') and REGEXP_LIKE(reldatabase, '^%s$') and REGEXP_LIKE(relname, '^%s$')"
+	getTables = "select account_name, reldatabase, relname from mo_catalog.mo_tables join mo_catalog.mo_account on mo_catalog.mo_tables.account_id = mo_catalog.mo_account.account_id where REGEXP_LIKE(account_name, '%s') and REGEXP_LIKE(reldatabase, '%s') and REGEXP_LIKE(relname, '%s')"
 
 	getCdcTaskId = "select task_id from mo_catalog.mo_cdc_task where account_id = %d"
 
@@ -356,9 +356,9 @@ func splitPattern(pattern string) (*PatternTuple, error) {
 		} else if char == '.' && !inRegex {
 			res := current.String()
 			if !isRegex {
-				res = strings.ReplaceAll(res, ".", "?")
+				res = strings.ReplaceAll(res, "?", ".")
 				res = strings.ReplaceAll(res, "*", ".*")
-
+				res = "^" + res + "$"
 			}
 			isRegex = false
 			source = append(source, res)
@@ -370,9 +370,9 @@ func splitPattern(pattern string) (*PatternTuple, error) {
 	if current.Len() > 0 {
 		res := current.String()
 		if !isRegex {
-			res = strings.ReplaceAll(res, ".", "?")
+			res = strings.ReplaceAll(res, "?", ".")
 			res = strings.ReplaceAll(res, "*", ".*")
-
+			res = "^" + res + "$"
 		}
 		isRegex = false
 		source = append(source, res)
