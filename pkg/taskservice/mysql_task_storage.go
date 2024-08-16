@@ -1015,20 +1015,19 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		}
 		defer prepare.Close()
 	}
-
+	updateTasks := []task.DaemonTask{}
 	for _, taskId := range taskIds {
-		for idx := range daemonTasks {
-			daemonTask := &daemonTasks[idx]
-			if taskId == daemonTask.Details.Details.(*task.Details_CreateCdc).CreateCdc.TaskId {
+		for _, daemonTask := range daemonTasks {
+			if daemonTask.TaskStatus != task.TaskStatus_Canceled && taskId == daemonTask.Details.Details.(*task.Details_CreateCdc).CreateCdc.TaskId {
 				if targetStatus == task.TaskStatus_ResumeRequested && daemonTask.TaskStatus != task.TaskStatus_Paused ||
 					targetStatus == task.TaskStatus_PauseRequested && daemonTask.TaskStatus != task.TaskStatus_Running {
 					err = moerr.NewInternalError(ctx,
-						"task can be resumed only if it is in %s state, now it is %s",
-						targetStatus,
-						daemonTask.TaskStatus)
+						"status can not be change, now it is %s",
+						daemonTask.TaskStatus.String())
 					return 0, err
 				}
 				daemonTask.TaskStatus = targetStatus
+				updateTasks = append(updateTasks, daemonTask)
 			}
 		}
 	}
@@ -1064,7 +1063,7 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		}
 	}
 
-	affectedTaskRow, err = m.UpdateDaemonTask(ctx, daemonTasks)
+	affectedTaskRow, err = m.UpdateDaemonTask(ctx, updateTasks)
 	if err != nil {
 		return 0, err
 	}

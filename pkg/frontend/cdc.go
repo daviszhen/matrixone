@@ -973,11 +973,13 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		if stmt.Option.All {
 			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
 			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName),
+				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		}
 	case *tree.PauseCDC:
@@ -985,11 +987,13 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		if stmt.Option.All {
 			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
 			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName),
+				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		}
 	case *tree.ResumeCDC:
@@ -997,7 +1001,11 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName),
+			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
+	}
+	if err != nil {
+		return err
 	}
 	if n < 1 {
 		return moerr.NewInternalError(ctx, "There is no any cdc task.")
