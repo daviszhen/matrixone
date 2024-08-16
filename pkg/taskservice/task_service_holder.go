@@ -382,20 +382,25 @@ func (s *refreshableTaskStorage) HeartbeatDaemonTask(ctx context.Context, tasks 
 }
 
 func (s *refreshableTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, conditions ...Condition) (int, error) {
+	v, lastAddress, err := s.UpdateCdcSubTask(ctx, targetStatus, conditions...)
+	if err != nil {
+		s.maybeRefresh(lastAddress)
+	}
+	return v, err
+}
+
+func (s *refreshableTaskStorage) UpdateCdcSubTask(ctx context.Context, targetStatus task.TaskStatus, conditions ...Condition) (int, string, error) {
 	var v int
 	var err error
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	lastAddress := s.mu.lastAddress
 	if s.mu.store == nil {
 		err = ErrNotReady
 	} else if err = s.mu.store.PingContext(ctx); err == nil {
 		v, err = s.mu.store.UpdateCdcTask(ctx, targetStatus, conditions...)
 	}
-	s.mu.RUnlock()
-	if err != nil {
-		s.maybeRefresh(lastAddress)
-	}
-	return v, err
+	return v, lastAddress, err
 }
 
 func (s *refreshableTaskStorage) maybeRefresh(lastAddress string) bool {
