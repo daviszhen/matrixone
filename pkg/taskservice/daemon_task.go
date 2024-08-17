@@ -361,7 +361,7 @@ func (r *taskRunner) startTasks(ctx context.Context) []task.DaemonTask {
 			WithTaskStatusCond(task.TaskStatus_Created),
 		),
 		r.queryDaemonTasks(ctx,
-			WithTaskStatusCond(task.TaskStatus_Running, task.TaskStatus_ResumeRequested),
+			WithTaskStatusCond(task.TaskStatus_Running),
 			WithLastHeartbeat(LE, time.Now().UnixNano()-r.options.heartbeatTimeout.Nanoseconds()),
 		),
 	)
