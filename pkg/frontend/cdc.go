@@ -238,52 +238,7 @@ func createCdc(
 	ts taskservice.TaskService,
 	create *tree.CreateCDC,
 ) error {
-	accInfo := ses.GetTenantInfo()
-	tasks, err := ts.QueryDaemonTask(ctx,
-		taskservice.WithTaskType(taskservice.EQ,
-			pb.TaskType_CreateCdc.String()),
-		taskservice.WithAccountID(taskservice.EQ,
-			accInfo.GetTenantID()),
-	)
-	if err != nil {
-		return err
-	}
-	for _, t := range tasks {
-		_, ok := t.Details.Details.(*pb.Details_CreateCdc)
-		if !ok {
-			return moerr.NewInternalError(ctx, fmt.Sprintf("invalid task type %s",
-				t.TaskType.String()))
-		}
-		//if dc.Connector.TableName == tableName && duplicate(t, options) {
-		//	// do not return error if ifNotExists is true since the table is not actually created
-		//	if ifNotExists {
-		//		return nil
-		//	}
-		//	return moerr.NewErrDuplicateConnector(ctx, tableName)
-		//}
-	}
-	cdcId, _ := uuid.NewV7()
-	err = saveCdcTask(ctx, ses, cdcId, create)
-	if err != nil {
-		return err
-	}
-
-	details := &pb.Details{
-		AccountID: accInfo.GetTenantID(),
-		Account:   accInfo.GetTenant(),
-		Username:  accInfo.GetUser(),
-		Details: &pb.Details_CreateCdc{
-			CreateCdc: &pb.CreateCdcDetails{
-				TaskName:  create.TaskName,
-				AccountId: uint64(accInfo.GetTenantID()),
-				TaskId:    cdcId.String(),
-			},
-		},
-	}
-	if err = ts.CreateDaemonTask(ctx, cdcTaskMetadata(cdcId.String()), details); err != nil {
-		return err
-	}
-	return nil
+	return saveCdcTask(ctx, ses, ts, create)
 }
 
 func cdcTaskMetadata(cdcId string) pb.TaskMetadata {
@@ -483,12 +438,27 @@ func patterns2tables(ctx context.Context, pts []*PatternTuple, bh BackgroundExec
 func saveCdcTask(
 	ctx context.Context,
 	ses *Session,
-	cdcId uuid.UUID,
+	ts taskservice.TaskService,
 	create *tree.CreateCDC,
 ) error {
 	var startTs, endTs uint64
 	var err error
+
 	accInfo := ses.GetTenantInfo()
+	cdcId, _ := uuid.NewV7()
+
+	details := &pb.Details{
+		AccountID: accInfo.GetTenantID(),
+		Account:   accInfo.GetTenant(),
+		Username:  accInfo.GetUser(),
+		Details: &pb.Details_CreateCdc{
+			CreateCdc: &pb.CreateCdcDetails{
+				TaskName:  create.TaskName,
+				AccountId: uint64(accInfo.GetTenantID()),
+				TaskId:    cdcId.String(),
+			},
+		},
+	}
 
 	fmt.Fprintln(os.Stderr, "====>save cdc task",
 		accInfo.GetTenantID(),
@@ -535,22 +505,11 @@ func saveCdcTask(
 		return err
 	}
 
-	bh := ses.GetBackgroundExec(ctx)
-	defer bh.Close()
-	err = bh.Exec(ctx, "begin;")
-	defer func() {
-		err = finishTxn(ctx, bh, err)
-	}()
-	tablesMap, err := patterns2tables(ctx, pts, bh)
-	if err != nil {
-		return err
-	}
-	fmt.Println("=============>", tablesMap)
 	dat := time.Now().UTC()
 
 	//TODO: make it better
 	//Currently just for test
-	sql := getSqlForNewCdcTask(
+	insertSql := getSqlForNewCdcTask(
 		uint64(accInfo.GetTenantID()),
 		cdcId,
 		create.TaskName,
@@ -577,11 +536,9 @@ func saveCdcTask(
 		"FIXME",
 	)
 
-	err = bh.Exec(ctx, sql)
-	if err != nil {
+	if _, err = ts.AddCdcTask(ctx, cdcTaskMetadata(cdcId.String()), details, insertSql); err != nil {
 		return err
 	}
-
 	return nil
 }
 

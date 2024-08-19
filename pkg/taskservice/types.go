@@ -541,6 +541,9 @@ type TaskService interface {
 	// GetStorage returns the task storage
 	GetStorage() TaskStorage
 
+	// AddCdcTask Update cdc task in one transaction
+	AddCdcTask(context.Context, task.TaskMetadata, *task.Details, string) (int, error)
+
 	// UpdateCdcTask Update cdc task in one transaction
 	UpdateCdcTask(context.Context, task.TaskStatus, ...Condition) (int, error)
 }
@@ -607,6 +610,8 @@ type TaskStorage interface {
 	QueryDaemonTask(ctx context.Context, condition ...Condition) ([]task.DaemonTask, error)
 	// HeartbeatDaemonTask update the last heartbeat field of the task.
 	HeartbeatDaemonTask(ctx context.Context, task []task.DaemonTask) (int, error)
+	// AddCdcTask insert cdcTask and daemonTask
+	AddCdcTask(context.Context, string, task.DaemonTask) (int, error)
 	// UpdateCdcTask Update cdc task in one transaction
 	UpdateCdcTask(context.Context, task.TaskStatus, ...Condition) (int, error)
 }

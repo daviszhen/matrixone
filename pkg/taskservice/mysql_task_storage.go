@@ -681,6 +681,12 @@ func removeDuplicateDaemonTasks(err error, tasks []task.DaemonTask) ([]task.Daem
 	return b, nil
 }
 
+type DaemonTaskDb interface {
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+}
+
 func (m *mysqlTaskStorage) AddDaemonTask(ctx context.Context, tasks ...task.DaemonTask) (int, error) {
 	if taskFrameworkDisabled() {
 		return 0, nil
@@ -688,6 +694,11 @@ func (m *mysqlTaskStorage) AddDaemonTask(ctx context.Context, tasks ...task.Daem
 	if len(tasks) == 0 {
 		return 0, nil
 	}
+
+	return m.AddDaemonTaskFromDB(ctx, m.db, tasks...)
+}
+
+func (m *mysqlTaskStorage) AddDaemonTaskFromDB(ctx context.Context, db DaemonTaskDb, tasks ...task.DaemonTask) (int, error) {
 
 	sqlStr := insertDaemonTask
 	values := make([]any, 0)
@@ -720,7 +731,7 @@ func (m *mysqlTaskStorage) AddDaemonTask(ctx context.Context, tasks ...task.Daem
 	if sqlStr == insertDaemonTask {
 		return 0, nil
 	}
-	exec, err := m.db.ExecContext(ctx, sqlStr[:len(sqlStr)-1], values...)
+	exec, err := db.ExecContext(ctx, sqlStr[:len(sqlStr)-1], values...)
 	if err != nil {
 		dup, err := removeDuplicateDaemonTasks(err, tasks)
 		if err != nil {
@@ -752,14 +763,29 @@ func (m *mysqlTaskStorage) UpdateDaemonTask(ctx context.Context, tasks []task.Da
 	if err != nil {
 		return 0, err
 	}
+	n, err := m.UpdateDaemonTaskFromDB(ctx, tasks, tx, condition...)
+	if err != nil {
+		if e := tx.Rollback(); e != nil {
+			return 0, errors.Join(e, err)
+		}
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
 
+func (m *mysqlTaskStorage) UpdateDaemonTaskFromDB(ctx context.Context, tasks []task.DaemonTask, db DaemonTaskDb, condition ...Condition) (int, error) {
 	c := newConditions(condition...)
 	updateSql := updateDaemonTask + buildDaemonTaskWhereClause(c)
-	prepare, err := tx.PrepareContext(ctx, updateSql)
+	prepare, err := db.PrepareContext(ctx, updateSql)
 	if err != nil {
 		return 0, err
 	}
-	defer prepare.Close()
+	defer func() {
+		_ = prepare.Close()
+	}()
 	n := 0
 	for _, t := range tasks {
 		err := func() error {
@@ -811,14 +837,8 @@ func (m *mysqlTaskStorage) UpdateDaemonTask(ctx context.Context, tasks []task.Da
 			return nil
 		}()
 		if err != nil {
-			if e := tx.Rollback(); e != nil {
-				return 0, errors.Join(e, err)
-			}
 			return 0, err
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return 0, err
 	}
 	return n, nil
 }
@@ -828,9 +848,13 @@ func (m *mysqlTaskStorage) DeleteDaemonTask(ctx context.Context, condition ...Co
 		return 0, nil
 	}
 
+	return m.DeleteDaemonTaskFromDB(ctx, m.db, condition...)
+}
+
+func (m *mysqlTaskStorage) DeleteDaemonTaskFromDB(ctx context.Context, db DaemonTaskDb, condition ...Condition) (int, error) {
 	c := newConditions(condition...)
 	deleteSql := deleteDaemonTask + buildDaemonTaskWhereClause(c)
-	exec, err := m.db.ExecContext(ctx, deleteSql)
+	exec, err := db.ExecContext(ctx, deleteSql)
 	if err != nil {
 		return 0, err
 	}
@@ -846,13 +870,18 @@ func (m *mysqlTaskStorage) QueryDaemonTask(ctx context.Context, condition ...Con
 		return nil, nil
 	}
 
+	return m.QueryDaemonTaskFromDB(ctx, m.db, condition...)
+}
+
+func (m *mysqlTaskStorage) QueryDaemonTaskFromDB(ctx context.Context, db DaemonTaskDb, condition ...Condition) ([]task.DaemonTask, error) {
+
 	c := newConditions(condition...)
 	query := selectDaemonTask +
 		buildDaemonTaskWhereClause(c) +
 		buildOrderByClause(c) +
 		buildLimitClause(c)
 
-	rows, err := m.db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -929,7 +958,9 @@ func (m *mysqlTaskStorage) HeartbeatDaemonTask(ctx context.Context, tasks []task
 	if err != nil {
 		return 0, err
 	}
-	defer prepare.Close()
+	defer func() {
+		_ = prepare.Close()
+	}()
 	n := 0
 	for _, t := range tasks {
 		err := func() error {
@@ -965,6 +996,49 @@ func (m *mysqlTaskStorage) HeartbeatDaemonTask(ctx context.Context, tasks []task
 	return n, nil
 }
 
+func (m *mysqlTaskStorage) AddCdcTask(ctx context.Context, insertSql string, dt task.DaemonTask) (int, error) {
+	if taskFrameworkDisabled() {
+		return 0, nil
+	}
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			if e := tx.Rollback(); e != nil {
+				err = errors.Join(e, err)
+			}
+		} else {
+			if e := tx.Commit(); e != nil {
+				err = errors.Join(e, err)
+			}
+		}
+	}()
+
+	daemonTaskRowsAffected, err := m.AddDaemonTaskFromDB(ctx, tx, dt)
+	if err != nil {
+		return 0, err
+	}
+
+	exec, err := tx.ExecContext(ctx, insertSql)
+	if err != nil {
+		return 0, err
+	}
+
+	cdcTaskRowsAffected, err := exec.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	if daemonTaskRowsAffected != int(cdcTaskRowsAffected) {
+		err = moerr.NewInternalError(ctx, "add cdc task status failed.")
+		return 0, err
+	}
+	return daemonTaskRowsAffected, nil
+}
+
 func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, condition ...Condition) (int, error) {
 	if taskFrameworkDisabled() {
 		return 0, nil
@@ -990,7 +1064,7 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 	whereClauses := buildCdcTaskWhereClause(c)
 	query := selectCdcTask + whereClauses
 
-	rows, err := m.db.QueryContext(ctx, query)
+	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -1005,7 +1079,7 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		}
 		taskIds = append(taskIds, taskId)
 	}
-	daemonTasks, err := m.QueryDaemonTask(ctx, condition...)
+	daemonTasks, err := m.QueryDaemonTaskFromDB(ctx, tx, condition...)
 	var prepare *sql.Stmt
 	if targetStatus != task.TaskStatus_CancelRequested {
 		updateSql := updateCdcMeta + whereClauses
@@ -1013,9 +1087,11 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		if err != nil {
 			return 0, err
 		}
-		defer prepare.Close()
+		defer func() {
+			_ = prepare.Close()
+		}()
 	}
-	updateTasks := []task.DaemonTask{}
+	updateTasks := make([]task.DaemonTask, 0)
 	for _, taskId := range taskIds {
 		for _, daemonTask := range daemonTasks {
 			if daemonTask.TaskStatus != task.TaskStatus_Canceled && taskId == daemonTask.Details.Details.(*task.Details_CreateCdc).CreateCdc.TaskId {
@@ -1034,7 +1110,7 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 
 	if targetStatus == task.TaskStatus_CancelRequested {
 		deleteSql := dropCdcMeta + whereClauses
-		exec, err := m.db.ExecContext(ctx, deleteSql)
+		exec, err := tx.ExecContext(ctx, deleteSql)
 		if err != nil {
 			return 0, err
 		}
@@ -1063,7 +1139,7 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		}
 	}
 
-	affectedTaskRow, err = m.UpdateDaemonTask(ctx, updateTasks)
+	affectedTaskRow, err = m.UpdateDaemonTaskFromDB(ctx, updateTasks, tx)
 	if err != nil {
 		return 0, err
 	}
