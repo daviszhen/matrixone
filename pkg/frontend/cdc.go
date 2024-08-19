@@ -864,9 +864,11 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 		return
 	}
 
-	// hold
-	ch := make(chan int, 1)
-	<-ch
+	if firstTime {
+		// hold
+		ch := make(chan int, 1)
+		<-ch
+	}
 	return
 }
 
