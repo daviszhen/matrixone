@@ -872,12 +872,21 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	return
 }
 
-// Resume restart cdc task from last recorded watermark
+// Resume cdc task from last recorded watermark
 func (cdc *CdcTask) Resume() error {
 	// closed in Pause, need renew
 	cdc.activeRoutine.Cancel = make(chan struct{})
 	cdc.activeRoutine.Pause = make(chan struct{})
+	fmt.Println("=====> it's resume")
+	return cdc.Start(context.Background(), false)
+}
 
+// Restart cdc task from init watermark
+func (cdc *CdcTask) Restart() error {
+	// closed in Pause, need renew
+	cdc.activeRoutine.Cancel = make(chan struct{})
+	cdc.activeRoutine.Pause = make(chan struct{})
+	fmt.Println("=====> it's restart")
 	return cdc.Start(context.Background(), false)
 }
 
@@ -918,6 +927,10 @@ func handleResumeCdc(ses *Session, execCtx *ExecCtx, st *tree.ResumeCDC) error {
 	return updateCdc(execCtx.reqCtx, ses, st)
 }
 
+func handleRestartCdc(ses *Session, execCtx *ExecCtx, st *tree.RestartCDC) error {
+	return updateCdc(execCtx.reqCtx, ses, st)
+}
+
 func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error) {
 	var targetTaskStatus task.TaskStatus
 	var n int
@@ -955,6 +968,13 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		}
+	case *tree.RestartCDC:
+		targetTaskStatus = task.TaskStatus_RestartRequested
+		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName),
+			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
+		)
 	case *tree.ResumeCDC:
 		targetTaskStatus = task.TaskStatus_ResumeRequested
 		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
