@@ -232,15 +232,6 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	return err
 }
 
-func createCdc(
-	ctx context.Context,
-	ses *Session,
-	ts taskservice.TaskService,
-	create *tree.CreateCDC,
-) error {
-	return saveCdcTask(ctx, ses, ts, create)
-}
-
 func cdcTaskMetadata(cdcId string) pb.TaskMetadata {
 	return pb.TaskMetadata{
 		ID:       cdcId,
@@ -435,7 +426,7 @@ func patterns2tables(ctx context.Context, pts []*PatternTuple, bh BackgroundExec
 	return resMap, nil
 }
 
-func saveCdcTask(
+func createCdc(
 	ctx context.Context,
 	ses *Session,
 	ts taskservice.TaskService,
