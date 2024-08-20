@@ -637,7 +637,7 @@ type CdcTask struct {
 	cdcTsWaiter  client.TimestampWaiter
 	cdcEngMp     *mpool.MPool
 	cdcEngine    engine.Engine
-	cdcTable     *disttae.CdcRelation
+	cdcTables    []*disttae.CdcRelation
 
 	activeRoutine *cdc2.ActiveRoutine
 	// inputChs are channels between partitioner and decoder
@@ -848,7 +848,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 		}
 
 		//step3 : subscribe the table
-		cdcTables := make([]*disttae.CdcRelation, 0)
+		cdc.cdcTables = make([]*disttae.CdcRelation, 0, len(dbTableIds))
 		for i, pair := range dbTableIds {
 			//skip heartbeat
 			if pair.Key == 0 || pair.Value == 0 {
@@ -863,17 +863,14 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 				cdcEngine)
 			fmt.Fprintln(os.Stderr, "====>", "cdc SubscribeTable",
 				dbId, tableId, "before")
-			err = disttae.SubscribeCdcTable(ctx, cdcTbl, pair.Key, pair.Value)
-			if err != nil {
+			if err = disttae.SubscribeCdcTable(ctx, cdcTbl, pair.Key, pair.Value); err != nil {
 				return err
 			}
 
-			cdcTables = append(cdcTables, cdcTbl)
+			cdc.cdcTables = append(cdc.cdcTables, cdcTbl)
 
 			//step4 : process partition state
-			fmt.Fprintf(os.Stderr, "====> cdc SubscribeTable %v:%v after\n",
-				dbId, tableId,
-			)
+			fmt.Fprintf(os.Stderr, "====> cdc SubscribeTable %v:%v after\n", dbId, tableId)
 		}
 	}
 
@@ -888,16 +885,17 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 		return
 	}
 
-	// hold
-	ch := make(chan int, 1)
-	<-ch
+	if firstTime {
+		// hold
+		ch := make(chan int, 1)
+		<-ch
+	}
 	return
 }
 
 // Resume restart cdc task from last recorded watermark
 func (cdc *CdcTask) Resume() error {
 	// closed in Pause, need renew
-	cdc.activeRoutine.Cancel = make(chan struct{})
 	cdc.activeRoutine.Pause = make(chan struct{})
 
 	return cdc.Start(context.Background(), false)
@@ -917,6 +915,7 @@ func (cdc *CdcTask) Pause() error {
 
 // Cancel stops partitioner, decoder and sinker, as well as the cdc replayer
 func (cdc *CdcTask) Cancel() error {
+	close(cdc.activeRoutine.Pause)
 	close(cdc.activeRoutine.Cancel)
 	for _, c := range cdc.inputChs {
 		close(c)
@@ -924,7 +923,13 @@ func (cdc *CdcTask) Cancel() error {
 	for _, c := range cdc.interChs {
 		close(c)
 	}
-	// TODO stop replayer
+
+	// TODO stop cdcEngine
+	ctx := context.Background()
+	for _, tbl := range cdc.cdcTables {
+		cdc.cdcEngine.UnsubscribeTable(ctx, tbl.GetDBID(ctx), tbl.GetTableID(ctx))
+	}
+	cdc.cdcTables = nil
 	return nil
 }
 
@@ -1105,7 +1110,6 @@ func (cdc *CdcTask) startDecoderAndSinker(
 }
 
 func (cdc *CdcTask) updateTableWatermark(tableId uint64, watermark timestamp.Timestamp) {
-	//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ [[updateTableWatermark]] tableId: %d, watermark: %s\n", tableId, watermark.DebugString())
 	cdc.watermarkMap.Store(tableId, watermark)
 }
 
@@ -1126,8 +1130,8 @@ func (cdc *CdcTask) updateWatermark() {
 	sql := fmt.Sprintf(updatedWatermark, watermarkStr, accountId, cdcTaskId)
 
 	ctx := defines.AttachAccountId(context.Background(), uint32(cdc.cdcTask.AccountId))
-	err := cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
-	_, _ = fmt.Fprintf(os.Stderr, "^^^^^ [[updateWatermark]] watermark: %s, err: %v\n", watermark.DebugString(), err)
+	cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
+	//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ [[updateWatermark]] watermark: %s, err: %v\n", watermark.DebugString(), err)
 }
 
 func (cdc *CdcTask) watermarkUpdateLoop() {
