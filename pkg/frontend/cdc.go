@@ -1105,7 +1105,7 @@ func (cdc *CdcTask) updateWatermark() {
 
 	ctx := defines.AttachAccountId(context.Background(), uint32(cdc.cdcTask.AccountId))
 	cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
-	//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ [[updateWatermark]] watermark: %s\n", watermark.DebugString())
+	//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ [[updateWatermark]] watermark: %s, err: %v\n", watermark.DebugString(), err)
 }
 
 func (cdc *CdcTask) watermarkUpdateLoop() {
