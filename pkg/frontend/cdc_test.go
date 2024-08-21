@@ -29,7 +29,6 @@ func Test_newCdcSqlFormat(t *testing.T) {
 	id, _ := uuid.Parse("019111fd-aed1-70c0-8760-9abadd8f0f4a")
 	d := time.Date(2024, 8, 2, 15, 20, 0, 0, time.UTC)
 	sql := getSqlForNewCdcTask(
-		false,
 		3,
 		id,
 		"task1",

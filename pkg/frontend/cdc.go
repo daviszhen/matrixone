@@ -45,7 +45,7 @@ import (
 )
 
 const (
-	insertNewCdcTaskFormat = `insert %sinto mo_catalog.mo_cdc_task values(` +
+	insertNewCdcTaskFormat = `insert into mo_catalog.mo_cdc_task values(` +
 		`%d,` + //account id
 		`"%s",` + //task id
 		`"%s",` + //task name
@@ -111,7 +111,6 @@ const (
 )
 
 func getSqlForNewCdcTask(
-	IfNotExists bool,
 	accId uint64,
 	taskId uuid.UUID,
 	taskName string,
@@ -137,12 +136,7 @@ func getSqlForNewCdcTask(
 	fullConfig string,
 	incrConfig string,
 ) string {
-	existString := ""
-	if IfNotExists {
-		existString = "IGNORE "
-	}
 	return fmt.Sprintf(insertNewCdcTaskFormat,
-		existString,
 		accId,
 		taskId,
 		taskName,
@@ -444,7 +438,7 @@ func canCreateCdcTask(ctx context.Context, ses *Session, level string, account s
 			if pt.SourceAccount == "" {
 				pt.SourceAccount = ses.GetTenantName()
 			}
-			if slices.Contains(skipDbs, pt.SourceDatabase) {
+			if isBannedDatabase(pt.SourceDatabase) {
 				return moerr.NewInternalError(ctx, "The system database cannot be subscribed to")
 			}
 		}
@@ -531,7 +525,6 @@ func createCdc(
 	//TODO: make it better
 	//Currently just for test
 	insertSql := getSqlForNewCdcTask(
-		create.IfNotExists,
 		uint64(accInfo.GetTenantID()),
 		cdcId,
 		create.TaskName,

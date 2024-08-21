@@ -1501,6 +1501,7 @@ var (
 		"system_metrics":     0,
 		"mysql":              0,
 		"mo_task":            0,
+		"mo_debug":           0,
 	}
 
 	// the privileges that can not be granted or revoked
