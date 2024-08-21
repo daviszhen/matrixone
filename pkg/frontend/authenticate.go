@@ -7006,6 +7006,11 @@ func authenticateUserCanExecuteStatementWithObjectTypeNone(ctx context.Context, 
 			return tenant.IsSysTenant(), nil
 		}
 
+		checkCdcTaskPrivilege := func() (bool, error) {
+			//only the moAdmin or accountAdmin can execute the Cdc statement
+			return tenant.IsAdminRole(), nil
+		}
+
 		switch gp := stmt.(type) {
 		case *tree.Grant:
 			if gp.Typ == tree.GrantTypePrivilege {
@@ -7040,7 +7045,7 @@ func authenticateUserCanExecuteStatementWithObjectTypeNone(ctx context.Context, 
 		case *tree.BackupStart:
 			return checkBackUpStartPrivilege()
 		case *tree.CreateCDC, *tree.ShowCDC, *tree.PauseCDC, *tree.DropCDC, *tree.ResumeCDC, *tree.RestartCDC:
-			return checkBackUpStartPrivilege()
+			return checkCdcTaskPrivilege()
 		}
 	}
 
