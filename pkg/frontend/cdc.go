@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -428,7 +427,6 @@ func patterns2tables(ctx context.Context, pts []*PatternTuple, bh BackgroundExec
 	return resMap, nil
 }
 func canCreateCdcTask(ctx context.Context, ses *Session, level string, account string, pts []*PatternTuple) error {
-	skipDbs = []string{"mysql", "system", "system_metrics", "mo_task", "mo_debug", "information_schema", moCatalog}
 
 	if strings.EqualFold(level, ClusterLevel) {
 		if !ses.tenant.IsMoAdminRole() {
@@ -453,7 +451,7 @@ func canCreateCdcTask(ctx context.Context, ses *Session, level string, account s
 			if account != pt.SourceAccount {
 				return moerr.NewInternalError(ctx, "No privilege to create task on table %s", pt.OriginString)
 			}
-			if slices.Contains(skipDbs, pt.SourceDatabase) {
+			if isBannedDatabase(pt.SourceDatabase) {
 				return moerr.NewInternalError(ctx, "The system database cannot be subscribed to")
 			}
 		}
