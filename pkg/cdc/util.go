@@ -288,11 +288,29 @@ func convertColIntoSql(
 		//+------------------------------+
 		//|   �?   @  @@                  |
 		//+------------------------------+
-		value := data.(float32)
-		sqlBuff = appendFloat64(sqlBuff, float64(value), 32)
+		value := data.([]float32)
+		sqlBuff = appendByte(sqlBuff, '"')
+		sqlBuff = appendByte(sqlBuff, '[')
+		for i := range value {
+			sqlBuff = appendFloat64(sqlBuff, float64(value[i]), 32)
+			if i != len(value)-1 {
+				sqlBuff = appendByte(sqlBuff, ',')
+			}
+		}
+		sqlBuff = appendByte(sqlBuff, ']')
+		sqlBuff = appendByte(sqlBuff, '"')
 	case types.T_array_float64:
-		value := data.(float64)
-		sqlBuff = appendFloat64(sqlBuff, value, 64)
+		value := data.([]float64)
+		sqlBuff = appendByte(sqlBuff, '"')
+		sqlBuff = appendByte(sqlBuff, '[')
+		for i := range value {
+			sqlBuff = appendFloat64(sqlBuff, value[i], 64)
+			if i != len(value)-1 {
+				sqlBuff = appendByte(sqlBuff, ',')
+			}
+		}
+		sqlBuff = appendByte(sqlBuff, ']')
+		sqlBuff = appendByte(sqlBuff, '"')
 	case types.T_date:
 		value := data.(types.Date)
 		sqlBuff = appendByte(sqlBuff, '"')
