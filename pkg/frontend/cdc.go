@@ -16,7 +16,9 @@ package frontend
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"os"
 	"strconv"
 	"strings"
@@ -70,9 +72,7 @@ const (
 		`"%s",` + //state
 		`%d,` + //checkpoint
 		`"%d",` + //checkpoint_str
-		`"%s",` + //full_config
-		`"%s",` + //incr_config
-		`"",` + //reserved0
+		`"%d",` + //concurrency
 		`"",` + //reserved1
 		`"",` + //reserved2
 		`"",` + //reserved3
@@ -85,7 +85,8 @@ const (
 		`sink_password, ` +
 		`tables, ` +
 		`start_ts_str, ` +
-		`checkpoint_str ` +
+		`checkpoint_str, ` +
+		`concurrency ` +
 		`from ` +
 		`mo_catalog.mo_cdc_task ` +
 		`where ` +
@@ -137,8 +138,7 @@ func getSqlForNewCdcTask(
 	taskCreateTime time.Time,
 	state string,
 	checkpoint uint64,
-	fullConfig string,
-	incrConfig string,
+	concurrency uint64,
 ) string {
 	return fmt.Sprintf(insertNewCdcTaskFormat,
 		accId,
@@ -166,8 +166,7 @@ func getSqlForNewCdcTask(
 		state,
 		checkpoint,
 		checkpoint,
-		fullConfig,
-		incrConfig,
+		concurrency,
 	)
 }
 
@@ -472,7 +471,7 @@ func createCdc(
 	ts taskservice.TaskService,
 	create *tree.CreateCDC,
 ) error {
-	var startTs, endTs uint64
+	var startTs, endTs, concurrency uint64
 	var err error
 
 	cdcTaskOptionsMap := make(map[string]string)
@@ -522,17 +521,25 @@ func createCdc(
 	if err != nil {
 		return err
 	}
+	concurrency, err = string2uint64(cdcTaskOptionsMap["FullConcurrency"])
+	if err != nil {
+		return err
+	}
 
 	dat := time.Now().UTC()
 
+	safeUri, _, suc := splitPasswordFromURI(create.SourceUri)
+	if !suc {
+		logutil.Errorf("Failed to split password from URI: %s", create.SourceUri)
+	}
 	//TODO: make it better
 	//Currently just for test
 	insertSql := getSqlForNewCdcTask(
 		uint64(accInfo.GetTenantID()),
 		cdcId,
 		create.TaskName,
-		create.SourceUri,
-		"FIXME",
+		safeUri,
+		"",
 		create.SinkUri,
 		create.SinkType,
 		"FIXME",
@@ -550,8 +557,7 @@ func createCdc(
 		dat,
 		SyncLoading,
 		0, //FIXME
-		"FIXME",
-		"FIXME",
+		concurrency,
 	)
 
 	if _, err = ts.AddCdcTask(ctx, cdcTaskMetadata(cdcId.String()), details, insertSql); err != nil {
@@ -634,9 +640,10 @@ type CdcTask struct {
 	// tableId -> *disttae.CdcRelation
 	cdcTables *sync.Map
 
-	sinkUri string
-
-	activeRoutine *cdc2.ActiveRoutine
+	sinkUri          string
+	sinkConn         *sql.DB
+	maxAllowedPacket uint64
+	activeRoutine    *cdc2.ActiveRoutine
 	// inputChs are channels between partitioner and decoder; key is tableId
 	inputChs map[uint64]chan tools.Pair[*disttae.TableCtx, *disttae.DecoderInput]
 	// interChs are channels between decoder and sinker; key is tableId
@@ -658,14 +665,15 @@ func NewCdcTask(
 	cnEngine engine.Engine,
 ) *CdcTask {
 	return &CdcTask{
-		logger:          logger,
-		ie:              ie,
-		cdcTask:         cdcTask,
-		createTxnClient: createTxnClient,
-		cnUUID:          cnUUID,
-		fileService:     fileService,
-		cnTxnClient:     cnTxnClient,
-		cnEngine:        cnEngine,
+		logger:           logger,
+		ie:               ie,
+		cdcTask:          cdcTask,
+		createTxnClient:  createTxnClient,
+		cnUUID:           cnUUID,
+		fileService:      fileService,
+		cnTxnClient:      cnTxnClient,
+		cnEngine:         cnEngine,
+		maxAllowedPacket: cdc2.MaxSqlSize,
 	}
 }
 
@@ -735,6 +743,11 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	watermark, err := cdc2.StrToTimestamp(watermarkStr)
 	if err != nil {
 		watermark = timestamp.Timestamp{}
+	}
+
+	concurrency, err := res.GetUint64(ctx, 0, 6)
+	if err != nil {
+		return err
 	}
 
 	fmt.Fprintln(os.Stderr, "====>", "cdc task row",
@@ -853,6 +866,19 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	cdc.inputChs = make(map[uint64]chan tools.Pair[*disttae.TableCtx, *disttae.DecoderInput], len(dbTableInfos))
 	cdc.interChs = make(map[uint64]chan tools.Pair[*disttae.TableCtx, *cdc2.DecoderOutput], len(dbTableInfos))
 
+	cdc.sinkConn, err = cdc2.OpenDbConn(ctx, cdc.sinkUri, concurrency)
+	if err != nil {
+		return err
+	}
+	err = cdc.sinkConn.QueryRow("SELECT @@max_allowed_packet").Scan(&cdc.maxAllowedPacket)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("max_allowed_packet: %d bytes\n", cdc.maxAllowedPacket)
+
+	if err != nil {
+		return err
+	}
 	for _, info := range dbTableInfos {
 		if err = cdc.addExePipelineForTable(info.tblId, watermark, cdc.sunkWatermarkUpdater); err != nil {
 			return err
@@ -1076,11 +1102,11 @@ func (cdc *CdcTask) addExePipelineForTable(tableId uint64, watermark timestamp.T
 	cdc.interChs[tableId] = make(chan tools.Pair[*disttae.TableCtx, *cdc2.DecoderOutput])
 
 	// make decoder for table
-	decoder := cdc2.NewDecoder(cdc.cdcEngMp, cdc.cdcEngine.FS(), tableId, cdc.inputChs[tableId], cdc.interChs[tableId], wmarkUpdater)
+	decoder := cdc2.NewDecoder(cdc.cdcEngMp, cdc.cdcEngine.FS(), tableId, cdc.inputChs[tableId], cdc.interChs[tableId], wmarkUpdater, cdc.maxAllowedPacket)
 	go decoder.Run(ctx, cdc.activeRoutine)
 
 	// make sinker for table
-	sinker, err := cdc2.NewSinker(ctx, cdc.sinkUri, cdc.interChs[tableId], watermark, cdc.sunkWatermarkUpdater.UpdateTableWatermark)
+	sinker, err := cdc2.NewSinker(cdc.sinkConn, cdc.sinkUri, cdc.interChs[tableId], watermark, cdc.sunkWatermarkUpdater.UpdateTableWatermark)
 	if err != nil {
 		return err
 	}
