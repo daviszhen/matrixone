@@ -409,7 +409,7 @@ func (cdcTbl *CdcRelation) GetPrimarySeqNum() int {
 	return 0
 }
 
-func (cdcTbl *CdcRelation) tryToSubscribe(ctx context.Context) (ps *logtailreplay.PartitionState, err error) {
+func (cdcTbl *CdcRelation) tryToSubscribe(ctx context.Context) (ps *logtailreplay.PartitionStateInProgress, err error) {
 	ps, err = cdcTbl.cdcEng.PushClient().toSubscribeTable(ctx, cdcTbl)
 	if err != nil {
 		return nil, err
@@ -422,7 +422,7 @@ func (cdcTbl *CdcRelation) tryToSubscribe(ctx context.Context) (ps *logtailrepla
 func (cdcTbl *CdcRelation) getPartitionState(
 	ctx context.Context,
 	dbId, tableId uint64,
-) (*logtailreplay.PartitionState, error) {
+) (*logtailreplay.PartitionStateInProgress, error) {
 	if cdcTbl._partState.Load() == nil {
 		ps, err := cdcTbl.tryToSubscribe(ctx)
 		if err != nil {

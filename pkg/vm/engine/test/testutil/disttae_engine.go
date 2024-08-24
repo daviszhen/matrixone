@@ -90,7 +90,7 @@ func NewTestDisttaeEngine(
 	colexec.NewServer(hakeeper)
 
 	catalog.SetupDefines("")
-	de.Engine = disttae.New(ctx, "", mp, fs, de.txnClient, hakeeper, nil, 0)
+	de.Engine = disttae.New(ctx, "", mp, fs, de.txnClient, hakeeper, nil, 1)
 	de.Engine.PushClient().LogtailRPCClientFactory = rpcAgent.MockLogtailRPCClientFactory
 
 	go func() {
@@ -255,10 +255,10 @@ func (de *TestDisttaeEngine) waitLogtail(ctx context.Context) error {
 	return nil
 }
 
-func (de *TestDisttaeEngine) analyzeDataObjects(state *logtailreplay.PartitionState,
+func (de *TestDisttaeEngine) analyzeDataObjects(state *logtailreplay.PartitionStateInProgress,
 	stats *PartitionStateStats, ts types.TS) (err error) {
 
-	iter, err := state.NewObjectsIter(ts, false)
+	iter, err := state.NewObjectsIter(ts, false, false)
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func (de *TestDisttaeEngine) analyzeDataObjects(state *logtailreplay.PartitionSt
 }
 
 func (de *TestDisttaeEngine) analyzeInmemRows(
-	state *logtailreplay.PartitionState,
+	state *logtailreplay.PartitionStateInProgress,
 	stats *PartitionStateStats,
 	ts types.TS,
 ) (err error) {
@@ -311,7 +311,7 @@ func (de *TestDisttaeEngine) analyzeInmemRows(
 }
 
 func (de *TestDisttaeEngine) analyzeCheckpoint(
-	state *logtailreplay.PartitionState,
+	state *logtailreplay.PartitionStateInProgress,
 	stats *PartitionStateStats,
 	ts types.TS,
 ) (err error) {
@@ -330,12 +330,12 @@ func (de *TestDisttaeEngine) analyzeCheckpoint(
 }
 
 func (de *TestDisttaeEngine) analyzeTombstone(
-	state *logtailreplay.PartitionState,
+	state *logtailreplay.PartitionStateInProgress,
 	stats *PartitionStateStats,
 	ts types.TS,
 ) (outErr error) {
 
-	iter, err := state.NewObjectsIter(ts, true)
+	iter, err := state.NewObjectsIter(ts, true, true)
 	if err != nil {
 		return nil
 	}
@@ -410,7 +410,7 @@ func (de *TestDisttaeEngine) GetPartitionStateStats(
 	}
 
 	var (
-		state *logtailreplay.PartitionState
+		state *logtailreplay.PartitionStateInProgress
 	)
 
 	ts := types.TimestampToTS(de.Now())

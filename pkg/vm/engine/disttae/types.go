@@ -333,6 +333,17 @@ func (b *deletedBlocks) getDeletedRowIDs(mp map[types.Blockid][]int32) {
 	}
 }
 
+func (b *deletedBlocks) getDeletedRowIDsInProgress(dest *[]types.Rowid) {
+	b.RLock()
+	defer b.RUnlock()
+	for bid, offsets := range b.offsets {
+		for _, offset := range offsets {
+			rowId := types.NewRowid(&bid, uint32(offset))
+			*dest = append(*dest, *rowId)
+		}
+	}
+}
+
 func (b *deletedBlocks) clean() {
 	b.Lock()
 	defer b.Unlock()
@@ -789,7 +800,7 @@ type txnTable struct {
 	tableDef      *plan.TableDef
 	seqnums       []uint16
 	typs          []types.Type
-	_partState    atomic.Pointer[logtailreplay.PartitionState]
+	_partState    atomic.Pointer[logtailreplay.PartitionStateInProgress]
 	primaryIdx    int // -1 means no primary key
 	primarySeqnum int // -1 means no primary key
 	clusterByIdx  int // -1 means no clusterBy key
@@ -944,7 +955,7 @@ type CdcRelation struct {
 	db, table                string
 	accountId, dbId, tableId uint64
 	cdcEng                   *CdcEngine
-	_partState               atomic.Pointer[logtailreplay.PartitionState]
+	_partState               atomic.Pointer[logtailreplay.PartitionStateInProgress]
 }
 
 func (cdcTbl *CdcRelation) Ranges(ctx context.Context, exprs []*plan.Expr, i int) (engine.RelData, error) {
@@ -1024,7 +1035,7 @@ type DecoderInput struct {
 	typ InputType
 	//ts comes from the ts timestamp on the logtail package
 	ts         timestamp.Timestamp
-	state      *logtailreplay.PartitionState
+	state      *logtailreplay.PartitionStateInProgress
 	receivedAt time.Time
 	ddls       []*DDL
 	//fromSubResp denotes the content comes from subscribe response
@@ -1043,7 +1054,7 @@ func (dec *DecoderInput) TS() timestamp.Timestamp {
 	return dec.ts
 }
 
-func (dec *DecoderInput) State() *logtailreplay.PartitionState {
+func (dec *DecoderInput) State() *logtailreplay.PartitionStateInProgress {
 	return dec.state
 }
 
