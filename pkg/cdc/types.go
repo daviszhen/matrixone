@@ -23,6 +23,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
 )
 
+const (
+	HeartBeatTableId = 0
+)
+
 /*
 Cdc process
 	logtail replayer

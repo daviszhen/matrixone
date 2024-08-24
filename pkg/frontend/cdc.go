@@ -64,7 +64,7 @@ const (
 		`"%s",` + //source_state
 		`"%s",` + //sink_state
 		`%d,` + //start_ts
-		`"%d",` + //start_ts_str
+		`"%d-0",` + //start_ts_str
 		`%d,` + //end_ts
 		`"%d",` + //end_ts_str
 		`"%s",` + //config_file
@@ -72,7 +72,9 @@ const (
 		`"%s",` + //state
 		`%d,` + //checkpoint
 		`"%d",` + //checkpoint_str
-		`"%d",` + //concurrency
+		`"%s",` + //full_config
+		`"%s",` + //incr_config
+		`"",` + //reserved0
 		`"",` + //reserved1
 		`"",` + //reserved2
 		`"",` + //reserved3
@@ -85,7 +87,6 @@ const (
 		`sink_password, ` +
 		`tables, ` +
 		`start_ts_str, ` +
-		`checkpoint_str, ` +
 		`concurrency ` +
 		`from ` +
 		`mo_catalog.mo_cdc_task ` +
@@ -105,7 +106,17 @@ const (
 
 	updateCdcMeta = "update mo_catalog.mo_cdc_task set state = '%s' where account_id = %d and task_id = '%s'"
 
-	updatedWatermark = "update mo_catalog.mo_cdc_task set checkpoint_str = '%s' where account_id = %d and task_id = '%s'"
+	insertWatermark = "insert into mo_catalog.mo_cdc_watermark values (%d, '%s', %d, '%s')"
+
+	getWatermark = "select watermark from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s' and table_id = %d"
+
+	getWatermarkCount = "select count(1) from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s'"
+
+	updateWatermark = "update mo_catalog.mo_cdc_watermark set watermark='%s' where account_id = %d and task_id = '%s' and table_id = %d"
+
+	deleteWatermark = "delete from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s'"
+
+	deleteWatermarkByTable = "delete from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s' and table_id = %d"
 )
 
 type dbTableInfo struct {
@@ -616,7 +627,7 @@ func RegisterCdcExecutor(
 		if err := attachToTask(ctx, T.GetID(), cdc); err != nil {
 			return err
 		}
-		err = cdc.Start(ctx, true)
+		err = cdc.Start(ctx)
 
 		return err
 	}
@@ -643,13 +654,18 @@ type CdcTask struct {
 	sinkUri          string
 	sinkConn         *sql.DB
 	maxAllowedPacket uint64
-	activeRoutine    *cdc2.ActiveRoutine
-	// inputChs are channels between partitioner and decoder; key is tableId
+
+	activeRoutine *cdc2.ActiveRoutine
+
+	partitioner cdc2.Partitioner
+	// inputChs are channels between partitioner and decoder; tableId -> channel
 	inputChs map[uint64]chan tools.Pair[*disttae.TableCtx, *disttae.DecoderInput]
-	// interChs are channels between decoder and sinker; key is tableId
+	// tableId -> decoder
+	decoders map[uint64]cdc2.Decoder
+	// interChs are channels between decoder and sinker; tableId -> channel
 	interChs map[uint64]chan tools.Pair[*disttae.TableCtx, *cdc2.DecoderOutput]
-	// TODO receivedWatermarkUpdater update the watermark of the items received from upstream
-	//receivedWatermarkUpdater *cdc2.WatermarkUpdater
+	// tableId -> sinker
+	sinkers map[uint64]cdc2.Sinker
 	// sunkWatermarkUpdater update the watermark of the items that has been sunk to downstream
 	sunkWatermarkUpdater *cdc2.WatermarkUpdater
 }
@@ -677,7 +693,7 @@ func NewCdcTask(
 	}
 }
 
-func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
+func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	fmt.Fprintln(os.Stderr, "====>cdc start")
 
 	ctx := defines.AttachAccountId(rootCtx, uint32(cdc.cdcTask.AccountId))
@@ -698,7 +714,8 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	}
 
 	//sink uri
-	cdc.sinkUri, err = res.GetString(ctx, 0, 0)
+	sinkUri, err := res.GetString(ctx, 0, 0)
+	cdc.sinkUri = sinkUri
 	if err != nil {
 		return err
 	}
@@ -731,32 +748,22 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 		return err
 	}
 
-	// watermark
-	watermarkStr, err := res.GetString(ctx, 0, 5)
+	startTs, err := cdc2.StrToTimestamp(startTsStr)
 	if err != nil {
 		return err
 	}
-	if watermarkStr == "" {
-		watermarkStr = startTsStr
-	}
 
-	watermark, err := cdc2.StrToTimestamp(watermarkStr)
-	if err != nil {
-		watermark = timestamp.Timestamp{}
-	}
-
-	concurrency, err := res.GetUint64(ctx, 0, 6)
+	concurrency, err := res.GetUint64(ctx, 0, 5)
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintln(os.Stderr, "====>", "cdc task row",
-		cdc.sinkUri,
+		sinkUri,
 		sinkTyp,
 		sinkPwd,
 		tables,
-		"startTs", startTsStr,
-		"watermark", watermarkStr)
+		"startTs", startTsStr)
 
 	var dbId, tblId uint64
 	tableList := strings.Split(tables, ",")
@@ -796,14 +803,13 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 			tblId:   tblId,
 		})
 	}
-	//dbid 0, tableid 0 reserved for heartbeat
-	//dbTableIds = append(dbTableIds, tools.Pair[uint64, uint64]{
-	//	Key:   0,
-	//	Value: 0,
-	//})
+	// add visual heartbeat table
+	dbTableInfos = append(dbTableInfos, &dbTableInfo{
+		tblId: cdc2.HeartBeatTableId,
+	})
 
 	//step2 : create cdc engine when first start
-	if firstTime {
+	if cdc.cdcEngine == nil {
 		fs, err := fileservice.Get[fileservice.FileService](cdc.fileService, defines.SharedFileServiceName)
 		if err != nil {
 			return err
@@ -858,13 +864,28 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 		}
 	}
 
-	// step3 : create cdc pipeline
-	//cdc.receivedWatermarkUpdater = cdc2.NewWatermarkUpdater(cdc.persistWatermark)
-	cdc.sunkWatermarkUpdater = cdc2.NewWatermarkUpdater(cdc.persistWatermark)
+	// init mo_cdc_watermark table
+	count, err := cdc.getWatermarkCount()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		for _, info := range dbTableInfos {
+			// use startTs as watermark
+			if err = cdc.insertWatermark(info.tblId, startTs); err != nil {
+				return err
+			}
+		}
+	}
 
-	// make channels between partitioner and decoder
+	// step3 : create cdc pipeline
+	cdc.sunkWatermarkUpdater = cdc2.NewWatermarkUpdater(cdc.updateWatermark)
+
+	// init channel map
 	cdc.inputChs = make(map[uint64]chan tools.Pair[*disttae.TableCtx, *disttae.DecoderInput], len(dbTableInfos))
+	cdc.decoders = make(map[uint64]cdc2.Decoder, len(dbTableInfos))
 	cdc.interChs = make(map[uint64]chan tools.Pair[*disttae.TableCtx, *cdc2.DecoderOutput], len(dbTableInfos))
+	cdc.sinkers = make(map[uint64]cdc2.Sinker, len(dbTableInfos))
 
 	cdc.sinkConn, err = cdc2.OpenDbConn(ctx, cdc.sinkUri, concurrency)
 	if err != nil {
@@ -879,8 +900,9 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	if err != nil {
 		return err
 	}
+
 	for _, info := range dbTableInfos {
-		if err = cdc.addExePipelineForTable(info.tblId, watermark, cdc.sunkWatermarkUpdater); err != nil {
+		if err = cdc.addExePipelineForTable(info.tblId, sinkUri); err != nil {
 			return err
 		}
 	}
@@ -889,15 +911,15 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	go cdc.sunkWatermarkUpdater.Run(cdc.activeRoutine)
 
 	// make partitioner
-	partitioner := cdc2.NewPartitioner(cdc.cdcEngine.InQueue(), cdc.inputChs)
-	go partitioner.Run(ctx, cdc.activeRoutine)
+	cdc.partitioner = cdc2.NewPartitioner(cdc.cdcEngine.InQueue(), cdc.inputChs)
+	go cdc.partitioner.Run(ctx, cdc.activeRoutine)
 
 	//step4 : subscribe the table
-	if firstTime {
+	if cdc.cdcTables == nil {
 		cdc.cdcTables = new(sync.Map)
 		for _, info := range dbTableInfos {
-			//skip heartbeat
-			if info.dbId == 0 || info.tblId == 0 {
+			// skip visual heart beat table
+			if info.tblId == cdc2.HeartBeatTableId {
 				continue
 			}
 
@@ -918,16 +940,19 @@ func (cdc *CdcTask) Resume() error {
 	// closed in Pause, need renew
 	cdc.activeRoutine.Pause = make(chan struct{})
 	fmt.Println("=====> it's resume")
-	return cdc.Start(context.Background(), false)
+	return cdc.Start(context.Background())
 }
 
 // Restart cdc task from init watermark
 func (cdc *CdcTask) Restart() error {
+	// delete previous watermark, restart from init watermark
+	cdc.deleteWatermark()
+
 	// closed in Pause, need renew
 	cdc.activeRoutine.Cancel = make(chan struct{})
 	cdc.activeRoutine.Pause = make(chan struct{})
 	fmt.Println("=====> it's restart")
-	return cdc.Start(context.Background(), false)
+	return cdc.Start(context.Background())
 }
 
 // Pause stops the components after inQueue (partitioner, decoder and sinker)
@@ -939,6 +964,16 @@ func (cdc *CdcTask) Pause() error {
 	for _, c := range cdc.interChs {
 		close(c)
 	}
+
+	// TODO unsubscribe all tables if not persist data of queue
+	//// unsubscribe all tables
+	//cdc.cdcTables.Range(func(k, v any) bool {
+	//	tbl := v.(*disttae.CdcRelation)
+	//	// TODO handle error
+	//	cdc.unsubscribeTable(tbl)
+	//	return true
+	//})
+	//cdc.cdcTables = nil
 	return nil
 }
 
@@ -953,6 +988,7 @@ func (cdc *CdcTask) Cancel() error {
 		close(c)
 	}
 
+	// unsubscribe all tables
 	cdc.cdcTables.Range(func(k, v any) bool {
 		tbl := v.(*disttae.CdcRelation)
 		// TODO handle error
@@ -960,7 +996,9 @@ func (cdc *CdcTask) Cancel() error {
 		return true
 	})
 	cdc.cdcTables = nil
-	return nil
+
+	// clean mo_cdc_watermark table
+	return cdc.deleteWatermark()
 }
 
 func handleDropCdc(ses *Session, execCtx *ExecCtx, st *tree.DropCDC) error {
@@ -1040,16 +1078,6 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 	return
 }
 
-func (cdc *CdcTask) persistWatermark(watermark timestamp.Timestamp) error {
-	accountId := uint32(cdc.cdcTask.AccountId)
-	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
-	watermarkStr := cdc2.TimestampToStr(watermark)
-	sql := fmt.Sprintf(updatedWatermark, watermarkStr, accountId, cdcTaskId)
-
-	ctx := defines.AttachAccountId(context.Background(), uint32(cdc.cdcTask.AccountId))
-	return cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
-}
-
 func (cdc *CdcTask) subscribeTable(dbName, tblName string, dbId, tblId uint64) (err error) {
 	cdcTbl := disttae.NewCdcRelation(
 		dbName,
@@ -1085,7 +1113,7 @@ func (cdc *CdcTask) unsubscribeTable(cdcTbl *disttae.CdcRelation) (err error) {
 	return
 }
 
-func (cdc *CdcTask) addExePipelineForTable(tableId uint64, watermark timestamp.Timestamp, wmarkUpdater *cdc2.WatermarkUpdater) (err error) {
+func (cdc *CdcTask) addExePipelineForTable(tableId uint64, sinkUri string) (err error) {
 	//                         + == inputCh == > decoder == interCh == > sinker -> remote db    // for table 1
 	// 	                       |
 	// inQueue -> partitioner -+ == inputCh == > decoder == interCh == > sinker -> remote db    // for table 2
@@ -1102,23 +1130,29 @@ func (cdc *CdcTask) addExePipelineForTable(tableId uint64, watermark timestamp.T
 	cdc.interChs[tableId] = make(chan tools.Pair[*disttae.TableCtx, *cdc2.DecoderOutput])
 
 	// make decoder for table
-	decoder := cdc2.NewDecoder(cdc.cdcEngMp, cdc.cdcEngine.FS(), tableId, cdc.inputChs[tableId], cdc.interChs[tableId], wmarkUpdater, cdc.maxAllowedPacket)
+	decoder := cdc2.NewDecoder(cdc.cdcEngMp, cdc.cdcEngine.FS(), tableId, cdc.inputChs[tableId], cdc.interChs[tableId], cdc.sunkWatermarkUpdater, cdc.maxAllowedPacket)
 	go decoder.Run(ctx, cdc.activeRoutine)
+	cdc.decoders[tableId] = decoder
+
+	watermark, err := cdc.getWatermark(tableId)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "table %v current watermark: %s\n", tableId, watermark.DebugString())
+	cdc.sunkWatermarkUpdater.UpdateTableWatermark(tableId, watermark)
 
 	// make sinker for table
-	sinker, err := cdc2.NewSinker(cdc.sinkConn, cdc.sinkUri, cdc.interChs[tableId], watermark, cdc.sunkWatermarkUpdater.UpdateTableWatermark)
+	sinker, err := cdc2.NewSinker(cdc.sinkConn, cdc.sinkUri, cdc.interChs[tableId], tableId, cdc.sunkWatermarkUpdater)
 	if err != nil {
 		return err
 	}
 	go sinker.Run(ctx, cdc.activeRoutine)
-
-	// add into watermark updater
-	cdc.sunkWatermarkUpdater.UpdateTableWatermark(tableId, watermark)
+	cdc.sinkers[tableId] = sinker
 
 	return
 }
 
-func (cdc *CdcTask) removeExePipelineForTable(tableId uint64) (err error) {
+func (cdc *CdcTask) removeExePipelineForTable(tableId uint64) {
 	// close and delete inputCh
 	close(cdc.inputChs[tableId])
 	delete(cdc.inputChs, tableId)
@@ -1127,8 +1161,84 @@ func (cdc *CdcTask) removeExePipelineForTable(tableId uint64) (err error) {
 	close(cdc.interChs[tableId])
 	delete(cdc.interChs, tableId)
 
-	// remove from watermark updater
-	cdc.sunkWatermarkUpdater.RemoveTable(tableId)
-
 	return
+}
+
+func (cdc *CdcTask) insertWatermark(tableId uint64, watermark timestamp.Timestamp) (err error) {
+	accountId := uint32(cdc.cdcTask.AccountId)
+	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
+	watermarkStr := cdc2.TimestampToStr(watermark)
+	sql := fmt.Sprintf(insertWatermark, accountId, cdcTaskId, tableId, watermarkStr)
+
+	ctx := defines.AttachAccountId(context.Background(), accountId)
+	return cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
+}
+
+func (cdc *CdcTask) getWatermark(tableId uint64) (watermark timestamp.Timestamp, err error) {
+	accountId := uint32(cdc.cdcTask.AccountId)
+	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
+	sql := fmt.Sprintf(getWatermark, accountId, cdcTaskId, tableId)
+
+	ctx := defines.AttachAccountId(context.Background(), accountId)
+	res := cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
+	if res.Error() != nil {
+		err = res.Error()
+	} else if res.RowCount() < 1 {
+		err = moerr.NewInternalError(ctx, "no watermark found for task: %s, tableId: %v\n", cdcTaskId, tableId)
+	} else if res.RowCount() > 1 {
+		err = moerr.NewInternalError(ctx, "duplicate watermark found for task: %s, tableId: %v\n", cdcTaskId, tableId)
+	}
+	if err != nil {
+		return
+	}
+
+	watermarkStr, err := res.GetString(ctx, 0, 0)
+	if err != nil {
+		return timestamp.Timestamp{}, err
+	}
+	return cdc2.StrToTimestamp(watermarkStr)
+}
+
+func (cdc *CdcTask) getWatermarkCount() (uint64, error) {
+	accountId := uint32(cdc.cdcTask.AccountId)
+	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
+	sql := fmt.Sprintf(getWatermarkCount, accountId, cdcTaskId)
+
+	ctx := defines.AttachAccountId(context.Background(), accountId)
+	res := cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
+	if res.Error() != nil {
+		return 0, res.Error()
+	}
+	return res.GetUint64(ctx, 0, 0)
+}
+
+func (cdc *CdcTask) updateWatermark(tableId uint64, watermark timestamp.Timestamp) (err error) {
+	accountId := uint32(cdc.cdcTask.AccountId)
+	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
+	watermarkStr := cdc2.TimestampToStr(watermark)
+	sql := fmt.Sprintf(updateWatermark, watermarkStr, accountId, cdcTaskId, tableId)
+
+	ctx := defines.AttachAccountId(context.Background(), accountId)
+	//fmt.Fprintf(os.Stderr, "====> updateWatermark tableId(%d), watermark(%s), start\n", tableId, watermarkStr)
+	err = cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
+	//fmt.Fprintf(os.Stderr, "====> updateWatermark tableId(%d), watermark(%s), end\n", tableId, watermarkStr)
+	return
+}
+
+func (cdc *CdcTask) deleteWatermark() (err error) {
+	accountId := uint32(cdc.cdcTask.AccountId)
+	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
+	sql := fmt.Sprintf(deleteWatermark, accountId, cdcTaskId)
+
+	ctx := defines.AttachAccountId(context.Background(), accountId)
+	return cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
+}
+
+func (cdc *CdcTask) deleteWatermarkByTable(tableId uint64) (err error) {
+	accountId := uint32(cdc.cdcTask.AccountId)
+	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
+	sql := fmt.Sprintf(deleteWatermarkByTable, accountId, cdcTaskId, tableId)
+
+	ctx := defines.AttachAccountId(context.Background(), accountId)
+	return cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
 }

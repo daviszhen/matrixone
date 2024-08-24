@@ -50,18 +50,22 @@ func (p tableIdPartitioner) Run(_ context.Context, ar *ActiveRoutine) {
 			return
 
 		default:
+			// TODO add a condition variable to avoid busy waiting
 			if !p.q.Empty() {
 				entry := p.q.Front()
 				tableCtx := entry.Key
 				decoderInput := entry.Value
 				p.q.Pop()
 
-				//TODO:process heartbeat.to decoder? to sinker?
-				if decoderInput.IsHeartbeat() {
-					//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Partitioner:{%s} heartbeat\n", decoderInput.TS().DebugString())
-					continue
-				} else if decoderInput.IsDDL() {
+				if decoderInput.IsDDL() {
 					//TODO:action on ddl
+					continue
+				}
+
+				// too many heartbeats, so put here to reduce logs
+				//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Partitioner: {%s} \n", decoderInput.TS().DebugString())
+				if decoderInput.IsHeartbeat() {
+					p.outputChs[HeartBeatTableId] <- entry
 					continue
 				}
 
@@ -73,7 +77,7 @@ func (p tableIdPartitioner) Run(_ context.Context, ar *ActiveRoutine) {
 				_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Partitioner: {%s} [%v(%v)].[%v(%v)], entry pushed\n",
 					decoderInput.TS().DebugString(), tableCtx.Db(), tableCtx.DBId(), tableCtx.Table(), tableCtx.TableId())
 			} else {
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}

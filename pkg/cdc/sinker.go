@@ -24,7 +24,6 @@ import (
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/util"
-	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan/tools"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
 )
@@ -33,8 +32,8 @@ func NewSinker(
 	sinkConn *sql.DB,
 	sinkUri string,
 	inputCh chan tools.Pair[*disttae.TableCtx, *DecoderOutput],
-	curWaterMark timestamp.Timestamp,
-	updateWatermarkFunc func(tableId uint64, watermark timestamp.Timestamp),
+	tableId uint64,
+	watermarkUpdater *WatermarkUpdater,
 ) (Sinker, error) {
 	//TODO: remove console
 	if strings.HasPrefix(strings.ToLower(sinkUri), "console://") {
@@ -45,7 +44,7 @@ func NewSinker(
 		return nil, err
 	}
 
-	return NewMysqlSinker(sink, inputCh, curWaterMark, updateWatermarkFunc), nil
+	return NewMysqlSinker(sink, inputCh, tableId, watermarkUpdater), nil
 }
 
 var _ Sinker = new(consoleSinker)
@@ -122,23 +121,23 @@ func (s *consoleSinker) Run(ctx context.Context, ar *ActiveRoutine) {
 var _ Sinker = new(mysqlSinker)
 
 type mysqlSinker struct {
-	mysql               Sink
-	inputCh             chan tools.Pair[*disttae.TableCtx, *DecoderOutput]
-	watermark           timestamp.Timestamp
-	updateWatermarkFunc func(tableId uint64, watermark timestamp.Timestamp)
+	mysql            Sink
+	inputCh          chan tools.Pair[*disttae.TableCtx, *DecoderOutput]
+	tableId          uint64
+	watermarkUpdater *WatermarkUpdater
 }
 
 func NewMysqlSinker(
 	mysql Sink,
 	inputCh chan tools.Pair[*disttae.TableCtx, *DecoderOutput],
-	watermark timestamp.Timestamp,
-	updateWatermarkFunc func(tableId uint64, watermark timestamp.Timestamp),
+	tableId uint64,
+	watermarkUpdater *WatermarkUpdater,
 ) Sinker {
 	return &mysqlSinker{
-		mysql:               mysql,
-		inputCh:             inputCh,
-		watermark:           watermark,
-		updateWatermarkFunc: updateWatermarkFunc,
+		mysql:            mysql,
+		inputCh:          inputCh,
+		tableId:          tableId,
+		watermarkUpdater: watermarkUpdater,
 	}
 }
 
@@ -165,28 +164,36 @@ func (s *mysqlSinker) Run(ctx context.Context, ar *ActiveRoutine) {
 			tableCtx := entry.Key
 			decodeOutput := entry.Value
 
-			if s.watermark.GreaterEq(decodeOutput.ts) {
-				_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Sinker: Unexpect watermark: %v, cur watermark: %v \n", decodeOutput.ts, s.watermark)
+			// TODO use the watermark to filter the data
+			//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Sinker: {%s}\n", decodeOutput.ts.DebugString())
+			watermark := s.watermarkUpdater.GetTableWatermark(s.tableId)
+			if watermark.GreaterEq(decodeOutput.ts) {
+				_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Sinker: %s(%d) Unexpect watermark: %s, cur watermark: %s \n",
+					tableCtx.Table(), tableCtx.TableId(), decodeOutput.ts.DebugString(), watermark.DebugString())
+				continue
+			}
+
+			if s.tableId == HeartBeatTableId {
+				s.watermarkUpdater.UpdateTableWatermark(s.tableId, decodeOutput.ts)
 				continue
 			}
 
 			_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Sinker: {%s} [%v(%v)].[%v(%v)]\n",
 				decodeOutput.ts.DebugString(), tableCtx.Db(), tableCtx.DBId(), tableCtx.Table(), tableCtx.TableId())
 
-			err := s.Sink(ctx, decodeOutput)
-			if err != nil {
+			if err := s.Sink(ctx, decodeOutput); err != nil {
 				_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Sinker: {%s} [%v(%v)].[%v(%v)], sink error: %v\n",
 					decodeOutput.ts.DebugString(), tableCtx.Db(), tableCtx.DBId(), tableCtx.Table(), tableCtx.TableId(),
 					err,
 				)
-				// TODO handle error
+				// TODO handle error, stop cdc task
 				continue
 			}
+
 			_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Sinker: {%s} [%v(%v)].[%v(%v)], sink over\n",
 				decodeOutput.ts.DebugString(), tableCtx.Db(), tableCtx.DBId(), tableCtx.Table(), tableCtx.TableId())
 
-			s.watermark = decodeOutput.ts
-			s.updateWatermarkFunc(tableCtx.TableId(), s.watermark)
+			s.watermarkUpdater.UpdateTableWatermark(s.tableId, decodeOutput.ts)
 		}
 	}
 }

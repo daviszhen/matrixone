@@ -454,7 +454,7 @@ func TimestampToStr(ts timestamp.Timestamp) string {
 func StrToTimestamp(tsStr string) (ts timestamp.Timestamp, err error) {
 	splits := strings.Split(tsStr, "-")
 	if len(splits) != 2 {
-		err = moerr.NewInternalErrorNoCtx("strToTimestamp : invalid timestamp string %s", tsStr)
+		err = moerr.NewInternalErrorNoCtx("StrToTimestamp : invalid timestamp string %s", tsStr)
 		return
 	}
 
