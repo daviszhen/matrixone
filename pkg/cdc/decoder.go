@@ -99,6 +99,14 @@ func (dec *decoder) Run(ctx context.Context, ar *ActiveRoutine) {
 		case entry := <-dec.inputCh:
 			tableCtx := entry.Key
 			input := entry.Value
+
+			//_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Decoder: {%s} \n", input.TS().DebugString())
+			// put here to reduce logs
+			if input.IsHeartbeat() {
+				dec.outputCh <- tools.NewPair[*disttae.TableCtx, *DecoderOutput](tableCtx, &DecoderOutput{ts: input.TS()})
+				continue
+			}
+
 			_, _ = fmt.Fprintf(os.Stderr, "^^^^^ Decoder: {%s} [%v(%v)].[%v(%v)]\n",
 				input.TS().DebugString(), tableCtx.Db(), tableCtx.DBId(), tableCtx.Table(), tableCtx.TableId())
 
@@ -228,8 +236,9 @@ func (dec *decoder) Decode(ctx context.Context, cdcCtx *disttae.TableCtx, input 
 
 	//update watermark
 	out.err = finalErr
-	out.ts = batchWMark
-
+	if batchWMark.Greater(out.ts) {
+		out.ts = batchWMark
+	}
 	return
 }
 
@@ -605,7 +614,7 @@ func decodeDeltaEntry(
 			rowTs := row[1].(types.TS)
 			abort := row[3].(bool)
 			toTs := rowTs.ToTimestamp()
-			if abort || wmarkPair.NeedSkip(toTs) {
+			if abort || !wmarkPair.NeedSkip(toTs) {
 				wmarkPair.Update(toTs)
 				if deleteInBuff, err = getDeleteInBuff(ctx, tableDef, colName2Index, row, DnDeltaRealDataOffset, deleteInBuff); err != nil {
 					return
