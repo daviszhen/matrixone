@@ -72,9 +72,7 @@ const (
 		`"%s",` + //state
 		`%d,` + //checkpoint
 		`"%d",` + //checkpoint_str
-		`"%s",` + //full_config
-		`"%s",` + //incr_config
-		`"",` + //reserved0
+		`"%d",` + //concurrency
 		`"",` + //reserved1
 		`"",` + //reserved2
 		`"",` + //reserved3
