@@ -18,7 +18,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"os"
 	"strconv"
 	"strings"
@@ -26,13 +25,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
-
 	cdc2 "github.com/matrixorigin/matrixone/pkg/cdc"
+	"github.com/matrixorigin/matrixone/pkg/common/malloc"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/task"
 	pb "github.com/matrixorigin/matrixone/pkg/pb/task"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
@@ -43,6 +42,7 @@ import (
 	ie "github.com/matrixorigin/matrixone/pkg/util/internalExecutor"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
+	"go.uber.org/zap"
 )
 
 const (
@@ -72,9 +72,7 @@ const (
 		`"%s",` + //state
 		`%d,` + //checkpoint
 		`"%d",` + //checkpoint_str
-		`"%s",` + //full_config
-		`"%s",` + //incr_config
-		`"",` + //reserved0
+		`"%d",` + //concurrency
 		`"",` + //reserved1
 		`"",` + //reserved2
 		`"",` + //reserved3
@@ -117,6 +115,9 @@ const (
 	deleteWatermark = "delete from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s'"
 
 	deleteWatermarkByTable = "delete from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s' and table_id = %d"
+
+	// DefaultMaxAllowedPacket of mysql is 64 MB
+	DefaultMaxAllowedPacket uint64 = 64 * 1024 * 1024
 )
 
 type dbTableInfo struct {
@@ -441,6 +442,7 @@ func patterns2tables(ctx context.Context, pts []*PatternTuple, bh BackgroundExec
 	}
 	return resMap, nil
 }
+
 func canCreateCdcTask(ctx context.Context, ses *Session, level string, account string, pts []*PatternTuple) error {
 
 	if strings.EqualFold(level, ClusterLevel) {
@@ -689,7 +691,7 @@ func NewCdcTask(
 		fileService:      fileService,
 		cnTxnClient:      cnTxnClient,
 		cnEngine:         cnEngine,
-		maxAllowedPacket: cdc2.MaxSqlSize,
+		maxAllowedPacket: DefaultMaxAllowedPacket,
 	}
 }
 
@@ -897,12 +899,9 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	}
 	fmt.Printf("max_allowed_packet: %d bytes\n", cdc.maxAllowedPacket)
 
-	if err != nil {
-		return err
-	}
-
+	allocator := malloc.GetDefault(nil)
 	for _, info := range dbTableInfos {
-		if err = cdc.addExePipelineForTable(info.tblId, sinkUri); err != nil {
+		if err = cdc.addExePipelineForTable(info.tblId, allocator); err != nil {
 			return err
 		}
 	}
@@ -1113,7 +1112,7 @@ func (cdc *CdcTask) unsubscribeTable(cdcTbl *disttae.CdcRelation) (err error) {
 	return
 }
 
-func (cdc *CdcTask) addExePipelineForTable(tableId uint64, sinkUri string) (err error) {
+func (cdc *CdcTask) addExePipelineForTable(tableId uint64, allocator malloc.Allocator) (err error) {
 	//                         + == inputCh == > decoder == interCh == > sinker -> remote db    // for table 1
 	// 	                       |
 	// inQueue -> partitioner -+ == inputCh == > decoder == interCh == > sinker -> remote db    // for table 2
@@ -1130,7 +1129,16 @@ func (cdc *CdcTask) addExePipelineForTable(tableId uint64, sinkUri string) (err 
 	cdc.interChs[tableId] = make(chan tools.Pair[*disttae.TableCtx, *cdc2.DecoderOutput])
 
 	// make decoder for table
-	decoder := cdc2.NewDecoder(cdc.cdcEngMp, cdc.cdcEngine.FS(), tableId, cdc.inputChs[tableId], cdc.interChs[tableId], cdc.sunkWatermarkUpdater, cdc.maxAllowedPacket)
+	decoder := cdc2.NewDecoder(
+		cdc.cdcEngMp,
+		cdc.cdcEngine.FS(),
+		tableId,
+		cdc.inputChs[tableId],
+		cdc.interChs[tableId],
+		cdc.sunkWatermarkUpdater,
+		cdc.maxAllowedPacket,
+		allocator,
+	)
 	go decoder.Run(ctx, cdc.activeRoutine)
 	cdc.decoders[tableId] = decoder
 
