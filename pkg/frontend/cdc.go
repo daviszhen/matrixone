@@ -18,8 +18,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +33,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/task"
 	pb "github.com/matrixorigin/matrixone/pkg/pb/task"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
@@ -72,9 +73,7 @@ const (
 		`"%s",` + //state
 		`%d,` + //checkpoint
 		`"%d",` + //checkpoint_str
-		`"%s",` + //full_config
-		`"%s",` + //incr_config
-		`"",` + //reserved0
+		`"%d",` + //concurrency
 		`"",` + //reserved1
 		`"",` + //reserved2
 		`"",` + //reserved3
@@ -101,6 +100,8 @@ const (
 	getCdcTaskId = "select task_id from mo_catalog.mo_cdc_task where account_id = %d"
 
 	getCdcTaskIdWhere = "select task_id from mo_catalog.mo_cdc_task where account_id = %d and task_name = '%s'"
+
+	getCdcCreateTableSql = "show create table %s"
 
 	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where account_id = %d and task_id = '%s'"
 
@@ -196,6 +197,10 @@ func getSqlForTables(
 	pt *PatternTuple,
 ) string {
 	return fmt.Sprintf(getTables, pt.SourceAccount, pt.SourceDatabase, pt.SourceTable)
+}
+
+func getSqlForCreateTable(dbTableInfo *dbTableInfo) string {
+	return fmt.Sprintf(getCdcCreateTableSql, dbTableInfo.dbName+"."+dbTableInfo.tblName)
 }
 
 func getSqlForTaskIdAndName(ses *Session, all bool, taskName string) string {
@@ -652,6 +657,7 @@ type CdcTask struct {
 	cdcTables *sync.Map
 
 	sinkUri          string
+	sinkType         string
 	sinkConn         *sql.DB
 	maxAllowedPacket uint64
 
@@ -715,16 +721,17 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 
 	//sink uri
 	sinkUri, err := res.GetString(ctx, 0, 0)
-	cdc.sinkUri = sinkUri
 	if err != nil {
 		return err
 	}
+	cdc.sinkUri = sinkUri
 
 	//sink_type
 	sinkTyp, err := res.GetString(ctx, 0, 1)
 	if err != nil {
 		return err
 	}
+	cdc.sinkType = sinkTyp
 
 	if sinkTyp != MysqlSink && sinkTyp != MatrixoneSink {
 		return moerr.NewInternalError(ctx, "unsupported sink type: %s", sinkTyp)
@@ -902,6 +909,13 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	}
 
 	for _, info := range dbTableInfos {
+		if info.tblId == cdc2.HeartBeatTableId {
+			continue
+		}
+		err = cdc.createSinkTable(ctx, info)
+		if err != nil {
+			return err
+		}
 		if err = cdc.addExePipelineForTable(info.tblId, sinkUri); err != nil {
 			return err
 		}
@@ -1241,4 +1255,76 @@ func (cdc *CdcTask) deleteWatermarkByTable(tableId uint64) (err error) {
 
 	ctx := defines.AttachAccountId(context.Background(), accountId)
 	return cdc.ie.Exec(ctx, sql, ie.SessionOverrideOptions{})
+}
+
+func convertToMysqlType(createTableSql string) string {
+	lines := regexp.MustCompile(`\r?\n`).Split(createTableSql, -1)
+	needReplace := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "  `") {
+			splitLine := strings.Fields(line)
+			if len(splitLine) > 1 {
+				addComma := splitLine[1][len(splitLine[1])-1] == ','
+				if splitLine[1] == "UUID" {
+					splitLine[1] = "VARCHAR(36)"
+					if addComma {
+						splitLine[1] += ","
+					}
+					lines[i] = "  " + strings.Join(splitLine, " ")
+					needReplace = true
+				}
+				if strings.HasPrefix(splitLine[1], "VECF") {
+					splitLine[1] = "TEXT"
+					if addComma {
+						splitLine[1] += ","
+					}
+					lines[i] = "  " + strings.Join(splitLine, " ")
+					needReplace = true
+				}
+			}
+		}
+	}
+	if needReplace {
+		newSQL := strings.Join(lines, "\n")
+		return newSQL
+	}
+	return createTableSql
+}
+
+func (cdc *CdcTask) createSinkTable(ctx context.Context, info *dbTableInfo) (err error) {
+	res := cdc.ie.Query(ctx, getSqlForCreateTable(info), ie.SessionOverrideOptions{})
+	if res.Error() != nil {
+		err = res.Error()
+	} else if res.RowCount() < 1 {
+		err = moerr.NewInternalError(ctx, "no create table sql found for task: %s, tableName: %s\n", cdc.cdcTask.TaskId, info.tblName)
+	} else if res.RowCount() > 1 {
+		err = moerr.NewInternalError(ctx, "duplicate create table sql found for task: %s, tableId: %s\n", cdc.cdcTask.TaskId, info.tblName)
+	}
+	if err != nil {
+		return
+	}
+	var createTableSql string
+	createTableSql, err = res.GetString(ctx, 0, 1)
+	if err != nil {
+		return
+	}
+	index := strings.Index(strings.ToUpper(createTableSql), "CREATE TABLE")
+	if index == -1 {
+		err = moerr.NewInternalError(ctx, "CREATE TABLE not found in statement: %s\n", createTableSql)
+		return
+	}
+	newSQL := createTableSql[:index+12] + " IF NOT EXISTS" + createTableSql[index+12:]
+	if cdc.sinkType == MysqlSink {
+		newSQL = convertToMysqlType(newSQL)
+	}
+
+	_, err = cdc.sinkConn.ExecContext(ctx, fmt.Sprintf("use %s", info.dbName))
+	if err != nil {
+		return
+	}
+	_, err = cdc.sinkConn.ExecContext(ctx, newSQL)
+	if err != nil {
+		return
+	}
+	return
 }

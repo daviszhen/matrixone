@@ -51,6 +51,7 @@ func Test_newCdcSqlFormat(t *testing.T) {
 		d,
 		"running",
 		125,
+		16,
 	)
 	wantSql := `insert into mo_catalog.mo_cdc_task values(3,"019111fd-aed1-70c0-8760-9abadd8f0f4a","task1","src uri","123","dst uri","mysql","456","ca path","cert path","key path","db1:t1","xfilter","op filters","error","common",123,"123",456,"456","conf path","2024-08-02 15:20:00","running",125,"125","xxx","yyy","","","","","")`
 	assert.Equal(t, wantSql, sql)
@@ -201,4 +202,22 @@ func Test_privilegeCheck(t *testing.T) {
 	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
 	assert.NotNil(t, err)
 
+}
+
+func Test_convertToMysqlType(t *testing.T) {
+	originSql1 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `u` VARCHAR(36) DEFAULT NULL,\n  `v` TEXT,\n  PRIMARY KEY (`t`)\n)"
+	wantSql1 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `u` VARCHAR(36) DEFAULT NULL,\n  `v` TEXT,\n  PRIMARY KEY (`t`)\n)"
+	assert.Equal(t, convertToMysqlType(originSql1), wantSql1)
+
+	originSql2 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `u` UUID DEFAULT NULL,\n  `v` VECF32(6),\n  PRIMARY KEY (`t`)\n)"
+	wantSql2 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `u` VARCHAR(36) DEFAULT NULL,\n  `v` TEXT,\n  PRIMARY KEY (`t`)\n)"
+	assert.Equal(t, convertToMysqlType(originSql2), wantSql2)
+
+	originSql3 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `UUID` UUID DEFAULT NULL,\n  `VECF_MY` VECF32(6),\n  PRIMARY KEY (`t`)\n)"
+	wantSql3 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `UUID` VARCHAR(36) DEFAULT NULL,\n  `VECF_MY` TEXT,\n  PRIMARY KEY (`t`)\n)"
+	assert.Equal(t, convertToMysqlType(originSql3), wantSql3)
+
+	originSql4 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `VECF_64` VECF64(6) DEFAULT NULL,\n  `VECF_32` VECF32(6),\n  PRIMARY KEY (`VECF_64`)\n)"
+	wantSql4 := "CREATE TABLE `r1` (\n  `t` INT NOT NULL,\n  `VECF_64` TEXT DEFAULT NULL,\n  `VECF_32` TEXT,\n  PRIMARY KEY (`VECF_64`)\n)"
+	assert.Equal(t, convertToMysqlType(originSql4), wantSql4)
 }
