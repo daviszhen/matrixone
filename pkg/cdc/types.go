@@ -50,7 +50,6 @@ type Partitioner interface {
 type Decoder interface {
 	Decode(ctx context.Context, cdcCtx *disttae.TableCtx, input *disttae.DecoderInput) *DecoderOutput
 	Run(ctx context.Context, ar *ActiveRoutine)
-	TableId() uint64
 }
 
 // Sinker manages and drains the sql parts

@@ -24,9 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/panjf2000/ants/v2"
-
 	"github.com/matrixorigin/matrixone/pkg/catalog"
+	"github.com/matrixorigin/matrixone/pkg/common/malloc"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
@@ -40,6 +39,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae/logtailreplay"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/tae/blockio"
+	"github.com/panjf2000/ants/v2"
 )
 
 const (
@@ -47,8 +47,6 @@ const (
 	ObjectsRealDataOffset int = 0
 	CnDeltaRealDataOffset int = 1
 	DnDeltaRealDataOffset int = 2
-
-	MaxSqlSize uint64 = 32 * 1024 * 1024
 )
 
 var _ Decoder = new(decoder)
@@ -60,7 +58,8 @@ type decoder struct {
 	inputCh      chan tools.Pair[*disttae.TableCtx, *disttae.DecoderInput]
 	outputCh     chan tools.Pair[*disttae.TableCtx, *DecoderOutput]
 	wmarkUpdater *WatermarkUpdater
-	maxSqlSize uint64
+	maxSqlSize   uint64
+	allocator    malloc.Allocator
 }
 
 func NewDecoder(
@@ -71,6 +70,7 @@ func NewDecoder(
 	outputCh chan tools.Pair[*disttae.TableCtx, *DecoderOutput],
 	wmarkUpdater *WatermarkUpdater,
 	maxSqlSize uint64,
+	allocator malloc.Allocator,
 ) Decoder {
 	return &decoder{
 		mp:           mp,
@@ -79,12 +79,9 @@ func NewDecoder(
 		inputCh:      inputCh,
 		outputCh:     outputCh,
 		wmarkUpdater: wmarkUpdater,
-		maxSqlSize: maxSqlSize,
+		maxSqlSize:   maxSqlSize,
+		allocator:    allocator,
 	}
-}
-
-func (dec *decoder) TableId() uint64 {
-	return dec.TableId()
 }
 
 func (dec *decoder) Run(ctx context.Context, ar *ActiveRoutine) {
@@ -148,7 +145,7 @@ func (dec *decoder) Decode(ctx context.Context, cdcCtx *disttae.TableCtx, input 
 		}
 		it := input.State().NewRowsIterInCdc()
 		defer it.Close()
-		rows, err2 := decodeRows(ctx, cdcCtx, input.TS(), it, wmarkPair, dec.maxSqlSize)
+		rows, err2 := decodeRows(ctx, cdcCtx, input.TS(), it, wmarkPair, dec.maxSqlSize, dec.allocator)
 		if err2 != nil {
 			decodeErrs[0].Store(err2)
 			return
@@ -182,6 +179,7 @@ func (dec *decoder) Decode(ctx context.Context, cdcCtx *disttae.TableCtx, input 
 			dec.mp,
 			wmarkPair,
 			dec.maxSqlSize,
+			dec.allocator,
 		)
 		if err2 != nil {
 			decodeErrs[1].Store(err2)
@@ -215,6 +213,7 @@ func (dec *decoder) Decode(ctx context.Context, cdcCtx *disttae.TableCtx, input 
 			wmarkPair,
 			input.FromSubResp(),
 			dec.maxSqlSize,
+			dec.allocator,
 		)
 		if err2 != nil {
 			decodeErrs[2].Store(err2)
@@ -254,6 +253,7 @@ func decodeRows(
 	rowsIter logtailreplay.RowsIter,
 	wmarkPair *WatermarkPair,
 	maxSqlSize uint64,
+	allocator malloc.Allocator,
 ) (res [][]byte, err error) {
 	//TODO: schema info
 	var row []any
@@ -306,13 +306,34 @@ func decodeRows(
 	deletePrefix := timePrefix + fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE %s IN (", cdcCtx.Db(), cdcCtx.Table(), primaryKeyStr)
 
 	// init sql buffer
-	insertBuff := make([]byte, 0, maxSqlSize)
-	insertBuff = append(insertBuff, []byte(insertPrefix)...)
-	deleteBuff := make([]byte, 0, maxSqlSize)
-	deleteBuff = append(deleteBuff, []byte(deletePrefix)...)
+	insertBuff, insertBuffDealloc, err := allocator.Allocate(maxSqlSize, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer insertBuffDealloc.Deallocate(malloc.NoHints)
+	insertBuff = append(insertBuff[:0], []byte(insertPrefix)...)
 
-	valuesBuff := make([]byte, 0, 1024)
-	deleteInBuff := make([]byte, 0, 1024)
+	deleteBuff, deleteBuffDealloc, err := allocator.Allocate(maxSqlSize, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer deleteBuffDealloc.Deallocate(malloc.NoHints)
+	deleteBuff = append(deleteBuff[:0], []byte(deletePrefix)...)
+
+	valuesBuff, valuesBuffDealloc, err := allocator.Allocate(1024, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer valuesBuffDealloc.Deallocate(malloc.NoHints)
+	valuesBuff = valuesBuff[:0]
+
+	deleteInBuff, deleteInBuffDealloc, err := allocator.Allocate(1024, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer deleteInBuffDealloc.Deallocate(malloc.NoHints)
+	deleteInBuff = deleteInBuff[:0]
+
 	tCount := 0
 	skippedCount := 0
 	for rowsIter.Next() {
@@ -377,6 +398,7 @@ func decodeObjects(
 	mp *mpool.MPool,
 	wmarkPair *WatermarkPair,
 	maxSqlSize uint64,
+	allocator malloc.Allocator,
 ) (res [][]byte, err error) {
 	var objMeta objectio.ObjectMeta
 	var bat *batch.Batch
@@ -418,10 +440,20 @@ func decodeObjects(
 	}
 
 	// init sql buffer
-	insertBuff := make([]byte, 0, maxSqlSize)
-	insertBuff = append(insertBuff, []byte(insertPrefix)...)
+	insertBuff, insertBuffDealloc, err := allocator.Allocate(maxSqlSize, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer insertBuffDealloc.Deallocate(malloc.NoHints)
+	insertBuff = append(insertBuff[:0], []byte(insertPrefix)...)
 
-	valuesBuff := make([]byte, 0, 1024)
+	valuesBuff, valuesBuffDealloc, err := allocator.Allocate(1024, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer valuesBuffDealloc.Deallocate(malloc.NoHints)
+	valuesBuff = valuesBuff[:0]
+
 	rowCnt := uint64(0)
 	tCount := 0
 	skippedCount := 0
@@ -503,6 +535,7 @@ func decodeDeltas(
 	wmarkPair *WatermarkPair,
 	fromSubResp bool,
 	maxSqlSize uint64,
+	allocator malloc.Allocator,
 ) (res [][]byte, err error) {
 	tableDef := cdcCtx.TableDef()
 	colName2Index := make(map[string]int)
@@ -518,9 +551,19 @@ func decodeDeltas(
 	timePrefix := fmt.Sprintf("/* decodeDeltas: %v, %v */ ", ts.String(), time.Now().Format(time.RFC3339Nano))
 	deletePrefix := timePrefix + fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE %s IN (", cdcCtx.Db(), cdcCtx.Table(), primaryKeyStr)
 
-	deleteBuff := make([]byte, 0, maxSqlSize)
-	deleteBuff = append(deleteBuff, []byte(deletePrefix)...)
-	deleteInBuff := make([]byte, 0, 1024)
+	deleteBuff, deleteBuffDealloc, err := allocator.Allocate(maxSqlSize, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer deleteBuffDealloc.Deallocate(malloc.NoHints)
+	deleteBuff = append(deleteBuff[:0], []byte(deletePrefix)...)
+
+	deleteInBuff, deleteInBuffDealloc, err := allocator.Allocate(1024, malloc.NoHints)
+	if err != nil {
+		return nil, err
+	}
+	defer deleteInBuffDealloc.Deallocate(malloc.NoHints)
+	deleteInBuff = deleteInBuff[:0]
 
 	//obj location -> obj commit ts
 	dedup := make(map[[objectio.LocationLen]byte]timestamp.Timestamp)
