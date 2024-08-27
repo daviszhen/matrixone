@@ -1261,6 +1261,9 @@ func convertToMysqlType(createTableSql string) string {
 	lines := regexp.MustCompile(`\r?\n`).Split(createTableSql, -1)
 	needReplace := false
 	for i, line := range lines {
+		// Find column type
+		// UUID ==> VARCHAR(36)
+		// VECF32, VECF64 ==> TEXT
 		if strings.HasPrefix(line, "  `") {
 			splitLine := strings.Fields(line)
 			if len(splitLine) > 1 {
