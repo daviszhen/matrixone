@@ -898,6 +898,60 @@ func (mr *MockRangesMockRecorder) Slice(i, j interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Slice", reflect.TypeOf((*MockRanges)(nil).Slice), i, j)
 }
 
+// MockChangesHandle is a mock of ChangesHandle interface.
+type MockChangesHandle struct {
+	ctrl     *gomock.Controller
+	recorder *MockChangesHandleMockRecorder
+}
+
+// MockChangesHandleMockRecorder is the mock recorder for MockChangesHandle.
+type MockChangesHandleMockRecorder struct {
+	mock *MockChangesHandle
+}
+
+// NewMockChangesHandle creates a new mock instance.
+func NewMockChangesHandle(ctrl *gomock.Controller) *MockChangesHandle {
+	mock := &MockChangesHandle{ctrl: ctrl}
+	mock.recorder = &MockChangesHandleMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockChangesHandle) EXPECT() *MockChangesHandleMockRecorder {
+	return m.recorder
+}
+
+// Close mocks base method.
+func (m *MockChangesHandle) Close() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Close")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Close indicates an expected call of Close.
+func (mr *MockChangesHandleMockRecorder) Close() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockChangesHandle)(nil).Close))
+}
+
+// Next mocks base method.
+func (m *MockChangesHandle) Next() (*batch.Batch, *batch.Batch, engine.Hint, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Next")
+	ret0, _ := ret[0].(*batch.Batch)
+	ret1, _ := ret[1].(*batch.Batch)
+	ret2, _ := ret[2].(engine.Hint)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
+}
+
+// Next indicates an expected call of Next.
+func (mr *MockChangesHandleMockRecorder) Next() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Next", reflect.TypeOf((*MockChangesHandle)(nil).Next))
+}
+
 // MockRelation is a mock of Relation interface.
 type MockRelation struct {
 	ctrl     *gomock.Controller
@@ -976,6 +1030,21 @@ func (m *MockRelation) BuildReaders(ctx context.Context, proc any, expr *plan.Ex
 func (mr *MockRelationMockRecorder) BuildReaders(ctx, proc, expr, relData, num, txnOffset, orderBy, policy interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BuildReaders", reflect.TypeOf((*MockRelation)(nil).BuildReaders), ctx, proc, expr, relData, num, txnOffset, orderBy, policy)
+}
+
+// CollectChanges mocks base method.
+func (m *MockRelation) CollectChanges(from, to types.TS) (engine.ChangesHandle, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CollectChanges", from, to)
+	ret0, _ := ret[0].(engine.ChangesHandle)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CollectChanges indicates an expected call of CollectChanges.
+func (mr *MockRelationMockRecorder) CollectChanges(from, to interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CollectChanges", reflect.TypeOf((*MockRelation)(nil).CollectChanges), from, to)
 }
 
 // CollectTombstones mocks base method.
@@ -1820,6 +1889,20 @@ func (m *MockEngine) Hints() engine.Hints {
 func (mr *MockEngineMockRecorder) Hints() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Hints", reflect.TypeOf((*MockEngine)(nil).Hints))
+}
+
+// LatestLogtailAppliedTime mocks base method.
+func (m *MockEngine) LatestLogtailAppliedTime() timestamp.Timestamp {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestLogtailAppliedTime")
+	ret0, _ := ret[0].(timestamp.Timestamp)
+	return ret0
+}
+
+// LatestLogtailAppliedTime indicates an expected call of LatestLogtailAppliedTime.
+func (mr *MockEngineMockRecorder) LatestLogtailAppliedTime() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LatestLogtailAppliedTime", reflect.TypeOf((*MockEngine)(nil).LatestLogtailAppliedTime))
 }
 
 // New mocks base method.

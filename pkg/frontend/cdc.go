@@ -31,6 +31,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/defines"
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/task"
 	pb "github.com/matrixorigin/matrixone/pkg/pb/task"
 	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
@@ -60,10 +61,8 @@ const (
 		`"%s",` + //opfilters
 		`"%s",` + //source_state
 		`"%s",` + //sink_state
-		`%d,` + //start_ts
-		`"%d-0",` + //start_ts_str
-		`%d,` + //end_ts
-		`"%d",` + //end_ts_str
+		`%s,` + //start_ts
+		`%s,` + //end_ts
 		`"%s",` + //config_file
 		`"%s",` + //task_create_time
 		`"%s",` + //state
@@ -83,7 +82,7 @@ const (
 		`sink_type, ` +
 		`sink_password, ` +
 		`tables, ` +
-		`start_ts_str ` +
+		`start_ts ` +
 		`from ` +
 		`mo_catalog.mo_cdc_task ` +
 		`where ` +
@@ -134,8 +133,8 @@ func getSqlForNewCdcTask(
 	opfilters string,
 	sourceState string,
 	sinkState string,
-	startTs uint64,
-	endTs uint64,
+	startTs string,
+	endTs string,
 	configFile string,
 	taskCreateTime time.Time,
 	state string,
@@ -161,8 +160,6 @@ func getSqlForNewCdcTask(
 		sourceState,
 		sinkState,
 		startTs,
-		startTs,
-		endTs,
 		endTs,
 		configFile,
 		taskCreateTime.Format(time.DateTime),
@@ -279,6 +276,7 @@ type PatternTuple struct {
 func splitPattern(pattern string) (*PatternTuple, error) {
 	pt := &PatternTuple{OriginString: pattern}
 	if strings.Contains(pattern, ":") {
+		//account.db.table:db:table
 		splitRes := strings.Split(pattern, ":")
 		if len(splitRes) != 2 {
 			return nil, fmt.Errorf("invalid pattern format")
@@ -353,6 +351,16 @@ func splitPattern(pattern string) (*PatternTuple, error) {
 
 func string2patterns(pattern string) ([]*PatternTuple, error) {
 	pts := make([]*PatternTuple, 0)
+
+	//step1 : split pattern by ',' => table pair
+	//step2 : split table pair by ':' => table0 table1
+	//step3 : split table0/1 by '.' => account database table
+	//step4 : check table accord with regular expression
+	tablePairs := strings.Split(strings.TrimSpace(pattern), ",")
+	if len(tablePairs) == 0 {
+		return nil, fmt.Errorf("invalid pattern format")
+	}
+	
 	current := strings.Builder{}
 	inRegex := false
 	for i := 0; i < len(pattern); i++ {
@@ -475,7 +483,6 @@ func createCdc(
 	ts taskservice.TaskService,
 	create *tree.CreateCDC,
 ) error {
-	var startTs, endTs uint64
 	var err error
 
 	cdcTaskOptionsMap := make(map[string]string)
@@ -517,15 +524,6 @@ func createCdc(
 		create.SinkType,
 	)
 
-	startTs, err = string2uint64(cdcTaskOptionsMap["StartTS"])
-	if err != nil {
-		return err
-	}
-	endTs, err = string2uint64(cdcTaskOptionsMap["EndTS"])
-	if err != nil {
-		return err
-	}
-
 	dat := time.Now().UTC()
 
 	//TODO: make it better
@@ -535,26 +533,26 @@ func createCdc(
 		cdcId,
 		create.TaskName,
 		create.SourceUri,
-		"FIXME",
+		"",
 		create.SinkUri,
 		create.SinkType,
-		"FIXME",
+		"",
 		"",
 		"",
 		"",
 		create.Tables,
-		"FIXME",
-		"FIXME",
+		"",
+		"",
 		SASCommon,
 		SASCommon,
-		startTs,
-		endTs,
+		"", //1.3 does not support startTs
+		"", //1.3 does not support endTs
 		cdcTaskOptionsMap["ConfigFile"],
 		dat,
-		SyncLoading,
-		0, //FIXME
-		"FIXME",
-		"FIXME",
+		SyncStopped,
+		0,
+		"",
+		"",
 	)
 
 	if _, err = ts.AddCdcTask(ctx, cdcTaskMetadata(cdcId.String()), details, insertSql); err != nil {
@@ -724,7 +722,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		return err
 	}
 
-	// start_ts_str
+	// start_ts
 	startTsStr, err := res.GetString(ctx, 0, 4)
 	if err != nil {
 		return err
@@ -759,10 +757,14 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 			return res.Error()
 		}
 
+		/*
+			missing table will be handled in the future.
+		*/
 		if res.RowCount() < 1 {
-			return moerr.NewInternalErrorf(ctx, "no table %s:%s", dbName, tblName)
+			logutil.Errorf("no table %s:%s", dbName, tblName)
+			continue
 		} else if res.RowCount() > 1 {
-			return moerr.NewInternalErrorf(ctx, "duplicate table %s:%s", dbName, tblName)
+			logutil.Errorf("duplicate table %s:%s", dbName, tblName)
 		}
 
 		if dbId, err = res.GetUint64(ctx, 0, 0); err != nil {
