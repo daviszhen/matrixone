@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -48,6 +49,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/sql/colexec"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers"
+	"github.com/matrixorigin/matrixone/pkg/sql/parsers/dialect"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	plan2 "github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
@@ -1491,4 +1494,48 @@ func colDef2MysqlColumn(ctx context.Context, col *plan.ColDef) (*MysqlColumn, er
 	c.SetDecimal(col.Typ.Scale)
 	convertMysqlTextTypeToBlobType(c)
 	return c, nil
+}
+
+/*
+isLegalIdentity checks the table string legal or not.
+rule:
+
+	if create table name or create table `name` can succeed,
+	it is legal.
+
+	it means all most all string can be legal.
+*/
+func isLegalIdentity(name string) bool {
+	name = strings.ToLower(name)
+	if len(name) == 0 {
+		return false
+	}
+	createTableSqls := []string{
+		"create table " + name + "(a int)",
+		"create table `" + name + "`(a int)",
+	}
+	yes := false
+	for _, sql := range createTableSqls {
+		_, err := parsers.ParseOne(context.Background(), dialect.MYSQL, sql, 1)
+		if err != nil {
+			continue
+		}
+		yes = true
+		break
+	}
+	return yes
+}
+
+func isLegalRegexpr(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	if strings.HasPrefix(s, "/") && strings.HasSuffix(s, "/") {
+		_, err := regexp.Compile(s)
+		if err != nil {
+			return false
+		}
+		return true
+	}
+	return false
 }

@@ -1304,3 +1304,55 @@ func Test_issue3482(t *testing.T) {
 func Test_xxx(t *testing.T) {
 	list.New()
 }
+
+func Test_isLegalIdentity(t *testing.T) {
+	type args struct {
+		table string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "t1",
+			args: args{
+				table: "abc",
+			},
+			want: true,
+		},
+		{
+			name: "t1--b'00011011'",
+			args: args{
+				table: "b'00011011'",
+			},
+			want: false,
+		},
+		{
+			name: "t1--0b00011011",
+			args: args{
+				table: "0b00011011",
+			},
+			want: false,
+		},
+		{
+			name: "t1--create table `0b`(a int)",
+			args: args{
+				table: "0b",
+			},
+			want: true,
+		},
+		{
+			name: "t1--create table 0b0a1fg(a int)",
+			args: args{
+				table: "0b0a1fg",
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, isLegalIdentity(tt.args.table), "isLegalIdentity(%v)", tt.args.table)
+		})
+	}
+}

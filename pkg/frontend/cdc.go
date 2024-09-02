@@ -229,13 +229,80 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		return moerr.NewInternalError(ctx, "no task service is found")
 	}
 
-	err = createCdc(
-		ctx,
-		ses,
-		ts,
-		create,
+	cdcTaskOptionsMap := make(map[string]string)
+	for i := 0; i < len(create.Option); i += 2 {
+		cdcTaskOptionsMap[create.Option[i]] = create.Option[i+1]
+	}
+
+	pts, err := extractTablePairs(ctx, create.Tables)
+	if err != nil {
+		return err
+	}
+
+	if err = canCreateCdcTask(ctx, ses, cdcTaskOptionsMap["Level"], cdcTaskOptionsMap["Account"], pts); err != nil {
+		return err
+	}
+
+	accInfo := ses.GetTenantInfo()
+	cdcId, _ := uuid.NewV7()
+
+	details := &pb.Details{
+		AccountID: accInfo.GetTenantID(),
+		Account:   accInfo.GetTenant(),
+		Username:  accInfo.GetUser(),
+		Details: &pb.Details_CreateCdc{
+			CreateCdc: &pb.CreateCdcDetails{
+				TaskName:  create.TaskName.String(),
+				AccountId: uint64(accInfo.GetTenantID()),
+				TaskId:    cdcId.String(),
+			},
+		},
+	}
+
+	fmt.Fprintln(os.Stderr, "====>save cdc task",
+		accInfo.GetTenantID(),
+		cdcId,
+		create.TaskName,
+		create.SourceUri,
+		create.SinkUri,
+		create.SinkType,
 	)
-	return err
+
+	dat := time.Now().UTC()
+
+	//TODO: make it better
+	//Currently just for test
+	insertSql := getSqlForNewCdcTask(
+		uint64(accInfo.GetTenantID()),
+		cdcId,
+		create.TaskName.String(),
+		create.SourceUri,
+		"",
+		create.SinkUri,
+		create.SinkType,
+		"",
+		"",
+		"",
+		"",
+		create.Tables,
+		"",
+		"",
+		SASCommon,
+		SASCommon,
+		"", //1.3 does not support startTs
+		"", //1.3 does not support endTs
+		cdcTaskOptionsMap["ConfigFile"],
+		dat,
+		SyncStopped,
+		0,
+		"",
+		"",
+	)
+
+	if _, err = ts.AddCdcTask(ctx, cdcTaskMetadata(cdcId.String()), details, insertSql); err != nil {
+		return err
+	}
+	return
 }
 
 func cdcTaskMetadata(cdcId string) pb.TaskMetadata {
@@ -273,120 +340,105 @@ type PatternTuple struct {
 	OriginString   string
 }
 
-func splitPattern(pattern string) (*PatternTuple, error) {
+func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error) {
+	var err error
+	pattern = strings.TrimSpace(pattern)
+	//step1 : split table pair by ':' => table0 table1
+	//step2 : split table0/1 by '.' => account database table
+	//step3 : check table accord with regular expression
 	pt := &PatternTuple{OriginString: pattern}
 	if strings.Contains(pattern, ":") {
-		//account.db.table:db:table
+		//Format: account.db.table:db:table
 		splitRes := strings.Split(pattern, ":")
 		if len(splitRes) != 2 {
-			return nil, fmt.Errorf("invalid pattern format")
+			return nil, moerr.NewInternalErrorf(ctx, "invalid pattern format 1")
 		}
 
-		source := strings.Split(splitRes[0], ".")
-		if len(source) != 2 && len(source) != 3 {
-			return nil, fmt.Errorf("invalid pattern format")
-		}
-		if len(source) == 2 {
-			pt.SourceDatabase, pt.SourceTable = source[0], source[1]
-		} else {
-			pt.SourceAccount, pt.SourceDatabase, pt.SourceTable = source[0], source[1], source[2]
+		//handle source part
+		pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, err = extractTableInfo(ctx, splitRes[0], false)
+		if err != nil {
+			return nil, err
 		}
 
-		sink := strings.Split(splitRes[1], ".")
-		if len(sink) != 2 && len(sink) != 3 {
-			return nil, fmt.Errorf("invalid pattern format")
-		}
-		if len(sink) == 2 {
-			pt.SinkDatabase, pt.SinkTable = sink[0], sink[1]
-		} else {
-			pt.SinkAccount, pt.SinkDatabase, pt.SinkTable = sink[0], sink[1], sink[2]
+		//handle sink part
+		pt.SinkAccount, pt.SinkDatabase, pt.SinkTable, err = extractTableInfo(ctx, splitRes[1], true)
+		if err != nil {
+			return nil, err
 		}
 		return pt, nil
 	}
 
-	source := make([]string, 0)
-	current := strings.Builder{}
-	inRegex := false
-	isRegex := false
-	for i := 0; i < len(pattern); i++ {
-		char := pattern[i]
-		if char == '/' {
-			isRegex = true
-			inRegex = !inRegex
-		} else if char == '.' && !inRegex {
-			res := current.String()
-			if !isRegex {
-				res = strings.ReplaceAll(res, "?", ".")
-				res = strings.ReplaceAll(res, "*", ".*")
-				res = "^" + res + "$"
-			}
-			isRegex = false
-			source = append(source, res)
-			current.Reset()
-		} else {
-			current.WriteByte(char)
-		}
-	}
-	if current.Len() > 0 {
-		res := current.String()
-		if !isRegex {
-			res = strings.ReplaceAll(res, "?", ".")
-			res = strings.ReplaceAll(res, "*", ".*")
-			res = "^" + res + "$"
-		}
-		isRegex = false
-		source = append(source, res)
-		current.Reset()
-	}
-	if (len(source) != 2 && len(source) != 3) || inRegex {
-		return nil, fmt.Errorf("invalid pattern format")
-	}
-	if len(source) == 2 {
-		pt.SourceDatabase, pt.SourceTable = source[0], source[1]
-	} else {
-		pt.SourceAccount, pt.SourceDatabase, pt.SourceTable = source[0], source[1], source[2]
+	//Format: account.db.table
+	//handle source part only
+	pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, err = extractTableInfo(ctx, pattern, false)
+	if err != nil {
+		return nil, err
 	}
 	return pt, nil
 }
 
-func string2patterns(pattern string) ([]*PatternTuple, error) {
+// extractTableInfo
+// get account,database,table info from string
+//
+//		account: may be empty
+//	 database: must be concrete instead of pattern.
+//	 table: concrete or pattern in the source part. concrete in the destination part
+func extractTableInfo(ctx context.Context, input string, mustBeConcreteTable bool) (account string, db string, table string, err error) {
+	parts := strings.Split(strings.TrimSpace(input), ".")
+	if len(parts) != 2 && len(parts) != 3 {
+		return "", "", "", moerr.NewInternalErrorf(ctx, "needs account.database.table or database.table. invalid format.")
+	}
+
+	if len(parts) == 2 {
+		db, table = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		if !isLegalIdentity(db) {
+			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid database name")
+		}
+	} else {
+		account, db, table = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if !isLegalIdentity(account) {
+			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid account name")
+		}
+		if !isLegalIdentity(db) {
+			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid database name")
+		}
+	}
+
+	if mustBeConcreteTable {
+		if !isLegalIdentity(table) {
+			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid table name")
+		}
+	} else {
+		yes1 := isLegalIdentity(table)
+		if !yes1 {
+			if !isLegalRegexpr(table) {
+				return "", "", "", moerr.NewInternalErrorf(ctx, "table name must be legal identity or /pattern/. invalid table name")
+			}
+			//strip '/' '/'
+			table = table[1 : len(table)-1]
+		}
+	}
+	return
+}
+
+func extractTablePairs(ctx context.Context, pattern string) ([]*PatternTuple, error) {
+	pattern = strings.TrimSpace(pattern)
 	pts := make([]*PatternTuple, 0)
 
-	//step1 : split pattern by ',' => table pair
-	//step2 : split table pair by ':' => table0 table1
-	//step3 : split table0/1 by '.' => account database table
-	//step4 : check table accord with regular expression
-	tablePairs := strings.Split(strings.TrimSpace(pattern), ",")
+	tablePairs := strings.Split(pattern, ",")
 	if len(tablePairs) == 0 {
 		return nil, fmt.Errorf("invalid pattern format")
 	}
-	
-	current := strings.Builder{}
-	inRegex := false
-	for i := 0; i < len(pattern); i++ {
-		char := pattern[i]
-		if char == '/' {
-			inRegex = !inRegex
-		}
-		if char == ',' && !inRegex {
-			pt, err := splitPattern(current.String())
-			if err != nil {
-				return nil, err
-			}
-			pts = append(pts, pt)
-			current.Reset()
-		} else {
-			current.WriteByte(char)
-		}
-	}
 
-	if current.Len() != 0 {
-		pt, err := splitPattern(current.String())
+	//step1 : split pattern by ',' => table pair
+	for _, pair := range tablePairs {
+		pt, err := extractTablePair(ctx, pair)
 		if err != nil {
 			return nil, err
 		}
 		pts = append(pts, pt)
 	}
+
 	return pts, nil
 }
 
@@ -473,90 +525,6 @@ func canCreateCdcTask(ctx context.Context, ses *Session, level string, account s
 		}
 	} else {
 		return moerr.NewInternalErrorf(ctx, "Incorrect level %s", level)
-	}
-	return nil
-}
-
-func createCdc(
-	ctx context.Context,
-	ses *Session,
-	ts taskservice.TaskService,
-	create *tree.CreateCDC,
-) error {
-	var err error
-
-	cdcTaskOptionsMap := make(map[string]string)
-	for i := 0; i < len(create.Option); i += 2 {
-		cdcTaskOptionsMap[create.Option[i]] = create.Option[i+1]
-	}
-
-	pts, err := string2patterns(create.Tables)
-	if err != nil {
-		return err
-	}
-
-	if err = canCreateCdcTask(ctx, ses, cdcTaskOptionsMap["Level"], cdcTaskOptionsMap["Account"], pts); err != nil {
-		return err
-	}
-
-	accInfo := ses.GetTenantInfo()
-	cdcId, _ := uuid.NewV7()
-
-	details := &pb.Details{
-		AccountID: accInfo.GetTenantID(),
-		Account:   accInfo.GetTenant(),
-		Username:  accInfo.GetUser(),
-		Details: &pb.Details_CreateCdc{
-			CreateCdc: &pb.CreateCdcDetails{
-				TaskName:  create.TaskName,
-				AccountId: uint64(accInfo.GetTenantID()),
-				TaskId:    cdcId.String(),
-			},
-		},
-	}
-
-	fmt.Fprintln(os.Stderr, "====>save cdc task",
-		accInfo.GetTenantID(),
-		cdcId,
-		create.TaskName,
-		create.SourceUri,
-		create.SinkUri,
-		create.SinkType,
-	)
-
-	dat := time.Now().UTC()
-
-	//TODO: make it better
-	//Currently just for test
-	insertSql := getSqlForNewCdcTask(
-		uint64(accInfo.GetTenantID()),
-		cdcId,
-		create.TaskName,
-		create.SourceUri,
-		"",
-		create.SinkUri,
-		create.SinkType,
-		"",
-		"",
-		"",
-		"",
-		create.Tables,
-		"",
-		"",
-		SASCommon,
-		SASCommon,
-		"", //1.3 does not support startTs
-		"", //1.3 does not support endTs
-		cdcTaskOptionsMap["ConfigFile"],
-		dat,
-		SyncStopped,
-		0,
-		"",
-		"",
-	)
-
-	if _, err = ts.AddCdcTask(ctx, cdcTaskMetadata(cdcId.String()), details, insertSql); err != nil {
-		return err
 	}
 	return nil
 }
@@ -910,7 +878,7 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		} else {
 			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName),
+				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		}
@@ -924,7 +892,7 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		} else {
 			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName),
+				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		}
@@ -932,14 +900,14 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		targetTaskStatus = task.TaskStatus_RestartRequested
 		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName),
+			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
 	case *tree.ResumeCDC:
 		targetTaskStatus = task.TaskStatus_ResumeRequested
 		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
-			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName),
+			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
 	}

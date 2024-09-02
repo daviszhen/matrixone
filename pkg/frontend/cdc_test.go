@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"sort"
 	"testing"
@@ -107,8 +108,8 @@ func Test_parseTables(t *testing.T) {
 
 	for wantIdx, table := range tables {
 		matchedIdx := []int{}
-		pts, err := string2patterns(table)
-		assert.Equal(t, err, nil)
+		pts, err := extractTablePairs(context.Background(), table)
+		assert.NoError(t, err)
 		for _, pt := range pts {
 			for idx := range rows {
 				row := rows[idx]
@@ -203,4 +204,184 @@ func Test_privilegeCheck(t *testing.T) {
 	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
 	assert.NotNil(t, err)
 
+}
+
+func Test_extractTableInfo(t *testing.T) {
+	//rows := [][]string{
+	//	{"acc1", "users", "t1"},
+	//	{"acc1", "users", "t2"},
+	//	{"acc2", "users", "t1"},
+	//	{"acc2", "users", "t2"},
+	//	{"acc3", "items", "t1"},
+	//	{"acc3", "items", "table1"},
+	//	{"acc3", "items", "table2"},
+	//	{"acc3", "items", "table3"},
+	//	{"sys", "test", "test"},
+	//	{"sys", "test1", "test"},
+	//	{"sys", "test2", "test"},
+	//	{"sys", "test", "t1"},
+	//	{"sys", "test", "t11"},
+	//	{"sys", "test", "t111"},
+	//	{"sys", "test", "t1111"},
+	//}
+
+	//tables := []string{
+	//	"acc1.users.t1",
+	//	"acc1.users.t*",
+	//	"acc*.users.t?",
+	//	"acc*./users|items/./t.*[12]/",
+	//	"acc*.*./table./",
+	//	"acc*.*.table*",
+	//	"/sys|acc.*/.*.t*",
+	//	"/sys|acc.*/.*./t.$/",
+	//	"/sys|acc.*/.test*./t1{1,3}$/,/acc[23]/.items./.*/",
+	//}
+
+	type args struct {
+		ctx                 context.Context
+		input               string
+		mustBeConcreteTable bool
+	}
+	tests := []struct {
+		name        string
+		args        args
+		wantAccount string
+		wantDb      string
+		wantTable   string
+		wantErr     assert.ErrorAssertionFunc
+	}{
+		{
+			name: "t1-1",
+			args: args{
+				input:               "acc1.db.t1",
+				mustBeConcreteTable: true,
+			},
+			wantAccount: "acc1",
+			wantDb:      "db",
+			wantTable:   "t1",
+			wantErr:     nil,
+		},
+		{
+			name: "t1-2",
+			args: args{
+				input:               "acc1.db.t*",
+				mustBeConcreteTable: true,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t1-3-table pattern needs //",
+			args: args{
+				input:               "acc1.db.t*",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "t*",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t1-4",
+			args: args{
+				input:               "acc1.db./t*/",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "acc1",
+			wantDb:      "db",
+			wantTable:   "t*",
+			wantErr:     nil,
+		},
+		{
+			name: "t2-1",
+			args: args{
+				input:               "db.t1",
+				mustBeConcreteTable: true,
+			},
+			wantAccount: "",
+			wantDb:      "db",
+			wantTable:   "t1",
+			wantErr:     nil,
+		},
+		{
+			name: "t2-2",
+			args: args{
+				input:               "db.t*",
+				mustBeConcreteTable: true,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t2-3-table pattern needs //",
+			args: args{
+				input:               "db.t*",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t2-4",
+			args: args{
+				input:               "db./t*/",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "db",
+			wantTable:   "t*",
+			wantErr:     nil,
+		},
+		{
+			name: "t3--invalid format",
+			args: args{
+				input:               "nodot",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t3--invalid account name",
+			args: args{
+				input:               "1234*90.db.t1",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t3--invalid database name",
+			args: args{
+				input:               "acc.12ddg.t1",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAccount, gotDb, gotTable, err := extractTableInfo(tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)
+			if tt.wantErr != nil && tt.wantErr(t, err, fmt.Sprintf("extractTableInfo(%v, %v, %v)", tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)) {
+				return
+			} else {
+				assert.Equalf(t, tt.wantAccount, gotAccount, "extractTableInfo(%v, %v, %v)", tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)
+				assert.Equalf(t, tt.wantDb, gotDb, "extractTableInfo(%v, %v, %v)", tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)
+				assert.Equalf(t, tt.wantTable, gotTable, "extractTableInfo(%v, %v, %v)", tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)
+			}
+		})
+	}
 }

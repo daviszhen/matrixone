@@ -537,3 +537,56 @@ func (sfile SqlFile) Record(row []byte) error {
 	}
 	return err
 }
+
+func TrimSpace(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	ret := make([]string, 0)
+	ForEach[string](values, func(v string) {
+		res := strings.TrimSpace(v)
+		if len(res) > 0 {
+			ret = append(ret)
+		}
+	})
+	return ret
+}
+
+func Deduplicate[T ~string | ~int](values []T) []T {
+	if len(values) == 0 {
+		return values
+	}
+	set := make(map[T]struct{})
+	ForEach(values, func(val T) {
+		if _, ok := set[val]; !ok {
+			set[val] = struct{}{}
+		}
+	})
+	ret := make([]T, 0)
+	for key, _ := range set {
+		ret = append(ret, key)
+	}
+	return ret
+}
+
+func ForEach[T any](values []T, fn func(T)) {
+	if len(values) == 0 || fn == nil {
+		return
+	}
+	for _, value := range values {
+		fn(value)
+	}
+}
+
+func ForEachWithError[T any](values []T, fn func(T) error) error {
+	if len(values) == 0 || fn == nil {
+		return nil
+	}
+	for _, value := range values {
+		err := fn(value)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
