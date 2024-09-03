@@ -17,8 +17,6 @@ package frontend
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"sort"
 	"testing"
 	"time"
 
@@ -64,68 +62,127 @@ func Test_newCdcSqlFormat(t *testing.T) {
 }
 
 func Test_parseTables(t *testing.T) {
-	rows := [][]string{
-		{"acc1", "users", "t1"},
-		{"acc1", "users", "t2"},
-		{"acc2", "users", "t1"},
-		{"acc2", "users", "t2"},
-		{"acc3", "items", "t1"},
-		{"acc3", "items", "table1"},
-		{"acc3", "items", "table2"},
-		{"acc3", "items", "table3"},
-		{"sys", "test", "test"},
-		{"sys", "test1", "test"},
-		{"sys", "test2", "test"},
-		{"sys", "test", "t1"},
-		{"sys", "test", "t11"},
-		{"sys", "test", "t111"},
-		{"sys", "test", "t1111"},
+	//tables := []string{
+	//	"acc1.users.t1:acc1.users.t1",
+	//	"acc1.users.t*:acc1.users.t*",
+	//	"acc*.users.t?:acc*.users.t?",
+	//	"acc*.users|items.*[12]/:acc*.users|items.*[12]/",
+	//	"acc*.*./table./",
+	//	//"acc*.*.table*",
+	//	//"/sys|acc.*/.*.t*",
+	//	//"/sys|acc.*/.*./t.$/",
+	//	//"/sys|acc.*/.test*./t1{1,3}$/,/acc[23]/.items./.*/",
+	//}
+
+	type tableInfo struct {
+		account, db, table string
+		tableIsRegexp      bool
 	}
 
-	tables := []string{
-		"acc1.users.t1",
-		"acc1.users.t*",
-		"acc*.users.t?",
-		"acc*./users|items/./t.*[12]/",
-		"acc*.*./table./",
-		"acc*.*.table*",
-		"/sys|acc.*/.*.t*",
-		"/sys|acc.*/.*./t.$/",
-		"/sys|acc.*/.test*./t1{1,3}$/,/acc[23]/.items./.*/",
+	isSame := func(info tableInfo, account, db, table string, isRegexp bool, tip string) {
+		assert.Equalf(t, info.account, account, tip)
+		assert.Equalf(t, info.db, db, tip)
+		assert.Equalf(t, info.table, table, tip)
+		assert.Equalf(t, info.tableIsRegexp, isRegexp, tip)
 	}
 
-	want := [][]int{
-		{0},
-		{0, 1},
-		{0, 1, 2, 3},
-		{0, 1, 2, 3, 4, 5, 6},
-		{5, 6, 7},
-		{5, 6, 7},
-		{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
-		{0, 1, 2, 3, 4, 11},
-		{4, 5, 6, 7, 11, 12, 13},
+	type kase struct {
+		input   string
+		wantErr bool
+		src     tableInfo
+		dst     tableInfo
 	}
 
-	for wantIdx, table := range tables {
-		matchedIdx := []int{}
-		pts, err := extractTablePairs(context.Background(), table)
-		assert.NoError(t, err)
-		for _, pt := range pts {
-			for idx := range rows {
-				row := rows[idx]
-				accountMatched, err := regexp.MatchString(pt.SourceAccount, row[0])
-				assert.Equal(t, err, nil)
-				databaseMatched, err := regexp.MatchString(pt.SourceDatabase, row[1])
-				assert.Equal(t, err, nil)
-				tableMatched, err := regexp.MatchString(pt.SourceTable, row[2])
-				assert.Equal(t, err, nil)
-				if accountMatched && databaseMatched && tableMatched {
-					matchedIdx = append(matchedIdx, idx)
-				}
-			}
+	kases := []kase{
+		{
+			input:   "acc1.users.t1:acc1.users.t1",
+			wantErr: false,
+			src: tableInfo{
+				account: "acc1",
+				db:      "users",
+				table:   "t1",
+			},
+			dst: tableInfo{
+				account: "acc1",
+				db:      "users",
+				table:   "t1",
+			},
+		},
+		{
+			input:   "acc1.users.t*:acc1.users.t*",
+			wantErr: false,
+			src: tableInfo{
+				account: "acc1",
+				db:      "users",
+				table:   "t*",
+			},
+			dst: tableInfo{
+				account: "acc1",
+				db:      "users",
+				table:   "t*",
+			},
+		},
+		{
+			input:   "acc*.users.t?:acc*.users.t?",
+			wantErr: false,
+			src: tableInfo{
+				account: "acc*",
+				db:      "users",
+				table:   "t?",
+			},
+			dst: tableInfo{
+				account: "acc*",
+				db:      "users",
+				table:   "t?",
+			},
+		},
+		{
+			input:   "acc*.users|items.*[12]/:acc*.users|items.*[12]/",
+			wantErr: false,
+			src: tableInfo{
+				account: "acc*",
+				db:      "users|items",
+				table:   "*[12]/",
+			},
+			dst: tableInfo{
+				account: "acc*",
+				db:      "users|items",
+				table:   "*[12]/",
+			},
+		},
+		{
+			input:   "acc*.*./table./",
+			wantErr: true,
+			src:     tableInfo{},
+			dst:     tableInfo{},
+		},
+		{
+			input:   "acc*.*.table*:acc*.*.table*",
+			wantErr: false,
+			src: tableInfo{
+				account: "acc*",
+				db:      "*",
+				table:   "table*",
+			},
+			dst: tableInfo{
+				account: "acc*",
+				db:      "*",
+				table:   "table*",
+			},
+		},
+	}
+
+	for _, tkase := range kases {
+		pirs, err := extractTablePairs(context.Background(), tkase.input)
+		if tkase.wantErr {
+			assert.Errorf(t, err, tkase.input)
+		} else {
+			assert.NoErrorf(t, err, tkase.input)
+			assert.Equal(t, len(pirs), 1, tkase.input)
+			pir := pirs[0]
+			isSame(tkase.src, pir.SourceAccount, pir.SourceDatabase, pir.SourceTable, pir.SourceTableIsRegexp, tkase.input)
+			isSame(tkase.dst, pir.SinkAccount, pir.SinkDatabase, pir.SinkTable, pir.SinkTableIsRegexp, tkase.input)
 		}
-		sort.Ints(matchedIdx)
-		assert.Equal(t, want[wantIdx], matchedIdx)
 	}
 }
 
@@ -207,36 +264,6 @@ func Test_privilegeCheck(t *testing.T) {
 }
 
 func Test_extractTableInfo(t *testing.T) {
-	//rows := [][]string{
-	//	{"acc1", "users", "t1"},
-	//	{"acc1", "users", "t2"},
-	//	{"acc2", "users", "t1"},
-	//	{"acc2", "users", "t2"},
-	//	{"acc3", "items", "t1"},
-	//	{"acc3", "items", "table1"},
-	//	{"acc3", "items", "table2"},
-	//	{"acc3", "items", "table3"},
-	//	{"sys", "test", "test"},
-	//	{"sys", "test1", "test"},
-	//	{"sys", "test2", "test"},
-	//	{"sys", "test", "t1"},
-	//	{"sys", "test", "t11"},
-	//	{"sys", "test", "t111"},
-	//	{"sys", "test", "t1111"},
-	//}
-
-	//tables := []string{
-	//	"acc1.users.t1",
-	//	"acc1.users.t*",
-	//	"acc*.users.t?",
-	//	"acc*./users|items/./t.*[12]/",
-	//	"acc*.*./table./",
-	//	"acc*.*.table*",
-	//	"/sys|acc.*/.*.t*",
-	//	"/sys|acc.*/.*./t.$/",
-	//	"/sys|acc.*/.test*./t1{1,3}$/,/acc[23]/.items./.*/",
-	//}
-
 	type args struct {
 		ctx                 context.Context
 		input               string
@@ -267,10 +294,10 @@ func Test_extractTableInfo(t *testing.T) {
 				input:               "acc1.db.t*",
 				mustBeConcreteTable: true,
 			},
-			wantAccount: "",
-			wantDb:      "",
-			wantTable:   "",
-			wantErr:     assert.Error,
+			wantAccount: "acc1",
+			wantDb:      "db",
+			wantTable:   "t*",
+			wantErr:     nil,
 		},
 		{
 			name: "t1-3-table pattern needs //",
@@ -278,10 +305,10 @@ func Test_extractTableInfo(t *testing.T) {
 				input:               "acc1.db.t*",
 				mustBeConcreteTable: false,
 			},
-			wantAccount: "",
-			wantDb:      "",
+			wantAccount: "acc1",
+			wantDb:      "db",
 			wantTable:   "t*",
-			wantErr:     assert.Error,
+			wantErr:     nil,
 		},
 		{
 			name: "t1-4",
@@ -306,26 +333,26 @@ func Test_extractTableInfo(t *testing.T) {
 			wantErr:     nil,
 		},
 		{
-			name: "t2-2",
+			name: "t2-2-table pattern needs //",
 			args: args{
 				input:               "db.t*",
 				mustBeConcreteTable: true,
 			},
 			wantAccount: "",
-			wantDb:      "",
-			wantTable:   "",
-			wantErr:     assert.Error,
+			wantDb:      "db",
+			wantTable:   "t*",
+			wantErr:     nil,
 		},
 		{
-			name: "t2-3-table pattern needs //",
+			name: "t2-3-table name can be 't*'",
 			args: args{
 				input:               "db.t*",
 				mustBeConcreteTable: false,
 			},
 			wantAccount: "",
-			wantDb:      "",
-			wantTable:   "",
-			wantErr:     assert.Error,
+			wantDb:      "db",
+			wantTable:   "t*",
+			wantErr:     nil,
 		},
 		{
 			name: "t2-4",
@@ -337,6 +364,17 @@ func Test_extractTableInfo(t *testing.T) {
 			wantDb:      "db",
 			wantTable:   "t*",
 			wantErr:     nil,
+		},
+		{
+			name: "t2-5",
+			args: args{
+				input:               "db./t*/",
+				mustBeConcreteTable: true,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
 		},
 		{
 			name: "t3--invalid format",
@@ -355,15 +393,59 @@ func Test_extractTableInfo(t *testing.T) {
 				input:               "1234*90.db.t1",
 				mustBeConcreteTable: false,
 			},
+			wantAccount: "1234*90",
+			wantDb:      "db",
+			wantTable:   "t1",
+			wantErr:     nil,
+		},
+		{
+			name: "t3--invalid database name",
+			args: args{
+				input:               "acc.12ddg.t1",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "acc",
+			wantDb:      "12ddg",
+			wantTable:   "t1",
+			wantErr:     nil,
+		},
+		{
+			name: "t4--invalid database name",
+			args: args{
+				input:               "acc*./users|items/./t.*[12]/",
+				mustBeConcreteTable: false,
+			},
 			wantAccount: "",
 			wantDb:      "",
 			wantTable:   "",
 			wantErr:     assert.Error,
 		},
 		{
-			name: "t3--invalid database name",
+			name: "t4-- X ",
 			args: args{
-				input:               "acc.12ddg.t1",
+				input:               "/sys|acc.*/.*.t*",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t4-- XX",
+			args: args{
+				input:               "/sys|acc.*/.*./t.$/",
+				mustBeConcreteTable: false,
+			},
+			wantAccount: "",
+			wantDb:      "",
+			wantTable:   "",
+			wantErr:     assert.Error,
+		},
+		{
+			name: "t4-- XXX",
+			args: args{
+				input:               "/sys|acc.*/.test*./t1{1,3}$/,/acc[23]/.items./.*/",
 				mustBeConcreteTable: false,
 			},
 			wantAccount: "",
@@ -374,7 +456,7 @@ func Test_extractTableInfo(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotAccount, gotDb, gotTable, err := extractTableInfo(tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)
+			gotAccount, gotDb, gotTable, _, err := extractTableInfo(tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)
 			if tt.wantErr != nil && tt.wantErr(t, err, fmt.Sprintf("extractTableInfo(%v, %v, %v)", tt.args.ctx, tt.args.input, tt.args.mustBeConcreteTable)) {
 				return
 			} else {

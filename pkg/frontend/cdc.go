@@ -270,7 +270,6 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 
 	dat := time.Now().UTC()
 
-	//TODO: make it better
 	//Currently just for test
 	insertSql := getSqlForNewCdcTask(
 		uint64(accInfo.GetTenantID()),
@@ -331,15 +330,19 @@ func string2uint64(str string) (res uint64, err error) {
 }
 
 type PatternTuple struct {
-	SourceAccount  string
-	SourceDatabase string
-	SourceTable    string
-	SinkAccount    string
-	SinkDatabase   string
-	SinkTable      string
-	OriginString   string
+	SourceAccount       string
+	SourceDatabase      string
+	SourceTable         string
+	SourceTableIsRegexp bool
+	SinkAccount         string
+	SinkDatabase        string
+	SinkTable           string
+	SinkTableIsRegexp   bool
+	OriginString        string
 }
 
+// extractTablePair
+// extract source:sink pair from the pattern
 func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error) {
 	var err error
 	pattern = strings.TrimSpace(pattern)
@@ -351,17 +354,17 @@ func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error
 		//Format: account.db.table:db:table
 		splitRes := strings.Split(pattern, ":")
 		if len(splitRes) != 2 {
-			return nil, moerr.NewInternalErrorf(ctx, "invalid pattern format 1")
+			return nil, moerr.NewInternalErrorf(ctx, "must be source : sink. invalid format")
 		}
 
 		//handle source part
-		pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, err = extractTableInfo(ctx, splitRes[0], false)
+		pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, pt.SourceTableIsRegexp, err = extractTableInfo(ctx, splitRes[0], false)
 		if err != nil {
 			return nil, err
 		}
 
 		//handle sink part
-		pt.SinkAccount, pt.SinkDatabase, pt.SinkTable, err = extractTableInfo(ctx, splitRes[1], true)
+		pt.SinkAccount, pt.SinkDatabase, pt.SinkTable, pt.SinkTableIsRegexp, err = extractTableInfo(ctx, splitRes[1], false)
 		if err != nil {
 			return nil, err
 		}
@@ -370,7 +373,7 @@ func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error
 
 	//Format: account.db.table
 	//handle source part only
-	pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, err = extractTableInfo(ctx, pattern, false)
+	pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, pt.SourceTableIsRegexp, err = extractTableInfo(ctx, pattern, false)
 	if err != nil {
 		return nil, err
 	}
@@ -380,47 +383,69 @@ func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error
 // extractTableInfo
 // get account,database,table info from string
 //
-//		account: may be empty
-//	 database: must be concrete instead of pattern.
-//	 table: concrete or pattern in the source part. concrete in the destination part
-func extractTableInfo(ctx context.Context, input string, mustBeConcreteTable bool) (account string, db string, table string, err error) {
+// account: may be empty
+// database: must be concrete name instead of pattern.
+// table: must be concrete name or pattern in the source part. must be concrete name in the destination part
+// isRegexpTable: table name is regular expression
+func extractTableInfo(ctx context.Context, input string, mustBeConcreteTable bool) (account string, db string, table string, isRegexpTable bool, err error) {
 	parts := strings.Split(strings.TrimSpace(input), ".")
 	if len(parts) != 2 && len(parts) != 3 {
-		return "", "", "", moerr.NewInternalErrorf(ctx, "needs account.database.table or database.table. invalid format.")
+		return "", "", "", false, moerr.NewInternalErrorf(ctx, "needs account.database.table or database.table. invalid format.")
+	}
+
+	isPatternStr := func(s string) bool {
+		return strings.HasPrefix(s, "/") && strings.HasSuffix(s, "/")
 	}
 
 	if len(parts) == 2 {
 		db, table = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-		if !isLegalIdentity(db) {
-			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid database name")
-		}
 	} else {
 		account, db, table = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
-		if !isLegalIdentity(account) {
-			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid account name")
+		if isPatternStr(account) {
+			return "", "", "", false, moerr.NewInternalErrorf(ctx, "account name must not be format '/.../'. invalid account name")
 		}
-		if !isLegalIdentity(db) {
-			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid database name")
+		if !accountNameIsLegal(account) {
+			return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid account name")
 		}
 	}
 
+	if isPatternStr(db) {
+		return "", "", "", false, moerr.NewInternalErrorf(ctx, "database name must not be format '/.../'. invalid database name")
+	}
+	if !dbNameIsLegal(db) {
+		return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid database name")
+	}
+
 	if mustBeConcreteTable {
-		if !isLegalIdentity(table) {
-			return "", "", "", moerr.NewInternalErrorf(ctx, "invalid table name")
+		//!!!NOTE!!!: table name may both have prefix '/' and suffix '/'.
+		//Then, we assume user input a regular expression.
+		if isPatternStr(table) {
+			return "", "", "", false, moerr.NewInternalErrorf(ctx, "table name must not be format '/.../'. invalid table name")
+		}
+		if !tableNameIsLegal(table) {
+			return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid table name")
 		}
 	} else {
-		yes1 := isLegalIdentity(table)
-		if !yes1 {
-			if !isLegalRegexpr(table) {
-				return "", "", "", moerr.NewInternalErrorf(ctx, "table name must be legal identity or /pattern/. invalid table name")
+		//!!!NOTE!!!: table name may both have prefix '/' and suffix '/'.
+		//Then, we assume user input a regular expression.
+		if isPatternStr(table) {
+			if !tableNameIsRegexpr(table) {
+				return "", "", "", false, moerr.NewInternalErrorf(ctx, "table name must be legal /pattern/. invalid table name")
 			}
 			//strip '/' '/'
 			table = table[1 : len(table)-1]
+			isRegexpTable = true
+		} else {
+			//Else, we assume user input a general name.
+			if !tableNameIsLegal(table) {
+				return "", "", "", false, moerr.NewInternalErrorf(ctx, "table name must be legal identity. invalid table name")
+			}
 		}
 	}
 	return
 }
 
+// extractTablePairs extracts all source:sink pairs from the pattern
 func extractTablePairs(ctx context.Context, pattern string) ([]*PatternTuple, error) {
 	pattern = strings.TrimSpace(pattern)
 	pts := make([]*PatternTuple, 0)

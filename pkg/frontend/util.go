@@ -1496,26 +1496,20 @@ func colDef2MysqlColumn(ctx context.Context, col *plan.ColDef) (*MysqlColumn, er
 	return c, nil
 }
 
-/*
-isLegalIdentity checks the table string legal or not.
-rule:
-
-	if create table name or create table `name` can succeed,
-	it is legal.
-
-	it means all most all string can be legal.
-*/
-func isLegalIdentity(name string) bool {
-	name = strings.ToLower(name)
-	if len(name) == 0 {
+// isLegal checks if the sqls are legal parsed by the mo parser.
+// if there is at least one sql can be parsed, it returns true
+func isLegal(name string, sqls []string) bool {
+	name = strings.TrimSpace(name)
+	if len(name) == 0 || len(sqls) == 0 {
 		return false
 	}
-	createTableSqls := []string{
-		"create table " + name + "(a int)",
-		"create table `" + name + "`(a int)",
+	for _, sql := range sqls {
+		if len(sql) == 0 {
+			return false
+		}
 	}
 	yes := false
-	for _, sql := range createTableSqls {
+	for _, sql := range sqls {
 		_, err := parsers.ParseOne(context.Background(), dialect.MYSQL, sql, 1)
 		if err != nil {
 			continue
@@ -1526,7 +1520,61 @@ func isLegalIdentity(name string) bool {
 	return yes
 }
 
-func isLegalRegexpr(s string) bool {
+/*
+accountNameIsLegal checks the account name legal or not.
+rule:
+
+	if create account name or create account `name` can succeed,
+	it is legal.
+
+	it means all most all string can be legal.
+*/
+func accountNameIsLegal(name string) bool {
+	name = strings.TrimSpace(name)
+	createAccountSqls := []string{
+		"create account " + name + " ADMIN_NAME 'admin' IDENTIFIED BY '111'",
+		"create account `" + name + "` ADMIN_NAME 'admin' IDENTIFIED BY '111'",
+	}
+	return isLegal(name, createAccountSqls)
+}
+
+/*
+dbNameIsLegal checks the database name legal or not.
+rule:
+
+	if create database name or create database `name` can succeed,
+	it is legal.
+
+	it means all most all string can be legal.
+*/
+func dbNameIsLegal(name string) bool {
+	name = strings.TrimSpace(name)
+	createDBSqls := []string{
+		"create database " + name,
+		"create database `" + name + "`",
+	}
+	return isLegal(name, createDBSqls)
+}
+
+/*
+tableNameIsLegal checks the table name legal or not.
+rule:
+
+	if create table name or create table `name` can succeed,
+	it is legal.
+
+	it means all most all string can be legal.
+*/
+func tableNameIsLegal(name string) bool {
+	name = strings.TrimSpace(name)
+	createTableSqls := []string{
+		"create table " + name + "(a int)",
+		"create table `" + name + "`(a int)",
+	}
+	return isLegal(name, createTableSqls)
+}
+
+func tableNameIsRegexpr(s string) bool {
 	if len(s) < 2 {
 		return false
 	}

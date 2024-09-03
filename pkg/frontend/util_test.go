@@ -1305,54 +1305,58 @@ func Test_xxx(t *testing.T) {
 	list.New()
 }
 
-func Test_isLegalIdentity(t *testing.T) {
+func Test_isLegal(t *testing.T) {
 	type args struct {
-		table string
+		name string
 	}
-	tests := []struct {
+	trueNames := []string{
+		"abc",
+		"0b",
+		"0b0a1fg",
+		"123",
+		"b'00011011'",
+		"b\\\\a9''", //b\\a9''
+		"\\0",       //\0
+		"\\\\'",     //\\'
+		"\\Z",       //\Z
+		"/000/",
+	}
+
+	type kase struct {
 		name string
 		args args
 		want bool
-	}{
-		{
-			name: "t1",
+	}
+
+	tests := []kase{}
+	for i, name := range trueNames {
+		tests = append(tests, kase{
+			name: fmt.Sprintf("t%d", i),
 			args: args{
-				table: "abc",
+				name: name,
 			},
 			want: true,
-		},
-		{
-			name: "t1--b'00011011'",
-			args: args{
-				table: "b'00011011'",
-			},
-			want: false,
-		},
-		{
-			name: "t1--0b00011011",
-			args: args{
-				table: "0b00011011",
-			},
-			want: false,
-		},
-		{
-			name: "t1--create table `0b`(a int)",
-			args: args{
-				table: "0b",
-			},
-			want: true,
-		},
-		{
-			name: "t1--create table 0b0a1fg(a int)",
-			args: args{
-				table: "0b0a1fg",
-			},
-			want: true,
-		},
+		})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, isLegalIdentity(tt.args.table), "isLegalIdentity(%v)", tt.args.table)
+			assert.Equalf(t, tt.want, accountNameIsLegal(tt.args.name), "accountNameIsLegal(%v)", tt.args.name)
+			assert.Equalf(t, tt.want, dbNameIsLegal(tt.args.name), "dbNameIsLegal(%v)", tt.args.name)
+			assert.Equalf(t, tt.want, tableNameIsLegal(tt.args.name), "tableNameIsLegal(%v)", tt.args.name)
 		})
 	}
+}
+
+func Test_parser(t *testing.T) {
+	sql := "select db_name, table_name, constraint_name, column_name, refer_column_name, on_delete, on_update from `mo_catalog`.`mo_foreign_keys` where refer_db_name = `test` and refer_table_name = `b'00011011'`  and (db_name != `test` or db_name = `test` and table_name != `b'00011011'`) order by db_name, table_name, constraint_name;"
+	x, err := parsers.ParseOne(context.Background(), dialect.MYSQL, sql, 1)
+	assert.NoError(t, err)
+	fmt.Println(x)
+
+}
+
+func Test_escape(t *testing.T) {
+	fmt.Println("\\'")
+	fmt.Println("\\\\")
+	fmt.Println("''")
 }
