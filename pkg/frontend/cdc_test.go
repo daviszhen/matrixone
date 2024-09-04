@@ -318,7 +318,7 @@ func Test_extractTableInfo(t *testing.T) {
 			},
 			wantAccount: "acc1",
 			wantDb:      "db",
-			wantTable:   "t*",
+			wantTable:   "/t*/",
 			wantErr:     nil,
 		},
 		{
@@ -362,7 +362,7 @@ func Test_extractTableInfo(t *testing.T) {
 			},
 			wantAccount: "",
 			wantDb:      "db",
-			wantTable:   "t*",
+			wantTable:   "/t*/",
 			wantErr:     nil,
 		},
 		{
@@ -372,9 +372,9 @@ func Test_extractTableInfo(t *testing.T) {
 				mustBeConcreteTable: true,
 			},
 			wantAccount: "",
-			wantDb:      "",
-			wantTable:   "",
-			wantErr:     assert.Error,
+			wantDb:      "db",
+			wantTable:   "/t*/",
+			wantErr:     nil,
 		},
 		{
 			name: "t3--invalid format",

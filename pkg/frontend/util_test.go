@@ -1356,7 +1356,10 @@ func Test_parser(t *testing.T) {
 }
 
 func Test_escape(t *testing.T) {
-	fmt.Println("\\'")
-	fmt.Println("\\\\")
-	fmt.Println("''")
+	data := "test ase"
+	encData, err := aesCFBEncode(data, []byte(aesKey))
+	assert.NoError(t, err)
+	decData, err := aesCFBDecode(context.Background(), encData, []byte(aesKey))
+	assert.NoError(t, err)
+	assert.Equal(t, data, decData)
 }

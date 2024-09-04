@@ -17,6 +17,8 @@ package frontend
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -1520,6 +1522,11 @@ func isLegal(name string, sqls []string) bool {
 	return yes
 }
 
+// hasSpecialChars checks the string have special characters (','  '.'  ':' '`')
+func hasSpecialChars(s string) bool {
+	return strings.ContainsAny(s, ",.:`")
+}
+
 /*
 accountNameIsLegal checks the account name legal or not.
 rule:
@@ -1530,6 +1537,9 @@ rule:
 	it means all most all string can be legal.
 */
 func accountNameIsLegal(name string) bool {
+	if hasSpecialChars(name) {
+		return false
+	}
 	name = strings.TrimSpace(name)
 	createAccountSqls := []string{
 		"create account " + name + " ADMIN_NAME 'admin' IDENTIFIED BY '111'",
@@ -1548,6 +1558,9 @@ rule:
 	it means all most all string can be legal.
 */
 func dbNameIsLegal(name string) bool {
+	if hasSpecialChars(name) {
+		return false
+	}
 	name = strings.TrimSpace(name)
 	createDBSqls := []string{
 		"create database " + name,
@@ -1566,6 +1579,9 @@ rule:
 	it means all most all string can be legal.
 */
 func tableNameIsLegal(name string) bool {
+	if hasSpecialChars(name) {
+		return false
+	}
 	name = strings.TrimSpace(name)
 	createTableSqls := []string{
 		"create table " + name + "(a int)",
@@ -1586,4 +1602,110 @@ func tableNameIsRegexpr(s string) bool {
 		return true
 	}
 	return false
+}
+
+type UriInfo struct {
+	user, password, ip         string
+	port                       int
+	passwordStart, passwordEnd int
+}
+
+// uriIsValid uri according to the format: mysql://root:111@127.0.0.1:6001
+// if valid, return true and extracted info
+func uriIsValid(uri string, uriPrefix string) (bool, UriInfo) {
+	if !uriHasPrefix(uri, uriPrefix) {
+		return false, UriInfo{}
+	}
+	//locate user password
+	rest := uri[len(uriPrefix):]
+	seps := strings.Split(rest, "@")
+	if len(seps) != 2 || len(seps[0]) == 0 || len(seps[1]) == 0 {
+		return false, UriInfo{}
+	}
+	seps2 := strings.Split(seps[0], ":")
+	if len(seps2) != 2 || len(seps2[0]) == 0 || len(seps2[1]) == 0 {
+		return false, UriInfo{}
+	}
+	userName := seps2[0]
+	password := seps2[1]
+	passwordStart := len(uriPrefix) + len(userName) + 1
+	passwordEnd := passwordStart + len(password)
+	if passwordStart >= passwordEnd ||
+		passwordEnd > len(uri) ||
+		password != uri[passwordStart:passwordEnd] {
+		return false, UriInfo{}
+	}
+
+	sep3 := strings.Split(seps[1], ":")
+	if len(sep3) != 2 || len(sep3[0]) == 0 || len(sep3[1]) == 0 {
+		return false, UriInfo{}
+	}
+	ip := sep3[0]
+	port := sep3[1]
+	portInt32, err := strconv.ParseUint(port, 10, 32)
+	if err != nil || portInt32 < 0 || portInt32 > 65535 {
+		return false, UriInfo{}
+	}
+	return true, UriInfo{
+		user:          userName,
+		password:      password,
+		ip:            ip,
+		port:          int(portInt32),
+		passwordStart: passwordStart,
+		passwordEnd:   passwordEnd,
+	}
+}
+
+// replaceStr replaces s[start:end] by s2
+func replaceStr(s string, start, end int, s2 string) string {
+	if start >= end || start < 0 || end < 0 {
+		return s
+	}
+	if end <= len(s) {
+		return s[:start] + s2 + s[:end]
+	}
+	return s
+}
+
+// uriHasPrefix
+func uriHasPrefix(uri string, prefix string) bool {
+	if len(uri) < len(prefix) || strings.ToLower(uri[:len(prefix)]) != prefix {
+		return false
+	}
+	return true
+}
+
+const (
+	aesKey = "test-aes-key-not-use-it-in-cloud"
+)
+
+func aesCFBEncode(data string, aesKey []byte) (string, error) {
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", err
+	}
+
+	encoded := make([]byte, aes.BlockSize+len(data))
+	iv := encoded[:aes.BlockSize]
+	salt := generate_salt(aes.BlockSize)
+	copy(iv, salt)
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(encoded[aes.BlockSize:], []byte(data))
+	return string(encoded), nil
+}
+
+func aesCFBDecode(ctx context.Context, data string, aesKey []byte) (string, error) {
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", err
+	}
+	encodedData := []byte(data)
+	if len(encodedData) < aes.BlockSize {
+		return "", moerr.NewInternalError(ctx, "encoded string is too short")
+	}
+	iv := encodedData[:aes.BlockSize]
+	encodedData = encodedData[aes.BlockSize:]
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(encodedData, encodedData)
+	return string(encodedData), nil
 }

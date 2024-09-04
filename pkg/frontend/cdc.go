@@ -205,10 +205,12 @@ func getSqlForUpdateCdcMeta(ses *Session, taskId string, status string) string {
 }
 
 const (
-	AccountLevel  = "account"
-	ClusterLevel  = "cluster"
-	MysqlSink     = "mysql"
-	MatrixoneSink = "matrixone"
+	AccountLevel    = "account"
+	ClusterLevel    = "cluster"
+	MysqlSink       = "mysql"
+	MatrixoneSink   = "matrixone"
+	SourceUriPrefix = "mysql://"
+	SinkUriPrefix   = "mysql://"
 
 	SASCommon = "common"
 	SASError  = "error"
@@ -234,17 +236,95 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		cdcTaskOptionsMap[create.Option[i]] = create.Option[i+1]
 	}
 
+	//step 1 : handle tables
 	pts, err := extractTablePairs(ctx, create.Tables)
 	if err != nil {
 		return err
 	}
 
+	//step 2: check privilege
 	if err = canCreateCdcTask(ctx, ses, cdcTaskOptionsMap["Level"], cdcTaskOptionsMap["Account"], pts); err != nil {
 		return err
 	}
 
+	//step 3: handle filters
+	//There must be no special characters (',' '.' ':' '`') in the single rule.
+	var filters string
+	var ok bool
+	if filters, ok = cdcTaskOptionsMap["Rules"]; ok {
+		filters = strings.TrimSpace(filters)
+		fmt.Fprintln(os.Stderr, "===>create cdc rules", filters)
+		if len(filters) != 0 {
+			_, err = extractRules(ctx, filters)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	dat := time.Now().UTC()
+
 	accInfo := ses.GetTenantInfo()
 	cdcId, _ := uuid.NewV7()
+
+	//step 4: check uri format and strip password
+	sourceUri := create.SourceUri
+
+	ok1, srcUriInfo := uriIsValid(sourceUri, SourceUriPrefix)
+	if !ok1 {
+		return moerr.NewInternalError(ctx, "source uri is invalid format")
+	}
+
+	sourceUri = replaceStr(sourceUri, srcUriInfo.passwordStart, srcUriInfo.passwordEnd, "******")
+
+	sinkType := strings.ToLower(create.SinkType)
+	if sinkType != MysqlSink && sinkType != MatrixoneSink {
+		return moerr.NewInternalErrorf(ctx, "unsupported sink type: %s", create.SinkType)
+	}
+
+	sinkUri := create.SinkUri
+	ok2, sinkUriInfo := uriIsValid(sinkUri, SinkUriPrefix)
+	if !ok2 {
+		return moerr.NewInternalError(ctx, "sink uri is invalid format")
+	}
+
+	sinkUri = replaceStr(sinkUri, sinkUriInfo.passwordStart, sinkUriInfo.passwordEnd, "******")
+
+	encodedSinkPassword, err := aesCFBEncode(sinkUriInfo.password, []byte(aesKey))
+	if err != nil {
+		return err
+	}
+
+	//!!!NOTE!!!
+	//user and password does not have the special character ( ':' '@' )
+
+	//step 5: create daemon task
+	insertSql := getSqlForNewCdcTask(
+		uint64(accInfo.GetTenantID()),
+		cdcId,
+		create.TaskName.String(),
+		create.SourceUri,
+		"",
+		sinkUri,
+		sinkType,
+		encodedSinkPassword,
+		"",
+		"",
+		"",
+		create.Tables,
+		filters,
+		"",
+		SASCommon,
+		SASCommon,
+		"", //1.3 does not support startTs
+		"", //1.3 does not support endTs
+		cdcTaskOptionsMap["ConfigFile"],
+		dat,
+		SyncStopped,
+		0,
+		"",
+		"",
+	)
 
 	details := &pb.Details{
 		AccountID: accInfo.GetTenantID(),
@@ -266,36 +346,6 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		create.SourceUri,
 		create.SinkUri,
 		create.SinkType,
-	)
-
-	dat := time.Now().UTC()
-
-	//Currently just for test
-	insertSql := getSqlForNewCdcTask(
-		uint64(accInfo.GetTenantID()),
-		cdcId,
-		create.TaskName.String(),
-		create.SourceUri,
-		"",
-		create.SinkUri,
-		create.SinkType,
-		"",
-		"",
-		"",
-		"",
-		create.Tables,
-		"",
-		"",
-		SASCommon,
-		SASCommon,
-		"", //1.3 does not support startTs
-		"", //1.3 does not support endTs
-		cdcTaskOptionsMap["ConfigFile"],
-		dat,
-		SyncStopped,
-		0,
-		"",
-		"",
 	)
 
 	if _, err = ts.AddCdcTask(ctx, cdcTaskMetadata(cdcId.String()), details, insertSql); err != nil {
@@ -343,6 +393,8 @@ type PatternTuple struct {
 
 // extractTablePair
 // extract source:sink pair from the pattern
+//
+//	There must be no special characters (','  '.'  ':' '`') in account name & database name & table name.
 func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error) {
 	var err error
 	pattern = strings.TrimSpace(pattern)
@@ -387,67 +439,39 @@ func extractTablePair(ctx context.Context, pattern string) (*PatternTuple, error
 // database: must be concrete name instead of pattern.
 // table: must be concrete name or pattern in the source part. must be concrete name in the destination part
 // isRegexpTable: table name is regular expression
+// !!!NOTE!!!
+//
+//	There must be no special characters (','  '.'  ':' '`') in account name & database name & table name.
 func extractTableInfo(ctx context.Context, input string, mustBeConcreteTable bool) (account string, db string, table string, isRegexpTable bool, err error) {
 	parts := strings.Split(strings.TrimSpace(input), ".")
 	if len(parts) != 2 && len(parts) != 3 {
 		return "", "", "", false, moerr.NewInternalErrorf(ctx, "needs account.database.table or database.table. invalid format.")
 	}
 
-	isPatternStr := func(s string) bool {
-		return strings.HasPrefix(s, "/") && strings.HasSuffix(s, "/")
-	}
-
 	if len(parts) == 2 {
 		db, table = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 	} else {
 		account, db, table = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
-		if isPatternStr(account) {
-			return "", "", "", false, moerr.NewInternalErrorf(ctx, "account name must not be format '/.../'. invalid account name")
-		}
+
 		if !accountNameIsLegal(account) {
 			return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid account name")
 		}
 	}
 
-	if isPatternStr(db) {
-		return "", "", "", false, moerr.NewInternalErrorf(ctx, "database name must not be format '/.../'. invalid database name")
-	}
 	if !dbNameIsLegal(db) {
 		return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid database name")
 	}
 
-	if mustBeConcreteTable {
-		//!!!NOTE!!!: table name may both have prefix '/' and suffix '/'.
-		//Then, we assume user input a regular expression.
-		if isPatternStr(table) {
-			return "", "", "", false, moerr.NewInternalErrorf(ctx, "table name must not be format '/.../'. invalid table name")
-		}
-		if !tableNameIsLegal(table) {
-			return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid table name")
-		}
-	} else {
-		//!!!NOTE!!!: table name may both have prefix '/' and suffix '/'.
-		//Then, we assume user input a regular expression.
-		if isPatternStr(table) {
-			if !tableNameIsRegexpr(table) {
-				return "", "", "", false, moerr.NewInternalErrorf(ctx, "table name must be legal /pattern/. invalid table name")
-			}
-			//strip '/' '/'
-			table = table[1 : len(table)-1]
-			isRegexpTable = true
-		} else {
-			//Else, we assume user input a general name.
-			if !tableNameIsLegal(table) {
-				return "", "", "", false, moerr.NewInternalErrorf(ctx, "table name must be legal identity. invalid table name")
-			}
-		}
+	if !tableNameIsLegal(table) {
+		return "", "", "", false, moerr.NewInternalErrorf(ctx, "invalid table name")
 	}
+
 	return
 }
 
 /*
 extractTablePairs extracts all source:sink pairs from the pattern
-It does not include '/' into regular expression.
+There must be no special characters (','  '.'  ':' '`') in account name & database name & table name.
 */
 func extractTablePairs(ctx context.Context, pattern string) ([]*PatternTuple, error) {
 	pattern = strings.TrimSpace(pattern)
@@ -461,6 +485,32 @@ func extractTablePairs(ctx context.Context, pattern string) ([]*PatternTuple, er
 	//step1 : split pattern by ',' => table pair
 	for _, pair := range tablePairs {
 		pt, err := extractTablePair(ctx, pair)
+		if err != nil {
+			return nil, err
+		}
+		pts = append(pts, pt)
+	}
+
+	return pts, nil
+}
+
+/*
+extractTablePairs extracts all source:sink pairs from the pattern
+There must be no special characters (','  '.'  ':' '`') in account name & database name & table name.
+*/
+func extractRules(ctx context.Context, pattern string) ([]*PatternTuple, error) {
+	pattern = strings.TrimSpace(pattern)
+	pts := make([]*PatternTuple, 0)
+
+	tablePairs := strings.Split(pattern, ",")
+	if len(tablePairs) == 0 {
+		return nil, fmt.Errorf("invalid pattern format")
+	}
+	var err error
+	//step1 : split pattern by ',' => table pair
+	for _, pair := range tablePairs {
+		pt := &PatternTuple{}
+		pt.SourceAccount, pt.SourceDatabase, pt.SourceTable, pt.SourceTableIsRegexp, err = extractTableInfo(ctx, pair, false)
 		if err != nil {
 			return nil, err
 		}
@@ -712,6 +762,11 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		return err
 	}
 
+	decodedSinkPwd, err := aesCFBDecode(ctx, sinkPwd, []byte(aesKey))
+	if err != nil {
+		return err
+	}
+
 	//tables
 	tables, err := res.GetString(ctx, 0, 3)
 	if err != nil {
@@ -732,6 +787,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 		cdc.sinkUri,
 		sinkTyp,
 		sinkPwd,
+		decodedSinkPwd,
 		tables,
 		"startTs", startTsStr,
 	)
