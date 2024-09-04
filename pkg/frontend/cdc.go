@@ -445,7 +445,10 @@ func extractTableInfo(ctx context.Context, input string, mustBeConcreteTable boo
 	return
 }
 
-// extractTablePairs extracts all source:sink pairs from the pattern
+/*
+extractTablePairs extracts all source:sink pairs from the pattern
+It does not include '/' into regular expression.
+*/
 func extractTablePairs(ctx context.Context, pattern string) ([]*PatternTuple, error) {
 	pattern = strings.TrimSpace(pattern)
 	pts := make([]*PatternTuple, 0)
