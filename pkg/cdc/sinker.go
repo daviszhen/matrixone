@@ -28,22 +28,17 @@ import (
 
 func NewSinker(
 	ctx context.Context,
-	sinkUri string,
+	sinkUri UriInfo,
 	inputCh chan tools.Pair[*TableCtx, *DecoderOutput],
 	tableId uint64,
 	watermarkUpdater *WatermarkUpdater,
 ) (Sinker, error) {
 	//TODO: remove console
-	if strings.HasPrefix(strings.ToLower(sinkUri), "console://") {
+	if sinkUri.SinkTyp == "console" {
 		return NewConsoleSinker(inputCh, tableId, watermarkUpdater), nil
 	}
 
-	//extract the info from the sink uri
-	userName, pwd, ip, port, err := extractUriInfo(ctx, sinkUri)
-	if err != nil {
-		return nil, err
-	}
-	sink, err := NewMysqlSink(userName, pwd, ip, port)
+	sink, err := NewMysqlSink(sinkUri.User, sinkUri.Password, sinkUri.Ip, sinkUri.Port)
 	if err != nil {
 		return nil, err
 	}

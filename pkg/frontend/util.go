@@ -17,8 +17,6 @@ package frontend
 import (
 	"bytes"
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -36,6 +34,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/matrixorigin/matrixone/pkg/cdc"
 	"github.com/matrixorigin/matrixone/pkg/common/log"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
@@ -1604,27 +1603,23 @@ func tableNameIsRegexpr(s string) bool {
 	return false
 }
 
-type UriInfo struct {
-	user, password, ip         string
-	port                       int
-	passwordStart, passwordEnd int
-}
-
-// uriIsValid uri according to the format: mysql://root:111@127.0.0.1:6001
+// compositedUriInfo uri according to the format: mysql://root:111@127.0.0.1:6001
 // if valid, return true and extracted info
-func uriIsValid(uri string, uriPrefix string) (bool, UriInfo) {
+// !!!NOTE!!!
+// user and password does not have the special character ( ':' '@' )
+func compositedUriInfo(uri string, uriPrefix string) (bool, cdc.UriInfo) {
 	if !uriHasPrefix(uri, uriPrefix) {
-		return false, UriInfo{}
+		return false, cdc.UriInfo{}
 	}
 	//locate user password
 	rest := uri[len(uriPrefix):]
 	seps := strings.Split(rest, "@")
 	if len(seps) != 2 || len(seps[0]) == 0 || len(seps[1]) == 0 {
-		return false, UriInfo{}
+		return false, cdc.UriInfo{}
 	}
 	seps2 := strings.Split(seps[0], ":")
 	if len(seps2) != 2 || len(seps2[0]) == 0 || len(seps2[1]) == 0 {
-		return false, UriInfo{}
+		return false, cdc.UriInfo{}
 	}
 	userName := seps2[0]
 	password := seps2[1]
@@ -1633,26 +1628,26 @@ func uriIsValid(uri string, uriPrefix string) (bool, UriInfo) {
 	if passwordStart >= passwordEnd ||
 		passwordEnd > len(uri) ||
 		password != uri[passwordStart:passwordEnd] {
-		return false, UriInfo{}
+		return false, cdc.UriInfo{}
 	}
 
 	sep3 := strings.Split(seps[1], ":")
 	if len(sep3) != 2 || len(sep3[0]) == 0 || len(sep3[1]) == 0 {
-		return false, UriInfo{}
+		return false, cdc.UriInfo{}
 	}
 	ip := sep3[0]
 	port := sep3[1]
 	portInt32, err := strconv.ParseUint(port, 10, 32)
 	if err != nil || portInt32 < 0 || portInt32 > 65535 {
-		return false, UriInfo{}
+		return false, cdc.UriInfo{}
 	}
-	return true, UriInfo{
-		user:          userName,
-		password:      password,
-		ip:            ip,
-		port:          int(portInt32),
-		passwordStart: passwordStart,
-		passwordEnd:   passwordEnd,
+	return true, cdc.UriInfo{
+		User:          userName,
+		Password:      password,
+		Ip:            ip,
+		Port:          int(portInt32),
+		PasswordStart: passwordStart,
+		PasswordEnd:   passwordEnd,
 	}
 }
 
@@ -1662,7 +1657,7 @@ func replaceStr(s string, start, end int, s2 string) string {
 		return s
 	}
 	if end <= len(s) {
-		return s[:start] + s2 + s[:end]
+		return s[:start] + s2 + s[end:]
 	}
 	return s
 }
@@ -1675,37 +1670,19 @@ func uriHasPrefix(uri string, prefix string) bool {
 	return true
 }
 
-const (
-	aesKey = "test-aes-key-not-use-it-in-cloud"
-)
+/*
+extractUriInfo extracts the uriInfo
+return serialized uriInfo
+*/
+func extractUriInfo(ctx context.Context, uri string, uriPrefix string) (string, cdc.UriInfo, error) {
+	ok, uriInfo := compositedUriInfo(uri, uriPrefix)
+	if !ok {
+		return "", cdc.UriInfo{}, moerr.NewInternalError(ctx, "source uri is invalid format")
+	}
 
-func aesCFBEncode(data string, aesKey []byte) (string, error) {
-	block, err := aes.NewCipher(aesKey)
+	jsonUriInfo, err := cdc.EncodeUriInfo(&uriInfo)
 	if err != nil {
-		return "", err
+		return "", cdc.UriInfo{}, err
 	}
-
-	encoded := make([]byte, aes.BlockSize+len(data))
-	iv := encoded[:aes.BlockSize]
-	salt := generate_salt(aes.BlockSize)
-	copy(iv, salt)
-	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(encoded[aes.BlockSize:], []byte(data))
-	return string(encoded), nil
-}
-
-func aesCFBDecode(ctx context.Context, data string, aesKey []byte) (string, error) {
-	block, err := aes.NewCipher(aesKey)
-	if err != nil {
-		return "", err
-	}
-	encodedData := []byte(data)
-	if len(encodedData) < aes.BlockSize {
-		return "", moerr.NewInternalError(ctx, "encoded string is too short")
-	}
-	iv := encodedData[:aes.BlockSize]
-	encodedData = encodedData[aes.BlockSize:]
-	stream := cipher.NewCFBDecrypter(block, iv)
-	stream.XORKeyStream(encodedData, encodedData)
-	return string(encodedData), nil
+	return jsonUriInfo, cdc.UriInfo{}, nil
 }

@@ -1355,11 +1355,41 @@ func Test_parser(t *testing.T) {
 
 }
 
-func Test_escape(t *testing.T) {
-	data := "test ase"
+func Test_aes(t *testing.T) {
+	data := []byte("test ase")
 	encData, err := aesCFBEncode(data, []byte(aesKey))
 	assert.NoError(t, err)
 	decData, err := aesCFBDecode(context.Background(), encData, []byte(aesKey))
 	assert.NoError(t, err)
 	assert.Equal(t, data, decData)
+}
+
+func Test_replaceStr(t *testing.T) {
+	type args struct {
+		s     string
+		start int
+		end   int
+		s2    string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "t1",
+			args: args{
+				s:     "mysql://root:111@127.0.0.1:6001",
+				start: 13,
+				end:   16,
+				s2:    "******",
+			},
+			want: "mysql://root:******@127.0.0.1:6001",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, replaceStr(tt.args.s, tt.args.start, tt.args.end, tt.args.s2), "replaceStr(%v, %v, %v, %v)", tt.args.s, tt.args.start, tt.args.end, tt.args.s2)
+		})
+	}
 }

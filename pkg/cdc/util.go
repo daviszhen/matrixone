@@ -16,9 +16,13 @@ package cdc
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"slices"
 	"strconv"
@@ -589,4 +593,62 @@ func ForEachWithError[T any](values []T, fn func(T) error) error {
 		}
 	}
 	return nil
+}
+
+const (
+	aesKey = "test-aes-key-not-use-it-in-cloud"
+)
+
+func AesCFBEncode(data []byte) (string, error) {
+	return aesCFBEncode(data, []byte(aesKey))
+}
+
+func aesCFBEncode(data []byte, aesKey []byte) (string, error) {
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", err
+	}
+
+	encoded := make([]byte, aes.BlockSize+len(data))
+	iv := encoded[:aes.BlockSize]
+	salt := generate_salt(aes.BlockSize)
+	copy(iv, salt)
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(encoded[aes.BlockSize:], data)
+	return hex.EncodeToString(encoded), nil
+}
+
+func AesCFBDecode(ctx context.Context, data string) (string, error) {
+	return aesCFBDecode(ctx, data, []byte(aesKey))
+}
+func aesCFBDecode(ctx context.Context, data string, aesKey []byte) (string, error) {
+	encodedData, err := hex.DecodeString(data)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", err
+	}
+	if len(encodedData) < aes.BlockSize {
+		return "", moerr.NewInternalError(ctx, "encoded string is too short")
+	}
+	iv := encodedData[:aes.BlockSize]
+	encodedData = encodedData[aes.BlockSize:]
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(encodedData, encodedData)
+	return string(encodedData), nil
+}
+
+func generate_salt(n int) []byte {
+	buf := make([]byte, n)
+	r := rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+	r.Read(buf)
+	for i := 0; i < n; i++ {
+		buf[i] &= 0x7f
+		if buf[i] == 0 || buf[i] == '$' {
+			buf[i]++
+		}
+	}
+	return buf
 }
