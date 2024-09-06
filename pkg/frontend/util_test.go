@@ -1355,15 +1355,6 @@ func Test_parser(t *testing.T) {
 
 }
 
-func Test_aes(t *testing.T) {
-	data := []byte("test ase")
-	encData, err := aesCFBEncode(data, []byte(aesKey))
-	assert.NoError(t, err)
-	decData, err := aesCFBDecode(context.Background(), encData, []byte(aesKey))
-	assert.NoError(t, err)
-	assert.Equal(t, data, decData)
-}
-
 func Test_replaceStr(t *testing.T) {
 	type args struct {
 		s     string

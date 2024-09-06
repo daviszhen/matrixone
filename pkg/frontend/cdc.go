@@ -19,7 +19,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -119,7 +118,7 @@ const (
 
 	showTables = "show tables from `%s`"
 
-	showIndex = "show index form `%s`.`%s`"
+	showIndex = "show index from `%s`.`%s`"
 )
 
 func getSqlForNewCdcTask(
@@ -271,6 +270,12 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		return err
 	}
 
+	//TODO: refine it after 1.3
+	//check table be filtered or not
+	if filterTable(tablePts, filterPts) == 0 {
+		return moerr.NewInternalError(ctx, "all tables has been excluded by filters. create cdc failed.")
+	}
+
 	dat := time.Now().UTC()
 
 	accInfo := ses.GetTenantInfo()
@@ -388,7 +393,10 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	return
 }
 
-// checkTableState checks the table should be filtered.
+// checkTableState
+// checks the table existed or not
+// checks the table having the primary key
+// filters the table
 func checkTableState(ctx context.Context, tx taskservice.DBExecutor, tablePts, filterPts *cdc2.PatternTuples) (int, error) {
 	var err error
 	var found bool
@@ -422,6 +430,25 @@ func checkTableState(ctx context.Context, tx taskservice.DBExecutor, tablePts, f
 		}
 	}
 	return 0, err
+}
+
+// filterTable checks the table filtered or not
+// returns the count of tables that not be filtered
+func filterTable(tablePts, filterPts *cdc2.PatternTuples) int {
+	//check table be filtered or not
+	leftCount := 0
+	for _, pt := range tablePts.Pts {
+		if pt == nil {
+			continue
+		}
+
+		//skip tables that is filtered
+		if needSkipThisTable(pt.Source.Database, pt.Source.Table, filterPts) {
+			continue
+		}
+		leftCount++
+	}
+	return leftCount
 }
 
 func queryTable(
@@ -483,11 +510,13 @@ func checkPrimarykey(ctx context.Context, tx taskservice.DBExecutor, db, table s
 	var columnName string
 	var collation string
 	var card int
-	var subpart int
+	var subpart string
 	var packed string
 	var yes string
 	var indexType string
 	var comment string
+	var indexComment string
+	var indexParams string
 	var visible string
 	var expr string
 
@@ -498,11 +527,13 @@ func checkPrimarykey(ctx context.Context, tx taskservice.DBExecutor, db, table s
 		seqInIndex = 0
 		columnName = ""
 		card = 0
-		subpart = 0
+		subpart = ""
 		packed = ""
 		yes = ""
 		indexType = ""
 		comment = ""
+		indexComment = ""
+		indexParams = ""
 		visible = ""
 		expr = ""
 		/*
@@ -530,6 +561,8 @@ func checkPrimarykey(ctx context.Context, tx taskservice.DBExecutor, db, table s
 			&yes,
 			&indexType,
 			&comment,
+			&indexComment,
+			&indexParams,
 			&visible,
 			&expr,
 		); err != nil {
@@ -555,18 +588,6 @@ func cdcTaskMetadata(cdcId string) pb.TaskMetadata {
 			Concurrency:   0,
 		},
 	}
-}
-
-func string2uint64(str string) (res uint64, err error) {
-	if str != "" {
-		res, err = strconv.ParseUint(str, 10, 64)
-		if err != nil {
-			return 0, err
-		}
-	} else {
-		res = uint64(0)
-	}
-	return res, nil
 }
 
 // extractTablePair
@@ -739,59 +760,6 @@ func extractRules(ctx context.Context, pattern string) (*cdc2.PatternTuples, err
 	return pts, nil
 }
 
-func patterns2tables(ctx context.Context, pts []*cdc2.PatternTuple, bh BackgroundExec) (map[string]string, error) {
-	resMap := make(map[string]string)
-	for _, pt := range pts {
-		sql := getSqlForTables(pt)
-		bh.ClearExecResultSet()
-		err := bh.Exec(ctx, sql)
-		if err != nil {
-			return nil, err
-		}
-		erArray, err := getResultSet(ctx, bh)
-		if err != nil {
-			return nil, err
-		}
-		if execResultArrayHasData(erArray) {
-			res := erArray[0]
-			for rowIdx := range erArray[0].GetRowCount() {
-				sourceString := strings.Builder{}
-				sinkString := strings.Builder{}
-				acc, err := res.GetString(ctx, rowIdx, 0)
-				if err != nil {
-					return nil, err
-				}
-				db, err := res.GetString(ctx, rowIdx, 1)
-				if err != nil {
-					return nil, err
-				}
-				tbl, err := res.GetString(ctx, rowIdx, 2)
-				if err != nil {
-					return nil, err
-				}
-				sourceString.WriteString(acc)
-				sourceString.WriteString(".")
-				sourceString.WriteString(db)
-				sourceString.WriteString(".")
-				sourceString.WriteString(tbl)
-				if pt.Sink.Table != "" {
-					if pt.Sink.Account != "" {
-						sinkString.WriteString(pt.Sink.Account)
-						sinkString.WriteString(".")
-					}
-					sinkString.WriteString(pt.Sink.Database)
-					sinkString.WriteString(".")
-					sinkString.WriteString(pt.Sink.Table)
-				} else {
-					sinkString.WriteString(sourceString.String())
-				}
-				resMap[sourceString.String()] = sinkString.String()
-			}
-		}
-	}
-	return resMap, nil
-}
-
 func canCreateCdcTask(ctx context.Context, ses *Session, level string, account string, pts *cdc2.PatternTuples) error {
 	if strings.EqualFold(level, ClusterLevel) {
 		if !ses.tenant.IsMoAdminRole() {
@@ -951,6 +919,11 @@ func (cdc *CdcTask) Start(rootCtx context.Context) (err error) {
 	err = cdc.retrieveCdcTask(ctx)
 	if err != nil {
 		return err
+	}
+
+	//check table be filtered or not
+	if filterTable(&cdc.tables, &cdc.filters) == 0 {
+		return moerr.NewInternalError(ctx, "all tables has been excluded by filters. start cdc failed.")
 	}
 
 	//step2 : get source tableid

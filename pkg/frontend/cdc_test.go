@@ -22,6 +22,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+
+	cdc2 "github.com/matrixorigin/matrixone/pkg/cdc"
 )
 
 func Test_newCdcSqlFormat(t *testing.T) {
@@ -178,10 +180,10 @@ func Test_parseTables(t *testing.T) {
 			assert.Errorf(t, err, tkase.input)
 		} else {
 			assert.NoErrorf(t, err, tkase.input)
-			assert.Equal(t, len(pirs), 1, tkase.input)
-			pir := pirs[0]
-			isSame(tkase.src, pir.SourceAccount, pir.SourceDatabase, pir.SourceTable, pir.SourceTableIsRegexp, tkase.input)
-			isSame(tkase.dst, pir.SinkAccount, pir.SinkDatabase, pir.SinkTable, pir.SinkTableIsRegexp, tkase.input)
+			assert.Equal(t, len(pirs.Pts), 1, tkase.input)
+			pir := pirs.Pts[0]
+			isSame(tkase.src, pir.Source.Account, pir.Source.Database, pir.Source.Table, pir.Source.TableIsRegexp, tkase.input)
+			isSame(tkase.dst, pir.Sink.Account, pir.Sink.Database, pir.Sink.Table, pir.Sink.TableIsRegexp, tkase.input)
 		}
 	}
 }
@@ -189,50 +191,54 @@ func Test_parseTables(t *testing.T) {
 func Test_privilegeCheck(t *testing.T) {
 	var tenantInfo *TenantInfo
 	var err error
-	var pts []*PatternTuple
+	var pts []*cdc2.PatternTuple
 	ctx := context.Background()
 	ses := &Session{}
+
+	gen := func(pts []*cdc2.PatternTuple) *cdc2.PatternTuples {
+		return &cdc2.PatternTuples{Pts: pts}
+	}
 
 	tenantInfo = &TenantInfo{
 		Tenant:      sysAccountName,
 		DefaultRole: moAdminRoleName,
 	}
 	ses.tenant = tenantInfo
-	pts = []*PatternTuple{
-		{SourceAccount: "acc1"},
-		{SourceAccount: sysAccountName},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: "acc1"}},
+		{Source: cdc2.PatternTable{Account: sysAccountName}},
 	}
-	err = canCreateCdcTask(ctx, ses, "Cluster", "", pts)
+	err = canCreateCdcTask(ctx, ses, "Cluster", "", gen(pts))
 	assert.Nil(t, err)
 
-	pts = []*PatternTuple{
-		{SourceAccount: sysAccountName, SourceDatabase: moCatalog},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: sysAccountName, Database: moCatalog}},
 	}
-	err = canCreateCdcTask(ctx, ses, "Cluster", "", pts)
+	err = canCreateCdcTask(ctx, ses, "Cluster", "", gen(pts))
 	assert.NotNil(t, err)
 
-	pts = []*PatternTuple{
-		{SourceAccount: sysAccountName},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: sysAccountName}},
 	}
-	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc1", gen(pts))
 	assert.NotNil(t, err)
 
-	pts = []*PatternTuple{
-		{SourceAccount: "acc2"},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: "acc2"}},
 	}
-	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc1", gen(pts))
 	assert.NotNil(t, err)
 
-	pts = []*PatternTuple{
+	pts = []*cdc2.PatternTuple{
 		{},
 	}
-	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc1", gen(pts))
 	assert.Nil(t, err)
 
-	pts = []*PatternTuple{
-		{SourceAccount: "acc1"},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: "acc1"}},
 	}
-	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc1", gen(pts))
 	assert.Nil(t, err)
 
 	tenantInfo = &TenantInfo{
@@ -241,24 +247,24 @@ func Test_privilegeCheck(t *testing.T) {
 	}
 	ses.tenant = tenantInfo
 
-	pts = []*PatternTuple{
-		{SourceAccount: "acc1"},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: "acc1"}},
 		{},
 	}
-	err = canCreateCdcTask(ctx, ses, "Cluster", "", pts)
+	err = canCreateCdcTask(ctx, ses, "Cluster", "", gen(pts))
 	assert.NotNil(t, err)
 
-	err = canCreateCdcTask(ctx, ses, "Account", "acc2", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc2", gen(pts))
 	assert.NotNil(t, err)
 
-	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc1", gen(pts))
 	assert.Nil(t, err)
 
-	pts = []*PatternTuple{
-		{SourceAccount: "acc2"},
-		{SourceAccount: sysAccountName},
+	pts = []*cdc2.PatternTuple{
+		{Source: cdc2.PatternTable{Account: "acc2"}},
+		{Source: cdc2.PatternTable{Account: sysAccountName}},
 	}
-	err = canCreateCdcTask(ctx, ses, "Account", "acc1", pts)
+	err = canCreateCdcTask(ctx, ses, "Account", "acc1", gen(pts))
 	assert.NotNil(t, err)
 
 }
