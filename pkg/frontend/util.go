@@ -1684,5 +1684,5 @@ func extractUriInfo(ctx context.Context, uri string, uriPrefix string) (string, 
 	if err != nil {
 		return "", cdc.UriInfo{}, err
 	}
-	return jsonUriInfo, cdc.UriInfo{}, nil
+	return jsonUriInfo, uriInfo, nil
 }

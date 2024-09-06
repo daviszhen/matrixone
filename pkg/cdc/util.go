@@ -23,12 +23,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,55 +36,10 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"github.com/matrixorigin/matrixone/pkg/pb/timestamp"
-	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae"
+	"github.com/matrixorigin/matrixone/pkg/pb/plan"
+	"github.com/matrixorigin/matrixone/pkg/txn/client"
+	"github.com/matrixorigin/matrixone/pkg/vm/engine"
 )
-
-func NewMemQ[T any]() disttae.Queue[T] {
-	return &memQ[T]{}
-}
-
-// TODO: add condition
-type memQ[T any] struct {
-	sync.Mutex
-	data []T
-}
-
-func (mq *memQ[T]) Push(v T) {
-	mq.Lock()
-	defer mq.Unlock()
-	mq.data = append(mq.data, v)
-}
-
-func (mq *memQ[T]) Pop() {
-	mq.Lock()
-	defer mq.Unlock()
-	mq.data = mq.data[1:]
-}
-
-func (mq *memQ[T]) Front() T {
-	mq.Lock()
-	defer mq.Unlock()
-	return mq.data[0]
-}
-
-func (mq *memQ[T]) Back() T {
-	mq.Lock()
-	defer mq.Unlock()
-	return mq.data[len(mq.data)-1]
-}
-
-func (mq *memQ[T]) Size() int {
-	mq.Lock()
-	defer mq.Unlock()
-	return len(mq.data)
-}
-
-func (mq *memQ[T]) Empty() bool {
-	mq.Lock()
-	defer mq.Unlock()
-	return len(mq.data) == 0
-}
 
 // extractRowFromEveryVector gets the j row from the every vector and outputs the row
 // skipFirstNCols denotes the first N columns should be skipped
@@ -121,34 +73,33 @@ func extractRowFromEveryVector(
 }
 
 // extractRowFromEveryVector2 gets the j row from the every vector and outputs the row
-// wantedColsIndices denotes the index of columns wanted. every index must < len(dataSet.Vecs)
-// row filled with indices by the sequence designated in the wantedColsIndices
-// len(row) == len(wantedColsIndices) <= len(dataSet.Vecs)
+// bat columns layout:
+// 1. data: user defined cols | cpk (if need) | commit-ts
+// 2. tombstone: pk/cpk | commit-ts
+// return user defined cols for data or only one cpk column for tombstone
 func extractRowFromEveryVector2(
 	ctx context.Context,
 	dataSet *batch.Batch,
-	wantedColsIndices []int,
 	rowIndex int,
 	row []any,
 ) error {
-	for resColIdx, colIdx := range wantedColsIndices {
-		vec := dataSet.Vecs[colIdx]
+	for i := 0; i < len(row); i++ {
+		vec := dataSet.Vecs[i]
 		rowIndexBackup := rowIndex
 		if vec.IsConstNull() {
-			row[colIdx] = nil
+			row[i] = nil
 			continue
 		}
 		if vec.IsConst() {
 			rowIndex = 0
 		}
 
-		err := extractRowFromVector(ctx, vec, resColIdx, row, rowIndex)
+		err := extractRowFromVector(ctx, vec, i, row, rowIndex)
 		if err != nil {
 			return err
 		}
 		rowIndex = rowIndexBackup
 	}
-
 	return nil
 }
 
@@ -229,7 +180,7 @@ func extractRowFromVector(ctx context.Context, vec *vector.Vector, i int, row []
 	case types.T_enum:
 		row[i] = vector.GetFixedAt[types.Enum](vec, rowIndex)
 	default:
-		logutil.Errorf(
+		logutil.Error(
 			"Failed to extract row from vector, unsupported type",
 			zap.Int("typeID", int(vec.GetType().Oid)))
 		return moerr.NewInternalErrorf(ctx, "extractRowFromVector : unsupported type %d", vec.GetType().Oid)
@@ -385,7 +336,7 @@ func convertColIntoSql(
 		sqlBuff = appendString(sqlBuff, value.String())
 		sqlBuff = appendByte(sqlBuff, '"')
 	default:
-		logutil.Errorf(
+		logutil.Error(
 			"Failed to extract row from vector, unsupported type",
 			zap.Int("typeID", int(typ.Oid)))
 		return nil, moerr.NewInternalErrorf(ctx, "extractRowFromVector : unsupported type %d", typ.Oid)
@@ -472,74 +423,43 @@ func tryConn(dsn string) (*sql.DB, error) {
 	return db, err
 }
 
-type ActiveRoutine struct {
-	Cancel chan struct{}
-}
-
-func NewCdcActiveRoutine() *ActiveRoutine {
-	activeRoutine := &ActiveRoutine{}
-	activeRoutine.Cancel = make(chan struct{})
-	return activeRoutine
-}
-
-func TimestampToStr(ts timestamp.Timestamp) string {
-	return fmt.Sprintf("%d-%d", ts.PhysicalTime, ts.LogicalTime)
-}
-
-func StrToTimestamp(tsStr string) (ts timestamp.Timestamp, err error) {
-	splits := strings.Split(tsStr, "-")
-	if len(splits) != 2 {
-		err = moerr.NewInternalErrorNoCtxf("strToTimestamp : invalid timestamp string %s", tsStr)
-		return
-	}
-
-	if ts.PhysicalTime, err = strconv.ParseInt(splits[0], 10, 64); err != nil {
-		return
-	}
-
-	logicalTime, err := strconv.ParseUint(splits[1], 10, 32)
-	if err != nil {
-		return
-	}
-
-	ts.LogicalTime = uint32(logicalTime)
-	return
-}
-
-func updateWatermark(outputWMarkAtomic *atomic.Pointer[timestamp.Timestamp], curWMark timestamp.Timestamp) {
-	outputWMarkPtr := outputWMarkAtomic.Load()
-	if outputWMarkPtr == nil {
-		return
-	}
-	if curWMark.Greater(*outputWMarkPtr) {
-		*outputWMarkPtr = curWMark
-	}
-}
-
-type SqlFile struct {
-	file *os.File
-}
-
-func NewSqlFile(fname string) (*SqlFile, error) {
-	ret := &SqlFile{}
-	var err error
-	ret.file, err = os.OpenFile("./tee", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+func GetTableDef(
+	ctx context.Context,
+	cnEngine engine.Engine,
+	cnTxnClient client.TxnClient,
+	tblId uint64,
+) (*plan.TableDef, error) {
+	nowTs := cnEngine.LatestLogtailAppliedTime()
+	createByOpt := client.WithTxnCreateBy(
+		0,
+		"",
+		"readMultipleTables",
+		0)
+	txnOp, err := cnTxnClient.New(ctx, nowTs, createByOpt)
 	if err != nil {
 		return nil, err
 	}
-	return ret, nil
-}
+	defer func() {
+		//same timeout value as it in frontend
+		ctx2, cancel := context.WithTimeout(ctx, cnEngine.Hints().CommitOrRollbackTimeout)
+		defer cancel()
+		if err != nil {
+			_ = txnOp.Rollback(ctx2)
+		} else {
+			_ = txnOp.Commit(ctx2)
+		}
+	}()
 
-func (sfile SqlFile) Record(row []byte) error {
-	_, err := sfile.file.Write(row)
-	if err != nil {
-		return err
+	if err = cnEngine.New(ctx, txnOp); err != nil {
+		return nil, err
 	}
-	_, err = sfile.file.WriteString("\n")
+
+	_, _, rel, err := cnEngine.GetRelationById(ctx, txnOp, tblId)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return err
+
+	return rel.CopyTableDef(ctx), nil
 }
 
 func TrimSpace(values []string) []string {

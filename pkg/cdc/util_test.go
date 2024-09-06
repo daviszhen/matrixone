@@ -22,8 +22,8 @@ import (
 )
 
 func Test_aes(t *testing.T) {
-	data := []byte("test ase")
-	encData, err := aesCFBEncode(data, []byte(aesKey))
+	data := "test ase"
+	encData, err := aesCFBEncode([]byte(data), []byte(aesKey))
 	assert.NoError(t, err)
 	decData, err := aesCFBDecode(context.Background(), encData, []byte(aesKey))
 	assert.NoError(t, err)
