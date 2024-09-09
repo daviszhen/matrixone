@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/google/uuid"
+
 	cdc2 "github.com/matrixorigin/matrixone/pkg/cdc"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
@@ -33,7 +34,6 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/fileservice"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/task"
-	pb "github.com/matrixorigin/matrixone/pkg/pb/task"
 	"github.com/matrixorigin/matrixone/pkg/sql/parsers/tree"
 	"github.com/matrixorigin/matrixone/pkg/taskservice"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
@@ -200,8 +200,11 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		cdcTaskOptionsMap[create.Option[i]] = create.Option[i+1]
 	}
 
+	cdcLevel := cdcTaskOptionsMap["Level"]
+	cdcAccount := cdcTaskOptionsMap["Account"]
+
 	//step 1 : handle tables
-	jsonTables, tablePts, err := preprocessTables(ctx, ses, cdcTaskOptionsMap["Level"], cdcTaskOptionsMap["Account"], create.Tables)
+	jsonTables, tablePts, err := preprocessTables(ctx, ses, cdcLevel, cdcAccount, create.Tables)
 	if err != nil {
 		return err
 	}
@@ -288,15 +291,18 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		"",
 	)
 
-	details := &pb.Details{
+	details := &task.Details{
+		//account info that create cdc
 		AccountID: accInfo.GetTenantID(),
 		Account:   accInfo.GetTenant(),
 		Username:  accInfo.GetUser(),
-		Details: &pb.Details_CreateCdc{
-			CreateCdc: &pb.CreateCdcDetails{
+		Details: &task.Details_CreateCdc{
+			CreateCdc: &task.CreateCdcDetails{
+				//info that cdc belongs to
 				TaskName:  create.TaskName.String(),
 				AccountId: uint64(accInfo.GetTenantID()),
 				TaskId:    cdcId.String(),
+				Account:   cdcAccount,
 			},
 		},
 	}
@@ -311,7 +317,7 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	)
 
 	addCdcTaskCallback := func(ctx context.Context, tx taskservice.DBExecutor) (ret int, err error) {
-
+		//TODO: check account exists or not
 		ret, err = checkTableState(ctx, tx, tablePts, filterPts)
 		if err != nil {
 			return 0, err
@@ -525,11 +531,11 @@ func checkPrimaryKey(ctx context.Context, tx taskservice.DBExecutor, db, table s
 	return ret, err
 }
 
-func cdcTaskMetadata(cdcId string) pb.TaskMetadata {
-	return pb.TaskMetadata{
+func cdcTaskMetadata(cdcId string) task.TaskMetadata {
+	return task.TaskMetadata{
 		ID:       cdcId,
-		Executor: pb.TaskCode_InitCdc,
-		Options: pb.TaskOptions{
+		Executor: task.TaskCode_InitCdc,
+		Options: task.TaskOptions{
 			MaxRetryTimes: defaultConnectorTaskMaxRetryTimes,
 			RetryInterval: defaultConnectorTaskRetryInterval,
 			DelayDuration: 0,

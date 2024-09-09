@@ -182,11 +182,14 @@ message ConnectorDetails {
 }
 
 message CreateCdcDetails {
+  //id of the account that cdc belongs to
   uint64 AccountId = 1;
   //cdc task uuid
   string TaskId = 2;
   //cdc task name in CreateCdc
   string TaskName = 3;
+  //name of the account that cdc belongs to
+  string Account = 4;
 }
 
 message RetentionDetails {}

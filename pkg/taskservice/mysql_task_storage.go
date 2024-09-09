@@ -26,6 +26,7 @@ import (
 
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
 	"github.com/matrixorigin/matrixone/pkg/common/util"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"github.com/matrixorigin/matrixone/pkg/pb/task"
 )
 
@@ -630,6 +631,15 @@ func buildOrderByClause(c *conditions) string {
 	return " order by task_id"
 }
 
+func buildLabels(c *conditions) *CnLabels {
+	if cond, ok := (*c)[CondCnLabels]; ok {
+		if labelCond, ok2 := cond.(*cnLabelsCond); ok2 {
+			return labelCond.labels
+		}
+	}
+	return nil
+}
+
 func removeDuplicateAsyncTasks(err error, tasks []task.AsyncTask) ([]task.AsyncTask, error) {
 	var me *mysql.MySQLError
 	if ok := errors.As(err, &me); !ok {
@@ -881,6 +891,8 @@ func (m *mysqlTaskStorage) RunQueryDaemonTask(ctx context.Context, db DBExecutor
 		buildOrderByClause(c) +
 		buildLimitClause(c)
 
+	labels := buildLabels(c)
+
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -932,7 +944,39 @@ func (m *mysqlTaskStorage) RunQueryDaemonTask(ctx context.Context, db DBExecutor
 		t.EndAt = endAt.Time
 		t.LastRun = lastRun.Time
 
-		tasks = append(tasks, t)
+		//if it is cdc,the cnlabels
+		if t.Metadata.GetExecutor() == task.TaskCode_InitCdc {
+			details := t.GetDetails()
+			createCdcDetails := details.GetDetails().(*task.Details_CreateCdc)
+
+			canRunCdc := false
+			if labels == nil {
+				canRunCdc = true
+			} else {
+				has, cnMap := labels.HasAccount(createCdcDetails.CreateCdc.Account)
+				if has && cnMap != nil {
+					//current cn in account labels' cn list
+					if _, in := cnMap[labels.cnUUID]; in {
+						canRunCdc = true
+					} //else this cn can not run the cdc
+				} else {
+					//no labels in cluster for cdc's account
+					canRunCdc = true
+				}
+			}
+			if canRunCdc {
+				tasks = append(tasks, t)
+			} else {
+				logutil.Errorf("can not run cdc %s %s %s on this cn %s",
+					createCdcDetails.CreateCdc.TaskName,
+					createCdcDetails.CreateCdc.Account,
+					createCdcDetails.CreateCdc.TaskId,
+					labels.cnUUID)
+			}
+		} else {
+			tasks = append(tasks, t)
+		}
+
 	}
 	if err := rows.Err(); err != nil {
 		return tasks, err

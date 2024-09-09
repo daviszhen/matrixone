@@ -317,6 +317,18 @@ func (c *taskNameCond) sql() string {
 	return fmt.Sprintf("task_name %s '%s'", OpName[c.op], c.taskName)
 }
 
+type cnLabelsCond struct {
+	op     Op
+	labels *CnLabels
+}
+
+func (c *cnLabelsCond) eval(v any) bool {
+	return false
+}
+func (c *cnLabelsCond) sql() string {
+	return fmt.Sprintf("%v", c.labels)
+}
+
 func compare[T constraints.Ordered](op Op, a T, b T) bool {
 	switch op {
 	case EQ:
@@ -352,6 +364,7 @@ const (
 	CondCronTaskId
 	CondTaskMetadataId
 	CondCdcTaskName
+	CondCnLabels
 )
 
 var (
@@ -490,6 +503,12 @@ func WithTaskMetadataId(op Op, value string) Condition {
 func WithTaskName(op Op, value string) Condition {
 	return func(c *conditions) {
 		(*c)[CondCdcTaskName] = &taskNameCond{op: op, taskName: value}
+	}
+}
+
+func WithLabels(op Op, labels *CnLabels) Condition {
+	return func(c *conditions) {
+		(*c)[CondCnLabels] = &cnLabelsCond{op: op, labels: labels}
 	}
 }
 
@@ -633,3 +652,35 @@ type TaskStorageFactory interface {
 }
 
 type Getter func() (TaskService, bool)
+
+type CnLabels struct {
+	cnUUID string
+	//account -> cn map. in all cn
+	labels map[string]map[string]struct{}
+}
+
+func NewCnLabels(cnUUID string) *CnLabels {
+	return &CnLabels{
+		cnUUID: cnUUID,
+		labels: make(map[string]map[string]struct{}),
+	}
+}
+
+func (cnlabels *CnLabels) Add(cn string, labels []string) {
+	for _, label := range labels {
+		if len(label) == 0 {
+			continue
+		}
+		if cnMap, has := cnlabels.labels[label]; has {
+			cnMap[cn] = struct{}{}
+		} else {
+			cnlabels.labels[label] = make(map[string]struct{})
+			cnMap[cn] = struct{}{}
+		}
+	}
+}
+
+func (cnlabels *CnLabels) HasAccount(account string) (bool, map[string]struct{}) {
+	cnMap, has := cnlabels.labels[account]
+	return has, cnMap
+}
