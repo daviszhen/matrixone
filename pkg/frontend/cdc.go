@@ -210,6 +210,10 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	cdcLevel := cdcTaskOptionsMap["Level"]
 	cdcAccount := cdcTaskOptionsMap["Account"]
 
+	if cdcAccount == ClusterLevel {
+		return moerr.NewInternalErrorf(ctx, "does not support cluster level in 1.3")
+	}
+
 	//step 1 : handle tables
 	jsonTables, tablePts, err := preprocessTables(ctx, ses, cdcLevel, cdcAccount, create.Tables)
 	if err != nil {
@@ -277,7 +281,7 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 
 	//step 5: create daemon task
 	insertSql := getSqlForNewCdcTask(
-		uint64(accInfo.GetTenantID()),
+		uint64(accInfo.GetTenantID()), //the account_id of cdc creator
 		cdcId,
 		create.TaskName.String(),
 		jsonSrcUri, //json bytes
@@ -310,11 +314,13 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		Username:  accInfo.GetUser(),
 		Details: &task.Details_CreateCdc{
 			CreateCdc: &task.CreateCdcDetails{
-				//info that cdc belongs to
-				TaskName:  create.TaskName.String(),
-				AccountId: uint64(accInfo.GetTenantID()),
-				TaskId:    cdcId.String(),
-				Account:   cdcAccount,
+				TaskName: create.TaskName.String(),
+				TaskId:   cdcId.String(),
+				Accounts: []*task.Account{
+					{
+						Name: "", //TODO:
+					},
+				},
 			},
 		},
 	}
@@ -328,7 +334,7 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 		create.SinkType,
 	)
 
-	addCdcTaskCallback := func(ctx context.Context, tx taskservice.DBExecutor) (ret int, err error) {
+	addCdcTaskCallback := func(ctx context.Context, tx taskservice.SqlExecutor) (ret int, err error) {
 		err = checkAccounts(ctx, tx, tablePts, filterPts)
 		if err != nil {
 			return 0, err
@@ -363,8 +369,21 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	return
 }
 
+func cdcTaskMetadata(cdcId string) task.TaskMetadata {
+	return task.TaskMetadata{
+		ID:       cdcId,
+		Executor: task.TaskCode_InitCdc,
+		Options: task.TaskOptions{
+			MaxRetryTimes: defaultConnectorTaskMaxRetryTimes,
+			RetryInterval: defaultConnectorTaskRetryInterval,
+			DelayDuration: 0,
+			Concurrency:   0,
+		},
+	}
+}
+
 // checkAccounts checks the accounts exists or not
-func checkAccounts(ctx context.Context, tx taskservice.DBExecutor, tablePts, filterPts *cdc2.PatternTuples) error {
+func checkAccounts(ctx context.Context, tx taskservice.SqlExecutor, tablePts, filterPts *cdc2.PatternTuples) error {
 	//step1 : collect accounts
 	accounts := make(map[string]uint64)
 	for _, pt := range tablePts.Pts {
@@ -384,7 +403,7 @@ func checkAccounts(ctx context.Context, tx taskservice.DBExecutor, tablePts, fil
 	//step2 : collect account id
 	//after this step, all account has accountid
 	res := make(map[string]uint64)
-	for acc, _ := range accounts {
+	for acc := range accounts {
 		exists, accId, err := checkAccountExists(ctx, tx, acc)
 		if err != nil {
 			return err
@@ -417,7 +436,7 @@ func checkAccounts(ctx context.Context, tx taskservice.DBExecutor, tablePts, fil
 // checks the table existed or not
 // checks the table having the primary key
 // filters the table
-func checkTables(ctx context.Context, tx taskservice.DBExecutor, tablePts, filterPts *cdc2.PatternTuples) (int, error) {
+func checkTables(ctx context.Context, tx taskservice.SqlExecutor, tablePts, filterPts *cdc2.PatternTuples) (int, error) {
 	var err error
 	var found bool
 	var hasPrimaryKey bool
@@ -473,7 +492,7 @@ func filterTable(tablePts, filterPts *cdc2.PatternTuples) int {
 
 func queryTable(
 	ctx context.Context,
-	tx taskservice.DBExecutor,
+	tx taskservice.SqlExecutor,
 	query string,
 	callback func(ctx context.Context, rows *sql.Rows) (bool, error)) (bool, error) {
 	var rows *sql.Rows
@@ -499,7 +518,7 @@ func queryTable(
 	return false, nil
 }
 
-func checkAccountExists(ctx context.Context, tx taskservice.DBExecutor, account string) (bool, uint64, error) {
+func checkAccountExists(ctx context.Context, tx taskservice.SqlExecutor, account string) (bool, uint64, error) {
 	checkSql := getSqlForCheckAccount(account)
 	var err error
 	var ret bool
@@ -515,7 +534,7 @@ func checkAccountExists(ctx context.Context, tx taskservice.DBExecutor, account 
 	return ret, accountId, err
 }
 
-func checkTableExists(ctx context.Context, tx taskservice.DBExecutor, accountId uint64, db, table string) (bool, error) {
+func checkTableExists(ctx context.Context, tx taskservice.SqlExecutor, accountId uint64, db, table string) (bool, error) {
 	//select from mo_tables
 	checkSql := getSqlForGetTable(accountId, db, table)
 	var err error
@@ -532,7 +551,7 @@ func checkTableExists(ctx context.Context, tx taskservice.DBExecutor, accountId 
 	return ret, err
 }
 
-func checkPrimaryKey(ctx context.Context, tx taskservice.DBExecutor, db, table string) (bool, error) {
+func checkPrimaryKey(ctx context.Context, tx taskservice.SqlExecutor, db, table string) (bool, error) {
 	checkSql := getSqlForShowIndex(db, table)
 	var ret bool
 	var err error
@@ -609,19 +628,6 @@ func checkPrimaryKey(ctx context.Context, tx taskservice.DBExecutor, db, table s
 	})
 
 	return ret, err
-}
-
-func cdcTaskMetadata(cdcId string) task.TaskMetadata {
-	return task.TaskMetadata{
-		ID:       cdcId,
-		Executor: task.TaskCode_InitCdc,
-		Options: task.TaskOptions{
-			MaxRetryTimes: defaultConnectorTaskMaxRetryTimes,
-			RetryInterval: defaultConnectorTaskRetryInterval,
-			DelayDuration: 0,
-			Concurrency:   0,
-		},
-	}
 }
 
 // extractTablePair
@@ -890,11 +896,10 @@ func RegisterCdcExecutor(
 		}
 
 		fmt.Fprintln(os.Stderr, "====>", "cdc task info 1", tasks[0].String())
-		accId := details.CreateCdc.GetAccountId()
 		taskId := details.CreateCdc.GetTaskId()
 		taskName := details.CreateCdc.GetTaskName()
 
-		fmt.Fprintln(os.Stderr, "====>", "cdc task info 2", accId, taskId, taskName)
+		fmt.Fprintln(os.Stderr, "====>", "cdc task info 2", taskId, taskName)
 
 		cdc := NewCdcTask(
 			logger,
@@ -1249,22 +1254,22 @@ func handleRestartCdc(ses *Session, execCtx *ExecCtx, st *tree.RestartCDC) error
 
 func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error) {
 	var targetTaskStatus task.TaskStatus
-	var n int
 	ts := getGlobalPu().TaskService
 	if ts == nil {
 		return moerr.NewInternalError(ctx,
 			"task service not ready yet, please try again later.")
 	}
+	//TODO: clarify the accountid following
 	switch stmt := st.(type) {
 	case *tree.DropCDC:
 		targetTaskStatus = task.TaskStatus_CancelRequested
 		if stmt.Option.All {
-			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
-			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
@@ -1273,12 +1278,12 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 	case *tree.PauseCDC:
 		targetTaskStatus = task.TaskStatus_PauseRequested
 		if stmt.Option.All {
-			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
-			n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
@@ -1286,14 +1291,14 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		}
 	case *tree.RestartCDC:
 		targetTaskStatus = task.TaskStatus_RestartRequested
-		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+		_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
 	case *tree.ResumeCDC:
 		targetTaskStatus = task.TaskStatus_ResumeRequested
-		n, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
+		_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
 			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
@@ -1301,9 +1306,6 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 	}
 	if err != nil {
 		return err
-	}
-	if n < 1 {
-		return moerr.NewInternalError(ctx, "There is no any cdc task.")
 	}
 	return
 }

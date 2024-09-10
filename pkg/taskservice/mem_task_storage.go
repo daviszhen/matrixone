@@ -382,6 +382,6 @@ func (s *memTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.Ta
 	return 0, nil
 }
 
-func (s *memTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, callback func(context.Context, DBExecutor) (int, error)) (int, error) {
+func (s *memTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, callback func(context.Context, SqlExecutor) (int, error)) (int, error) {
 	return 0, nil
 }

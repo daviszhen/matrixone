@@ -382,7 +382,7 @@ func (s *refreshableTaskStorage) HeartbeatDaemonTask(ctx context.Context, tasks 
 	return v, err
 }
 
-func (s *refreshableTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, callback func(context.Context, DBExecutor) (int, error)) (int, error) {
+func (s *refreshableTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, callback func(context.Context, SqlExecutor) (int, error)) (int, error) {
 	v, lastAddress, err := s.AddCdcTaskSub(ctx, dt, callback)
 	if err != nil {
 		s.maybeRefresh(lastAddress)
@@ -390,7 +390,7 @@ func (s *refreshableTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonT
 	return v, err
 }
 
-func (s *refreshableTaskStorage) AddCdcTaskSub(ctx context.Context, dt task.DaemonTask, callback func(context.Context, DBExecutor) (int, error)) (int, string, error) {
+func (s *refreshableTaskStorage) AddCdcTaskSub(ctx context.Context, dt task.DaemonTask, callback func(context.Context, SqlExecutor) (int, error)) (int, string, error) {
 	var v int
 	var err error
 	s.mu.RLock()

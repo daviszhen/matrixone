@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -162,17 +163,18 @@ var (
 		"last_run, " +
 		"details from sys_daemon_task where 1=1"
 
-	selectCdcTask = "select " +
-		"task_id from mo_catalog.mo_cdc_task where 1=1"
+	selectCdcTask = "select account_id,task_id from `mo_catalog`.`mo_cdc_task` where 1=1"
 
-	dropCdcMeta = "delete from mo_catalog.mo_cdc_task where 1=1"
+	deleteCdcMeta = "delete from `mo_catalog`.`mo_cdc_task` where 1=1"
 
-	updateCdcMeta = "update mo_catalog.mo_cdc_task set state = ? where 1=1"
+	updateCdcMeta = "update `mo_catalog`.`mo_cdc_task` set state = ? where 1=1"
 )
 
 const (
 	CdcRunning = "running"
 	CdcStopped = "stopped"
+
+	DeleteWatermarkFormat = "delete from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s'"
 )
 
 type mysqlTaskStorage struct {
@@ -691,7 +693,7 @@ func removeDuplicateDaemonTasks(err error, tasks []task.DaemonTask) ([]task.Daem
 	return b, nil
 }
 
-type DBExecutor interface {
+type SqlExecutor interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
@@ -708,7 +710,7 @@ func (m *mysqlTaskStorage) AddDaemonTask(ctx context.Context, tasks ...task.Daem
 	return m.RunAddDaemonTask(ctx, m.db, tasks...)
 }
 
-func (m *mysqlTaskStorage) RunAddDaemonTask(ctx context.Context, db DBExecutor, tasks ...task.DaemonTask) (int, error) {
+func (m *mysqlTaskStorage) RunAddDaemonTask(ctx context.Context, db SqlExecutor, tasks ...task.DaemonTask) (int, error) {
 
 	sqlStr := insertDaemonTask
 	values := make([]any, 0)
@@ -786,7 +788,7 @@ func (m *mysqlTaskStorage) UpdateDaemonTask(ctx context.Context, tasks []task.Da
 	return n, nil
 }
 
-func (m *mysqlTaskStorage) RunUpdateDaemonTask(ctx context.Context, tasks []task.DaemonTask, db DBExecutor, condition ...Condition) (int, error) {
+func (m *mysqlTaskStorage) RunUpdateDaemonTask(ctx context.Context, tasks []task.DaemonTask, db SqlExecutor, condition ...Condition) (int, error) {
 	c := newConditions(condition...)
 	updateSql := updateDaemonTask + buildDaemonTaskWhereClause(c)
 	prepare, err := db.PrepareContext(ctx, updateSql)
@@ -861,7 +863,7 @@ func (m *mysqlTaskStorage) DeleteDaemonTask(ctx context.Context, condition ...Co
 	return m.RunDeleteDaemonTask(ctx, m.db, condition...)
 }
 
-func (m *mysqlTaskStorage) RunDeleteDaemonTask(ctx context.Context, db DBExecutor, condition ...Condition) (int, error) {
+func (m *mysqlTaskStorage) RunDeleteDaemonTask(ctx context.Context, db SqlExecutor, condition ...Condition) (int, error) {
 	c := newConditions(condition...)
 	deleteSql := deleteDaemonTask + buildDaemonTaskWhereClause(c)
 	exec, err := db.ExecContext(ctx, deleteSql)
@@ -883,7 +885,7 @@ func (m *mysqlTaskStorage) QueryDaemonTask(ctx context.Context, condition ...Con
 	return m.RunQueryDaemonTask(ctx, m.db, condition...)
 }
 
-func (m *mysqlTaskStorage) RunQueryDaemonTask(ctx context.Context, db DBExecutor, condition ...Condition) ([]task.DaemonTask, error) {
+func (m *mysqlTaskStorage) RunQueryDaemonTask(ctx context.Context, db SqlExecutor, condition ...Condition) ([]task.DaemonTask, error) {
 
 	c := newConditions(condition...)
 	query := selectDaemonTask +
@@ -1041,7 +1043,7 @@ func (m *mysqlTaskStorage) HeartbeatDaemonTask(ctx context.Context, tasks []task
 	return n, nil
 }
 
-func (m *mysqlTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, callback func(context.Context, DBExecutor) (int, error)) (int, error) {
+func (m *mysqlTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, callback func(context.Context, SqlExecutor) (int, error)) (int, error) {
 	if taskFrameworkDisabled() {
 		return 0, nil
 	}
@@ -1083,11 +1085,19 @@ func (m *mysqlTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, c
 	return daemonTaskRowsAffected, nil
 }
 
+type cdcTaskKey struct {
+	accountId uint64
+	taskId    string
+}
+
 func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, condition ...Condition) (int, error) {
 	if taskFrameworkDisabled() {
 		return 0, nil
 	}
 	var affectedCdcRow, affectedTaskRow int
+	var accountId uint64
+	var taskId string
+	var cnt int64
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -1105,7 +1115,9 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 	}()
 
 	c := newConditions(condition...)
+	//where : account_id = xxx and task_name = yyy
 	whereClauses := buildCdcTaskWhereClause(c)
+	//step1: query all account id & task id that we need from mo_cdc_task
 	query := selectCdcTask + whereClauses
 
 	rows, err := tx.QueryContext(ctx, query)
@@ -1115,17 +1127,25 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 	defer func() {
 		_ = rows.Close()
 	}()
-	taskIds := make([]string, 0)
+
+	taskKeyMap := make(map[cdcTaskKey]struct{}, 0)
+
 	for rows.Next() {
-		var taskId string
-		if err = rows.Scan(&taskId); err != nil {
+		if err = rows.Scan(&accountId, &taskId); err != nil {
 			return 0, err
 		}
-		taskIds = append(taskIds, taskId)
+		tInfo := cdcTaskKey{accountId: accountId, taskId: taskId}
+		taskKeyMap[tInfo] = struct{}{}
 	}
+
+	//step2: query all create cdc daemon tasks
 	daemonTasks, err := m.RunQueryDaemonTask(ctx, tx, condition...)
 	var prepare *sql.Stmt
+
+	//step3: update or cancel cdc task
 	if targetStatus != task.TaskStatus_CancelRequested {
+		//Update cdc task
+		//updating mo_cdc_task table
 		updateSql := updateCdcMeta + whereClauses
 		prepare, err = tx.PrepareContext(ctx, updateSql)
 		if err != nil {
@@ -1134,71 +1154,115 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		defer func() {
 			_ = prepare.Close()
 		}()
-	}
-	updateTasks := make([]task.DaemonTask, 0)
-	for _, taskId := range taskIds {
-		for _, daemonTask := range daemonTasks {
-			details, ok := daemonTask.Details.Details.(*task.Details_CreateCdc)
-			if !ok {
-				err = moerr.NewInternalError(ctx,
-					"Details not a CreateCdc task type")
-				return 0, err
-			}
-			if daemonTask.TaskStatus != task.TaskStatus_Canceled && taskId == details.CreateCdc.TaskId {
-				if (targetStatus == task.TaskStatus_ResumeRequested || targetStatus == task.TaskStatus_RestartRequested) && daemonTask.TaskStatus != task.TaskStatus_Paused ||
-					targetStatus == task.TaskStatus_PauseRequested && daemonTask.TaskStatus != task.TaskStatus_Running {
-					err = moerr.NewInternalErrorf(ctx,
-						"status can not be change, now it is %s",
-						daemonTask.TaskStatus.String())
-					return 0, err
-				}
-				daemonTask.TaskStatus = targetStatus
-				updateTasks = append(updateTasks, daemonTask)
-			}
-		}
-	}
 
-	if targetStatus == task.TaskStatus_CancelRequested {
-		deleteSql := dropCdcMeta + whereClauses
-		exec, err := tx.ExecContext(ctx, deleteSql)
-		if err != nil {
-			return 0, err
+		//step4: collect daemon task that we want to update
+		updateTasks := make([]task.DaemonTask, 0)
+		for _, dTask := range daemonTasks {
+			details, ok := dTask.Details.Details.(*task.Details_CreateCdc)
+			if !ok {
+				continue
+			}
+			//skip task we do not need
+			tInfo := cdcTaskKey{
+				accountId: uint64(dTask.Details.AccountID), //from account  that creates cdc
+				taskId:    details.CreateCdc.TaskId,
+			}
+			if _, has := taskKeyMap[tInfo]; !has {
+				continue
+			}
+			if dTask.TaskStatus != task.TaskStatus_Canceled {
+				if (targetStatus == task.TaskStatus_ResumeRequested || targetStatus == task.TaskStatus_RestartRequested) && dTask.TaskStatus != task.TaskStatus_Paused ||
+					targetStatus == task.TaskStatus_PauseRequested && dTask.TaskStatus != task.TaskStatus_Running {
+					continue
+				}
+				dTask.TaskStatus = targetStatus
+				updateTasks = append(updateTasks, dTask)
+			}
 		}
-		affected, err := exec.RowsAffected()
-		if err != nil {
-			return 0, err
-		}
-		affectedCdcRow += int(affected)
-	} else {
+
 		if prepare != nil {
+			//step5: execute update cdc status in mo_cdc_task
 			var targetCdcStatus string
 			if targetStatus == task.TaskStatus_PauseRequested {
 				targetCdcStatus = CdcStopped
 			} else {
 				targetCdcStatus = CdcRunning
 			}
-			exec, err := prepare.ExecContext(ctx, targetCdcStatus)
+			res, err := prepare.ExecContext(ctx, targetCdcStatus)
 			if err != nil {
 				return 0, err
 			}
-			affected, err := exec.RowsAffected()
+			affected, err := res.RowsAffected()
 			if err != nil {
-				return 0, nil
+				return 0, err
 			}
 			affectedCdcRow += int(affected)
 		}
-	}
 
-	affectedTaskRow, err = m.RunUpdateDaemonTask(ctx, updateTasks, tx)
+		//step6: update daemon task status
+		if len(updateTasks) > 0 {
+			affectedTaskRow, err = m.RunUpdateDaemonTask(ctx, updateTasks, tx)
+			if err != nil {
+				return 0, err
+			}
+		}
+
+		if targetStatus == task.TaskStatus_RestartRequested {
+			//step7: delete watermark
+			cnt, err = deleteWatermark(ctx, tx, taskKeyMap)
+			if err != nil {
+				return 0, err
+			}
+			affectedCdcRow += int(cnt)
+		}
+
+		affectedCdcRow += affectedTaskRow
+	} else {
+		//Cancel cdc task
+		//step4: deleting mo_cdc_task
+		deleteSql := deleteCdcMeta + whereClauses
+		cnt, err = executeSql(ctx, tx, deleteSql)
+		if err != nil {
+			return 0, err
+		}
+		affectedCdcRow += int(cnt)
+
+		//step5: delete watermark
+		cnt, err = deleteWatermark(ctx, tx, taskKeyMap)
+		if err != nil {
+			return 0, err
+		}
+		affectedCdcRow += int(cnt)
+	}
+	return affectedCdcRow, nil
+}
+
+func deleteWatermark(ctx context.Context, tx SqlExecutor, taskKeyMap map[cdcTaskKey]struct{}) (int64, error) {
+	tCount := int64(0)
+	cnt := int64(0)
+	var err error
+	//deleting mo_cdc_watermark belongs to cancelled cdc task
+	for tInfo, _ := range taskKeyMap {
+		deleteSql2 := fmt.Sprintf(DeleteWatermarkFormat, tInfo.accountId, tInfo.taskId)
+		cnt, err = executeSql(ctx, tx, deleteSql2)
+		if err != nil {
+			return 0, err
+		}
+		tCount += cnt
+	}
+	return tCount, nil
+}
+
+func executeSql(ctx context.Context, tx SqlExecutor, query string, args ...interface{}) (int64, error) {
+	exec, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}
-
-	if affectedCdcRow != affectedTaskRow {
-		err = moerr.NewInternalError(ctx, "update daemon task status failed.")
+	rows, err := exec.RowsAffected()
+	if err != nil {
 		return 0, err
 	}
-	return affectedCdcRow, nil
+	return rows, nil
 }
 
 func buildDaemonTaskWhereClause(c *conditions) string {

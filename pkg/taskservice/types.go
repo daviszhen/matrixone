@@ -562,7 +562,7 @@ type TaskService interface {
 	GetStorage() TaskStorage
 
 	// AddCdcTask Update cdc task in one transaction
-	AddCdcTask(context.Context, task.TaskMetadata, *task.Details, func(context.Context, DBExecutor) (int, error)) (int, error)
+	AddCdcTask(context.Context, task.TaskMetadata, *task.Details, func(context.Context, SqlExecutor) (int, error)) (int, error)
 
 	// UpdateCdcTask Update cdc task in one transaction
 	UpdateCdcTask(context.Context, task.TaskStatus, ...Condition) (int, error)
@@ -631,7 +631,7 @@ type TaskStorage interface {
 	// HeartbeatDaemonTask update the last heartbeat field of the task.
 	HeartbeatDaemonTask(ctx context.Context, task []task.DaemonTask) (int, error)
 	// AddCdcTask insert cdcTask and daemonTask
-	AddCdcTask(context.Context, task.DaemonTask, func(context.Context, DBExecutor) (int, error)) (int, error)
+	AddCdcTask(context.Context, task.DaemonTask, func(context.Context, SqlExecutor) (int, error)) (int, error)
 	// UpdateCdcTask Update cdc task in one transaction
 	UpdateCdcTask(context.Context, task.TaskStatus, ...Condition) (int, error)
 }
