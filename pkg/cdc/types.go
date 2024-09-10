@@ -22,12 +22,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tidwall/btree"
+
 	"github.com/matrixorigin/matrixone/pkg/common/mpool"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
 	"github.com/matrixorigin/matrixone/pkg/container/vector"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae/logtailreplay"
-	"github.com/tidwall/btree"
 )
 
 type Reader interface {
@@ -324,6 +325,7 @@ func DecodeUriInfo(uri string, uriInfo *UriInfo) error {
 
 type PatternTable struct {
 	Account       string `json:"account"`
+	AccountId     uint64 `json:"account_id"`
 	Database      string `json:"database"`
 	Table         string `json:"table"`
 	TableIsRegexp bool   `json:"table_is_regexp"`
@@ -331,7 +333,7 @@ type PatternTable struct {
 }
 
 func (table PatternTable) String() string {
-	return fmt.Sprintf("(%s,%s,%s)", table.Account, table.Database, table.Table)
+	return fmt.Sprintf("(%s,%d,%s,%s)", table.Account, table.AccountId, table.Database, table.Table)
 }
 
 type PatternTuple struct {

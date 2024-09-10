@@ -18,6 +18,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -90,9 +91,11 @@ const (
 
 	getDbIdAndTableIdFormat = "select reldatabase_id,rel_id from mo_catalog.mo_tables where account_id = %d and reldatabase = '%s' and relname = '%s'"
 
-	showTables = "show tables from `%s`"
+	getTable = "select rel_id from `mo_catalog`.`mo_tables` where account_id = %d and reldatabase ='%s' and relname = '%s'"
 
 	showIndex = "show index from `%s`.`%s`"
+
+	getAccount = "select account_id from `mo_catalog`.`mo_account` where account_name='%s'"
 )
 
 func getSqlForNewCdcTask(
@@ -161,12 +164,16 @@ func getSqlForDbIdAndTableId(accId uint64, db, table string) string {
 	return fmt.Sprintf(getDbIdAndTableIdFormat, accId, db, table)
 }
 
-func getSqlForShowTables(s string) string {
-	return fmt.Sprintf(showTables, s)
+func getSqlForGetTable(accountId uint64, db, table string) string {
+	return fmt.Sprintf(getTable, accountId, db, table)
 }
 
 func getSqlForShowIndex(db, table string) string {
 	return fmt.Sprintf(showIndex, db, table)
+}
+
+func getSqlForCheckAccount(account string) string {
+	return fmt.Sprintf(getAccount, account)
 }
 
 const (
@@ -217,6 +224,11 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	fmt.Fprintln(os.Stderr, "===>create cdc rules", filters)
 
 	jsonFilters, filterPts, err := preprocessRules(ctx, filters)
+	if err != nil {
+		return err
+	}
+
+	err = attachAccountForFilters(ctx, ses, cdcLevel, cdcAccount, filterPts)
 	if err != nil {
 		return err
 	}
@@ -317,8 +329,12 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	)
 
 	addCdcTaskCallback := func(ctx context.Context, tx taskservice.DBExecutor) (ret int, err error) {
-		//TODO: check account exists or not
-		ret, err = checkTableState(ctx, tx, tablePts, filterPts)
+		err = checkAccounts(ctx, tx, tablePts, filterPts)
+		if err != nil {
+			return 0, err
+		}
+
+		ret, err = checkTables(ctx, tx, tablePts, filterPts)
 		if err != nil {
 			return 0, err
 		}
@@ -347,11 +363,61 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	return
 }
 
-// checkTableState
+// checkAccounts checks the accounts exists or not
+func checkAccounts(ctx context.Context, tx taskservice.DBExecutor, tablePts, filterPts *cdc2.PatternTuples) error {
+	//step1 : collect accounts
+	accounts := make(map[string]uint64)
+	for _, pt := range tablePts.Pts {
+		if pt == nil || pt.Source.Account == "" {
+			continue
+		}
+		accounts[pt.Source.Account] = math.MaxUint64
+	}
+
+	for _, pt := range filterPts.Pts {
+		if pt == nil || pt.Source.Account == "" {
+			continue
+		}
+		accounts[pt.Source.Account] = math.MaxUint64
+	}
+
+	//step2 : collect account id
+	//after this step, all account has accountid
+	res := make(map[string]uint64)
+	for acc, _ := range accounts {
+		exists, accId, err := checkAccountExists(ctx, tx, acc)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return moerr.NewInternalError(ctx, fmt.Sprintf("account %s does not exist", acc))
+		}
+		res[acc] = accId
+	}
+
+	//step3: attach accountId
+	for _, pt := range tablePts.Pts {
+		if pt == nil || pt.Source.Account == "" {
+			continue
+		}
+		pt.Source.AccountId = res[pt.Source.Account]
+	}
+
+	for _, pt := range filterPts.Pts {
+		if pt == nil || pt.Source.Account == "" {
+			continue
+		}
+		pt.Source.AccountId = res[pt.Source.Account]
+	}
+
+	return nil
+}
+
+// checkTables
 // checks the table existed or not
 // checks the table having the primary key
 // filters the table
-func checkTableState(ctx context.Context, tx taskservice.DBExecutor, tablePts, filterPts *cdc2.PatternTuples) (int, error) {
+func checkTables(ctx context.Context, tx taskservice.DBExecutor, tablePts, filterPts *cdc2.PatternTuples) (int, error) {
 	var err error
 	var found bool
 	var hasPrimaryKey bool
@@ -361,12 +427,12 @@ func checkTableState(ctx context.Context, tx taskservice.DBExecutor, tablePts, f
 		}
 
 		//skip tables that is filtered
-		if needSkipThisTable(pt.Source.Database, pt.Source.Table, filterPts) {
+		if needSkipThisTable(pt.Source.Account, pt.Source.Database, pt.Source.Table, filterPts) {
 			continue
 		}
 
 		//check tables exists or not and filter the table
-		found, err = checkTableExists(ctx, tx, pt.Source.Database, pt.Source.Table)
+		found, err = checkTableExists(ctx, tx, pt.Source.AccountId, pt.Source.Database, pt.Source.Table)
 		if err != nil {
 			return 0, err
 		}
@@ -397,7 +463,7 @@ func filterTable(tablePts, filterPts *cdc2.PatternTuples) int {
 		}
 
 		//skip tables that is filtered
-		if needSkipThisTable(pt.Source.Database, pt.Source.Table, filterPts) {
+		if needSkipThisTable(pt.Source.Account, pt.Source.Database, pt.Source.Table, filterPts) {
 			continue
 		}
 		leftCount++
@@ -433,21 +499,34 @@ func queryTable(
 	return false, nil
 }
 
-func checkTableExists(ctx context.Context, tx taskservice.DBExecutor, db, table string) (bool, error) {
-	//TODO: use show tables from ... like ... but stuck in escape character
-	checkSql := getSqlForShowTables(db)
+func checkAccountExists(ctx context.Context, tx taskservice.DBExecutor, account string) (bool, uint64, error) {
+	checkSql := getSqlForCheckAccount(account)
 	var err error
 	var ret bool
-	var tableName string
+	var accountId uint64
 	ret, err = queryTable(ctx, tx, checkSql, func(ctx context.Context, rows *sql.Rows) (bool, error) {
-		tableName = ""
-		if err = rows.Scan(&tableName); err != nil {
+		accountId = 0
+		if err = rows.Scan(&accountId); err != nil {
 			return false, err
 		}
-		if tableName == table {
-			return true, nil
+		return true, nil
+	})
+
+	return ret, accountId, err
+}
+
+func checkTableExists(ctx context.Context, tx taskservice.DBExecutor, accountId uint64, db, table string) (bool, error) {
+	//select from mo_tables
+	checkSql := getSqlForGetTable(accountId, db, table)
+	var err error
+	var ret bool
+	var tableId uint64
+	ret, err = queryTable(ctx, tx, checkSql, func(ctx context.Context, rows *sql.Rows) (bool, error) {
+		tableId = 0
+		if err = rows.Scan(&tableId); err != nil {
+			return false, err
 		}
-		return false, nil
+		return true, nil
 	})
 
 	return ret, err
@@ -491,6 +570,7 @@ func checkPrimaryKey(ctx context.Context, tx taskservice.DBExecutor, db, table s
 		visible = ""
 		expr = ""
 		/*
+			Reference To: https://docs.matrixorigin.cn/en/1.2.2/MatrixOne/Reference/SQL-Reference/Other/SHOW-Statements/show-index/#examples
 			CREATE TABLE show_01(sname varchar(30),id int);
 			mysql> show INDEX FROM show_01;
 			+---------+------------+------------+--------------+-------------+-----------+-------------+----------+--------+------+------------+------------------+---------+------------+
@@ -752,6 +832,34 @@ func canCreateCdcTask(ctx context.Context, ses *Session, level string, account s
 	return nil
 }
 
+func attachAccountForFilters(ctx context.Context, ses *Session, level string, account string, pts *cdc2.PatternTuples) error {
+	if strings.EqualFold(level, ClusterLevel) {
+		if !ses.tenant.IsMoAdminRole() {
+			return moerr.NewInternalError(ctx, "Only sys account administrator are allowed to create cluster level task")
+		}
+		for _, pt := range pts.Pts {
+			if pt.Source.Account == "" {
+				pt.Source.Account = ses.GetTenantName()
+			}
+		}
+	} else if strings.EqualFold(level, AccountLevel) {
+		if !ses.tenant.IsMoAdminRole() && ses.GetTenantName() != account {
+			return moerr.NewInternalErrorf(ctx, "No privilege to create task on %s", account)
+		}
+		for _, pt := range pts.Pts {
+			if pt.Source.Account == "" {
+				pt.Source.Account = account
+			}
+			if account != pt.Source.Account {
+				return moerr.NewInternalErrorf(ctx, "No privilege to create task on table %s", pt.OriginString)
+			}
+		}
+	} else {
+		return moerr.NewInternalErrorf(ctx, "Incorrect level %s", level)
+	}
+	return nil
+}
+
 func RegisterCdcExecutor(
 	logger *zap.Logger,
 	ts taskservice.TaskService,
@@ -892,7 +1000,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	var info *cdc2.DbTableInfo
 	dbTableInfos := make([]*cdc2.DbTableInfo, 0, len(cdc.tables.Pts))
 	for _, tuple := range cdc.tables.Pts {
-		if needSkipThisTable(tuple.Source.Database, tuple.Source.Table, &cdc.filters) {
+		if needSkipThisTable(tuple.Source.Account, tuple.Source.Database, tuple.Source.Table, &cdc.filters) {
 			logutil.Infof("cdc skip table %s:%s by filter", tuple.Source.Database, tuple.Source.Table)
 			continue
 		}
@@ -1058,7 +1166,7 @@ func (cdc *CdcTask) retrieveTable(ctx context.Context, dbName, tblName string) (
 	}, err
 }
 
-func needSkipThisTable(dbName, tblName string, filters *cdc2.PatternTuples) bool {
+func needSkipThisTable(accountName, dbName, tblName string, filters *cdc2.PatternTuples) bool {
 	if len(filters.Pts) == 0 {
 		return false
 	}
@@ -1066,7 +1174,9 @@ func needSkipThisTable(dbName, tblName string, filters *cdc2.PatternTuples) bool
 		if filter == nil {
 			continue
 		}
-		if filter.Source.Database == dbName && filter.Source.Table == tblName {
+		if filter.Source.Account == accountName &&
+			filter.Source.Database == dbName &&
+			filter.Source.Table == tblName {
 			return true
 		}
 	}
