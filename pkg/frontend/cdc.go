@@ -741,7 +741,7 @@ func preprocessTables(
 		return "", nil, err
 	}
 
-	jsonTablePts, err := cdc2.EncodePatternTuples(tablesPts)
+	jsonTablePts, err := cdc2.JsonEncode(tablesPts)
 	if err != nil {
 		return "", nil, err
 	}
@@ -779,7 +779,7 @@ func preprocessRules(ctx context.Context, rules string) (string, *cdc2.PatternTu
 		return "", nil, err
 	}
 
-	jsonPts, err := cdc2.EncodePatternTuples(pts)
+	jsonPts, err := cdc2.JsonEncode(pts)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1093,7 +1093,7 @@ func (cdc *CdcTask) retrieveCdcTask(ctx context.Context) error {
 			return err
 		}
 
-		err = cdc2.DecodeUriInfo(jsonSinkUri, &cdc.sinkUri)
+		err = cdc2.JsonDecode(jsonSinkUri, &cdc.sinkUri)
 		if err != nil {
 			return err
 		}
@@ -1119,7 +1119,7 @@ func (cdc *CdcTask) retrieveCdcTask(ctx context.Context) error {
 		return err
 	}
 
-	err = cdc2.DecodePatternTuples(jsonTables, &cdc.tables)
+	err = cdc2.JsonDecode(jsonTables, &cdc.tables)
 	if err != nil {
 		return err
 	}
@@ -1130,7 +1130,7 @@ func (cdc *CdcTask) retrieveCdcTask(ctx context.Context) error {
 		return err
 	}
 
-	err = cdc2.DecodePatternTuples(jsonFilters, &cdc.filters)
+	err = cdc2.JsonDecode(jsonFilters, &cdc.filters)
 	if err != nil {
 		return err
 	}
@@ -1277,12 +1277,12 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		targetTaskStatus = task.TaskStatus_CancelRequested
 		if stmt.Option.All {
 			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
-				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
 			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
-				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
@@ -1291,12 +1291,12 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		targetTaskStatus = task.TaskStatus_PauseRequested
 		if stmt.Option.All {
 			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
-				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
 			_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
-				taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
@@ -1304,14 +1304,14 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 	case *tree.RestartCDC:
 		targetTaskStatus = task.TaskStatus_RestartRequested
 		_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
-			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+			taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
 	case *tree.ResumeCDC:
 		targetTaskStatus = task.TaskStatus_ResumeRequested
 		_, err = ts.UpdateCdcTask(ctx, targetTaskStatus,
-			taskservice.WithAccountID(taskservice.EQ, ses.accountId),
+			taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)

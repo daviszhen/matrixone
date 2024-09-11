@@ -187,7 +187,7 @@ func (reader *tableReader) readTableWithTxn(
 	fromTs := reader.wMarkUpdater.GetFromMem(reader.info.SourceTblId)
 	//fromTs := types.StringToTS("1-1")
 	toTs := types.TimestampToTS(txnOp.SnapshotTS())
-	fmt.Fprintln(os.Stderr, reader.info, "from", fromTs.ToString(), "to", toTs.ToString())
+	//fmt.Fprintln(os.Stderr, reader.info, "from", fromTs.ToString(), "to", toTs.ToString())
 	changes, err = rel.CollectChanges(ctx, fromTs, toTs, reader.mp)
 	if err != nil {
 		return

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -1135,14 +1136,12 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 			return 0, err
 		}
 		tInfo := cdcTaskKey{accountId: accountId, taskId: taskId}
+		fmt.Fprintln(os.Stderr, "==>", "account id", accountId, "task id", taskId)
 		taskKeyMap[tInfo] = struct{}{}
 	}
 
-	//step2: query all create cdc daemon tasks
-	daemonTasks, err := m.RunQueryDaemonTask(ctx, tx, condition...)
 	var prepare *sql.Stmt
-
-	//step3: update or cancel cdc task
+	//step2: update or cancel cdc task
 	if targetStatus != task.TaskStatus_CancelRequested {
 		//Update cdc task
 		//updating mo_cdc_task table
@@ -1155,33 +1154,8 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 			_ = prepare.Close()
 		}()
 
-		//step4: collect daemon task that we want to update
-		updateTasks := make([]task.DaemonTask, 0)
-		for _, dTask := range daemonTasks {
-			details, ok := dTask.Details.Details.(*task.Details_CreateCdc)
-			if !ok {
-				continue
-			}
-			//skip task we do not need
-			tInfo := cdcTaskKey{
-				accountId: uint64(dTask.Details.AccountID), //from account  that creates cdc
-				taskId:    details.CreateCdc.TaskId,
-			}
-			if _, has := taskKeyMap[tInfo]; !has {
-				continue
-			}
-			if dTask.TaskStatus != task.TaskStatus_Canceled {
-				if (targetStatus == task.TaskStatus_ResumeRequested || targetStatus == task.TaskStatus_RestartRequested) && dTask.TaskStatus != task.TaskStatus_Paused ||
-					targetStatus == task.TaskStatus_PauseRequested && dTask.TaskStatus != task.TaskStatus_Running {
-					continue
-				}
-				dTask.TaskStatus = targetStatus
-				updateTasks = append(updateTasks, dTask)
-			}
-		}
-
 		if prepare != nil {
-			//step5: execute update cdc status in mo_cdc_task
+			//execute update cdc status in mo_cdc_task
 			var targetCdcStatus string
 			if targetStatus == task.TaskStatus_PauseRequested {
 				targetCdcStatus = CdcStopped
@@ -1199,27 +1173,17 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 			affectedCdcRow += int(affected)
 		}
 
-		//step6: update daemon task status
-		if len(updateTasks) > 0 {
-			affectedTaskRow, err = m.RunUpdateDaemonTask(ctx, updateTasks, tx)
-			if err != nil {
-				return 0, err
-			}
-		}
-
 		if targetStatus == task.TaskStatus_RestartRequested {
-			//step7: delete watermark
+			//delete mo_cdc_watermark
 			cnt, err = deleteWatermark(ctx, tx, taskKeyMap)
 			if err != nil {
 				return 0, err
 			}
 			affectedCdcRow += int(cnt)
 		}
-
-		affectedCdcRow += affectedTaskRow
 	} else {
 		//Cancel cdc task
-		//step4: deleting mo_cdc_task
+		//deleting mo_cdc_task
 		deleteSql := deleteCdcMeta + whereClauses
 		cnt, err = executeSql(ctx, tx, deleteSql)
 		if err != nil {
@@ -1227,13 +1191,52 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		}
 		affectedCdcRow += int(cnt)
 
-		//step5: delete watermark
+		//delete mo_cdc_watermark
 		cnt, err = deleteWatermark(ctx, tx, taskKeyMap)
 		if err != nil {
 			return 0, err
 		}
 		affectedCdcRow += int(cnt)
 	}
+
+	//step3: collect daemon task that we want to update
+	daemonTasks, err := m.RunQueryDaemonTask(ctx, tx, condition...)
+	updateTasks := make([]task.DaemonTask, 0)
+	for _, dTask := range daemonTasks {
+		details, ok := dTask.Details.Details.(*task.Details_CreateCdc)
+		if !ok {
+			continue
+		}
+		//skip task we do not need
+		tInfo := cdcTaskKey{
+			accountId: uint64(dTask.Details.AccountID), //from account  that creates cdc
+			taskId:    details.CreateCdc.TaskId,
+		}
+		if _, has := taskKeyMap[tInfo]; !has {
+			continue
+		}
+		if dTask.TaskStatus != task.TaskStatus_Canceled {
+			if (targetStatus == task.TaskStatus_ResumeRequested || targetStatus == task.TaskStatus_RestartRequested) && dTask.TaskStatus != task.TaskStatus_Paused ||
+				targetStatus == task.TaskStatus_PauseRequested && dTask.TaskStatus != task.TaskStatus_Running {
+				continue
+			}
+			dTask.TaskStatus = targetStatus
+			updateTasks = append(updateTasks, dTask)
+		}
+	}
+
+	//step5: update daemon task status
+	if len(updateTasks) > 0 {
+		for _, uTask := range updateTasks {
+			fmt.Fprintln(os.Stderr, "==>", uTask.Account, uTask.Details.String())
+		}
+		affectedTaskRow, err = m.RunUpdateDaemonTask(ctx, updateTasks, tx)
+		if err != nil {
+			return 0, err
+		}
+		affectedCdcRow += affectedTaskRow
+	}
+
 	return affectedCdcRow, nil
 }
 

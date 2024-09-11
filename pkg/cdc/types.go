@@ -299,30 +299,6 @@ func (info *UriInfo) GetEncodedPassword() (string, error) {
 	return AesCFBEncode([]byte(info.Password))
 }
 
-// EncodeUriInfo encodes the UriInfo
-func EncodeUriInfo(info *UriInfo) (string, error) {
-	jsonUri, err := json.Marshal(info)
-	if err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(jsonUri), nil
-}
-
-// DecodeUriInfo decodes the uri json bytes
-func DecodeUriInfo(uri string, uriInfo *UriInfo) error {
-	jsonSinkUriBytes, err := hex.DecodeString(uri)
-	if err != nil {
-		return err
-	}
-
-	err = json.Unmarshal(jsonSinkUriBytes, uriInfo)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 type PatternTable struct {
 	Account       string `json:"account"`
 	AccountId     uint64 `json:"account_id"`
@@ -370,20 +346,24 @@ func (pts *PatternTuples) String() string {
 	return strings.Join(ss, ",")
 }
 
-func EncodePatternTuples(pts *PatternTuples) (string, error) {
-	jsonTablePts, err := json.Marshal(pts)
+// JsonEncode encodes the object to json
+func JsonEncode(value any) (string, error) {
+	jbytes, err := json.Marshal(value)
 	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(jsonTablePts), err
+
+	return hex.EncodeToString(jbytes), nil
 }
 
-func DecodePatternTuples(jsonTuples string, pts *PatternTuples) error {
-	jsonBytes, err := hex.DecodeString(jsonTuples)
+// JsonDecode decodes the json bytes to objects
+func JsonDecode(jbytes string, value any) error {
+	jRawBytes, err := hex.DecodeString(jbytes)
 	if err != nil {
 		return err
 	}
-	err = json.Unmarshal(jsonBytes, &pts)
+
+	err = json.Unmarshal(jRawBytes, value)
 	if err != nil {
 		return err
 	}
