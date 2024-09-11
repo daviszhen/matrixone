@@ -1367,28 +1367,23 @@ func handleRestartCdc(ses *Session, execCtx *ExecCtx, st *tree.RestartCDC) error
 func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error) {
 	var targetTaskStatus task.TaskStatus
 	var taskName string
-	ts := getGlobalPu().TaskService
-	if ts == nil {
-		return moerr.NewInternalError(ctx,
-			"task service not ready yet, please try again later.")
-	}
-
 	conds := make([]taskservice.Condition, 0)
 	appendCond := func(cond ...taskservice.Condition) {
 		conds = append(conds, cond...)
 	}
+	accountId := ses.GetTenantInfo().GetTenantID()
 	switch stmt := st.(type) {
 	case *tree.DropCDC:
 		targetTaskStatus = task.TaskStatus_CancelRequested
 		if stmt.Option.All {
 			appendCond(
-				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
+				taskservice.WithAccountID(taskservice.EQ, accountId),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
 			taskName = stmt.Option.TaskName.String()
 			appendCond(
-				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
+				taskservice.WithAccountID(taskservice.EQ, accountId),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
@@ -1397,12 +1392,12 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		targetTaskStatus = task.TaskStatus_PauseRequested
 		if stmt.Option.All {
 			appendCond(
-				taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
+				taskservice.WithAccountID(taskservice.EQ, accountId),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
 		} else {
 			taskName = stmt.Option.TaskName.String()
-			appendCond(taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
+			appendCond(taskservice.WithAccountID(taskservice.EQ, accountId),
 				taskservice.WithTaskName(taskservice.EQ, stmt.Option.TaskName.String()),
 				taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 			)
@@ -1411,7 +1406,7 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		targetTaskStatus = task.TaskStatus_RestartRequested
 		taskName = stmt.TaskName.String()
 		appendCond(
-			taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
+			taskservice.WithAccountID(taskservice.EQ, accountId),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
@@ -1419,23 +1414,39 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 		targetTaskStatus = task.TaskStatus_ResumeRequested
 		taskName = stmt.TaskName.String()
 		appendCond(
-			taskservice.WithAccountID(taskservice.EQ, ses.GetTenantInfo().GetTenantID()),
+			taskservice.WithAccountID(taskservice.EQ, accountId),
 			taskservice.WithTaskName(taskservice.EQ, stmt.TaskName.String()),
 			taskservice.WithTaskType(taskservice.EQ, task.TaskType_CreateCdc.String()),
 		)
 	}
 
+	return runUpdateCdcTask(ctx, targetTaskStatus, uint64(accountId), taskName, conds...)
+}
+
+func runUpdateCdcTask(
+	ctx context.Context,
+	targetTaskStatus task.TaskStatus,
+	accountId uint64,
+	taskName string,
+	conds ...taskservice.Condition,
+) (err error) {
+	ts := getGlobalPu().TaskService
+	if ts == nil {
+		return moerr.NewInternalError(ctx,
+			"task service not ready yet, please try again later.")
+	}
 	updateCdcTaskFunc := func(
 		ctx context.Context,
 		targetStatus task.TaskStatus,
 		taskKeyMap map[taskservice.CdcTaskKey]struct{},
-		tx taskservice.SqlExecutor) (int, error) {
+		tx taskservice.SqlExecutor,
+	) (int, error) {
 		return updateCdcTask(
 			ctx,
 			targetStatus,
 			taskKeyMap,
 			tx,
-			uint64(ses.GetTenantInfo().GetTenantID()),
+			accountId,
 			taskName,
 		)
 	}
