@@ -1073,11 +1073,6 @@ func (m *mysqlTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, c
 	return daemonTaskRowsAffected, nil
 }
 
-type CdcTaskKey struct {
-	AccountId uint64
-	TaskId    string
-}
-
 func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, callback func(context.Context, task.TaskStatus, map[CdcTaskKey]struct{}, SqlExecutor) (int, error), condition ...Condition) (int, error) {
 	if taskFrameworkDisabled() {
 		return 0, nil

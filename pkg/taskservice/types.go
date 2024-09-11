@@ -684,3 +684,8 @@ func (cnlabels *CnLabels) HasAccount(account string) (bool, map[string]struct{})
 	cnMap, has := cnlabels.labels[account]
 	return has, cnMap
 }
+
+type CdcTaskKey struct {
+	AccountId uint64
+	TaskId    string
+}
