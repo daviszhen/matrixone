@@ -1469,8 +1469,7 @@ func runUpdateCdcTask(
 ) (err error) {
 	ts := getGlobalPu().TaskService
 	if ts == nil {
-		return moerr.NewInternalError(ctx,
-			"task service not ready yet, please try again later.")
+		return nil
 	}
 	updateCdcTaskFunc := func(
 		ctx context.Context,
