@@ -219,7 +219,7 @@ func (bat *AtomicBatch) Append(
 ) {
 	if batch != nil {
 		//ts columns
-		tsVec := vector.MustFixedCol[types.TS](batch.Vecs[tsColIdx])
+		tsVec := vector.MustFixedColWithTypeCheck[types.TS](batch.Vecs[tsColIdx])
 		//composited pk columns
 		compositedPkBytes := logtailreplay.EncodePrimaryKeyVector(batch.Vecs[compositedPkColIdx], packer)
 
