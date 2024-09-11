@@ -163,19 +163,6 @@ var (
 		"end_at, " +
 		"last_run, " +
 		"details from sys_daemon_task where 1=1"
-
-	selectCdcTask = "select account_id,task_id from `mo_catalog`.`mo_cdc_task` where 1=1"
-
-	deleteCdcMeta = "delete from `mo_catalog`.`mo_cdc_task` where 1=1"
-
-	updateCdcMeta = "update `mo_catalog`.`mo_cdc_task` set state = ? where 1=1"
-)
-
-const (
-	CdcRunning = "running"
-	CdcStopped = "stopped"
-
-	DeleteWatermarkFormat = "delete from mo_catalog.mo_cdc_watermark where account_id = %d and task_id = '%s'"
 )
 
 type mysqlTaskStorage struct {
@@ -1086,19 +1073,16 @@ func (m *mysqlTaskStorage) AddCdcTask(ctx context.Context, dt task.DaemonTask, c
 	return daemonTaskRowsAffected, nil
 }
 
-type cdcTaskKey struct {
-	accountId uint64
-	taskId    string
+type CdcTaskKey struct {
+	AccountId uint64
+	TaskId    string
 }
 
-func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, condition ...Condition) (int, error) {
+func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, callback func(context.Context, task.TaskStatus, map[CdcTaskKey]struct{}, SqlExecutor) (int, error), condition ...Condition) (int, error) {
 	if taskFrameworkDisabled() {
 		return 0, nil
 	}
 	var affectedCdcRow, affectedTaskRow int
-	var accountId uint64
-	var taskId string
-	var cnt int64
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -1115,88 +1099,10 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 		}
 	}()
 
-	c := newConditions(condition...)
-	//where : account_id = xxx and task_name = yyy
-	whereClauses := buildCdcTaskWhereClause(c)
-	//step1: query all account id & task id that we need from mo_cdc_task
-	query := selectCdcTask + whereClauses
-
-	rows, err := tx.QueryContext(ctx, query)
+	taskKeyMap := make(map[CdcTaskKey]struct{}, 0)
+	affectedCdcRow, err = callback(ctx, targetStatus, taskKeyMap, tx)
 	if err != nil {
 		return 0, err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	taskKeyMap := make(map[cdcTaskKey]struct{}, 0)
-
-	for rows.Next() {
-		if err = rows.Scan(&accountId, &taskId); err != nil {
-			return 0, err
-		}
-		tInfo := cdcTaskKey{accountId: accountId, taskId: taskId}
-		fmt.Fprintln(os.Stderr, "==>", "account id", accountId, "task id", taskId)
-		taskKeyMap[tInfo] = struct{}{}
-	}
-
-	var prepare *sql.Stmt
-	//step2: update or cancel cdc task
-	if targetStatus != task.TaskStatus_CancelRequested {
-		//Update cdc task
-		//updating mo_cdc_task table
-		updateSql := updateCdcMeta + whereClauses
-		prepare, err = tx.PrepareContext(ctx, updateSql)
-		if err != nil {
-			return 0, err
-		}
-		defer func() {
-			_ = prepare.Close()
-		}()
-
-		if prepare != nil {
-			//execute update cdc status in mo_cdc_task
-			var targetCdcStatus string
-			if targetStatus == task.TaskStatus_PauseRequested {
-				targetCdcStatus = CdcStopped
-			} else {
-				targetCdcStatus = CdcRunning
-			}
-			res, err := prepare.ExecContext(ctx, targetCdcStatus)
-			if err != nil {
-				return 0, err
-			}
-			affected, err := res.RowsAffected()
-			if err != nil {
-				return 0, err
-			}
-			affectedCdcRow += int(affected)
-		}
-
-		if targetStatus == task.TaskStatus_RestartRequested {
-			//delete mo_cdc_watermark
-			cnt, err = deleteWatermark(ctx, tx, taskKeyMap)
-			if err != nil {
-				return 0, err
-			}
-			affectedCdcRow += int(cnt)
-		}
-	} else {
-		//Cancel cdc task
-		//deleting mo_cdc_task
-		deleteSql := deleteCdcMeta + whereClauses
-		cnt, err = executeSql(ctx, tx, deleteSql)
-		if err != nil {
-			return 0, err
-		}
-		affectedCdcRow += int(cnt)
-
-		//delete mo_cdc_watermark
-		cnt, err = deleteWatermark(ctx, tx, taskKeyMap)
-		if err != nil {
-			return 0, err
-		}
-		affectedCdcRow += int(cnt)
 	}
 
 	//step3: collect daemon task that we want to update
@@ -1208,9 +1114,9 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 			continue
 		}
 		//skip task we do not need
-		tInfo := cdcTaskKey{
-			accountId: uint64(dTask.Details.AccountID), //from account  that creates cdc
-			taskId:    details.CreateCdc.TaskId,
+		tInfo := CdcTaskKey{
+			AccountId: uint64(dTask.Details.AccountID), //from account  that creates cdc
+			TaskId:    details.CreateCdc.TaskId,
 		}
 		if _, has := taskKeyMap[tInfo]; !has {
 			continue
@@ -1240,34 +1146,6 @@ func (m *mysqlTaskStorage) UpdateCdcTask(ctx context.Context, targetStatus task.
 	return affectedCdcRow, nil
 }
 
-func deleteWatermark(ctx context.Context, tx SqlExecutor, taskKeyMap map[cdcTaskKey]struct{}) (int64, error) {
-	tCount := int64(0)
-	cnt := int64(0)
-	var err error
-	//deleting mo_cdc_watermark belongs to cancelled cdc task
-	for tInfo, _ := range taskKeyMap {
-		deleteSql2 := fmt.Sprintf(DeleteWatermarkFormat, tInfo.accountId, tInfo.taskId)
-		cnt, err = executeSql(ctx, tx, deleteSql2)
-		if err != nil {
-			return 0, err
-		}
-		tCount += cnt
-	}
-	return tCount, nil
-}
-
-func executeSql(ctx context.Context, tx SqlExecutor, query string, args ...interface{}) (int64, error) {
-	exec, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, err
-	}
-	rows, err := exec.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	return rows, nil
-}
-
 func buildDaemonTaskWhereClause(c *conditions) string {
 	var clauseBuilder strings.Builder
 
@@ -1278,17 +1156,5 @@ func buildDaemonTaskWhereClause(c *conditions) string {
 		}
 	}
 
-	return clauseBuilder.String()
-}
-
-func buildCdcTaskWhereClause(c *conditions) string {
-	var clauseBuilder strings.Builder
-
-	for cond := range cdcWhereConditionCodes {
-		if cond, ok := (*c)[cond]; ok {
-			clauseBuilder.WriteString(" AND ")
-			clauseBuilder.WriteString(cond.sql())
-		}
-	}
 	return clauseBuilder.String()
 }

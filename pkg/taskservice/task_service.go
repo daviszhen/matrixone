@@ -239,8 +239,8 @@ func (s *taskService) AddCdcTask(ctx context.Context, metadata task.TaskMetadata
 	return s.store.AddCdcTask(ctx, dt, callback)
 }
 
-func (s *taskService) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, conds ...Condition) (int, error) {
-	return s.store.UpdateCdcTask(ctx, targetStatus, conds...)
+func (s *taskService) UpdateCdcTask(ctx context.Context, targetStatus task.TaskStatus, callback func(context.Context, task.TaskStatus, map[CdcTaskKey]struct{}, SqlExecutor) (int, error), conds ...Condition) (int, error) {
+	return s.store.UpdateCdcTask(ctx, targetStatus, callback, conds...)
 }
 
 func (s *taskService) Close() error {

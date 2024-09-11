@@ -31,6 +31,21 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/disttae/logtailreplay"
 )
 
+const (
+	AccountLevel      = "account"
+	ClusterLevel      = "cluster"
+	MysqlSink         = "mysql"
+	MatrixoneSink     = "matrixone"
+	ConsoleSink       = "console"
+	SourceUriPrefix   = "mysql://"
+	SinkUriPrefix     = "mysql://"
+	ConsolePrefix     = "console://" //only used in testing stage
+	EnableConsoleSink = true
+
+	SASCommon = "common"
+	SASError  = "error"
+)
+
 type Reader interface {
 	Run(ctx context.Context, ar *ActiveRoutine)
 	Close()
@@ -124,11 +139,10 @@ type RowIterator interface {
 }
 
 type DbTableInfo struct {
-	OriginString string
-
 	SourceAccountName string
 	SourceDbName      string
 	SourceTblName     string
+	SourceAccountId   uint64
 	SourceDbId        uint64
 	SourceTblId       uint64
 
@@ -299,9 +313,13 @@ func (info *UriInfo) GetEncodedPassword() (string, error) {
 	return AesCFBEncode([]byte(info.Password))
 }
 
+func (info *UriInfo) String() string {
+	return fmt.Sprintf("%s%s:%s@%s:%d", SourceUriPrefix, info.User, "******", info.Ip, info.Port)
+}
+
 type PatternTable struct {
-	Account       string `json:"account"`
 	AccountId     uint64 `json:"account_id"`
+	Account       string `json:"account"`
 	Database      string `json:"database"`
 	Table         string `json:"table"`
 	TableIsRegexp bool   `json:"table_is_regexp"`
