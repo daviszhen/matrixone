@@ -956,7 +956,7 @@ func (m *mysqlTaskStorage) RunQueryDaemonTask(ctx context.Context, db SqlExecuto
 				//no labels in the cluster
 				canRunCdc = true
 			} else {
-				has, cnMap := labels.HasAccount(createCdcDetails.CreateCdc.Account)
+				has, cnMap := labels.HasAccount(createCdcDetails.CreateCdc.Accounts[0].GetName())
 				if has && cnMap != nil {
 					//current cn in account labels' cn list
 					if _, in := cnMap[labels.cnUUID]; in {
@@ -973,7 +973,7 @@ func (m *mysqlTaskStorage) RunQueryDaemonTask(ctx context.Context, db SqlExecuto
 				logutil.Errorf("cn %s can not run cdc %s %s %s",
 					labels.cnUUID,
 					createCdcDetails.CreateCdc.TaskName,
-					createCdcDetails.CreateCdc.Account,
+					createCdcDetails.CreateCdc.Accounts[0].GetName(),
 					createCdcDetails.CreateCdc.TaskId)
 			}
 		} else {

@@ -210,9 +210,20 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	cdcLevel := cdcTaskOptionsMap["Level"]
 	cdcAccount := cdcTaskOptionsMap["Account"]
 
-	if cdcAccount == ClusterLevel {
-		return moerr.NewInternalErrorf(ctx, "does not support cluster level in 1.3")
+	if cdcLevel != AccountLevel {
+		return moerr.NewInternalError(ctx, "invalid level. only support account level in 1.3")
 	}
+
+	if cdcAccount != ses.GetTenantInfo().GetTenant() {
+		return moerr.NewInternalErrorf(ctx, "invalid account. account must be %s", ses.GetTenantInfo().GetTenant())
+	}
+
+	////////////
+	//!!!NOTE!!!
+	//1.3
+	//	level: account level
+	//	account: must be designated.
+	///////////
 
 	//step 1 : handle tables
 	jsonTables, tablePts, err := preprocessTables(ctx, ses, cdcLevel, cdcAccount, create.Tables)
@@ -245,7 +256,7 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 
 	dat := time.Now().UTC()
 
-	accInfo := ses.GetTenantInfo()
+	creatorAccInfo := ses.GetTenantInfo()
 	cdcId, _ := uuid.NewV7()
 
 	//step 4: check uri format and strip password
@@ -281,7 +292,7 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 
 	//step 5: create daemon task
 	insertSql := getSqlForNewCdcTask(
-		uint64(accInfo.GetTenantID()), //the account_id of cdc creator
+		uint64(creatorAccInfo.GetTenantID()), //the account_id of cdc creator
 		cdcId,
 		create.TaskName.String(),
 		jsonSrcUri, //json bytes
@@ -309,16 +320,17 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 
 	details := &task.Details{
 		//account info that create cdc
-		AccountID: accInfo.GetTenantID(),
-		Account:   accInfo.GetTenant(),
-		Username:  accInfo.GetUser(),
+		AccountID: creatorAccInfo.GetTenantID(),
+		Account:   creatorAccInfo.GetTenant(),
+		Username:  creatorAccInfo.GetUser(),
 		Details: &task.Details_CreateCdc{
 			CreateCdc: &task.CreateCdcDetails{
 				TaskName: create.TaskName.String(),
 				TaskId:   cdcId.String(),
 				Accounts: []*task.Account{
 					{
-						Name: "", //TODO:
+						Id:   uint64(creatorAccInfo.GetTenantID()),
+						Name: cdcAccount,
 					},
 				},
 			},
@@ -326,7 +338,7 @@ func doCreateCdc(ctx context.Context, ses *Session, create *tree.CreateCDC) (err
 	}
 
 	fmt.Fprintln(os.Stderr, "====>save cdc task",
-		accInfo.GetTenantID(),
+		creatorAccInfo.GetTenantID(),
 		cdcId,
 		create.TaskName,
 		create.SourceUri,
@@ -988,7 +1000,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 
 	fmt.Fprintln(os.Stderr, "====> cdc start")
 
-	ctx := defines.AttachAccountId(rootCtx, uint32(cdc.cdcTask.AccountId))
+	ctx := defines.AttachAccountId(rootCtx, uint32(cdc.cdcTask.Accounts[0].GetId()))
 
 	//step1 : get cdc task definition
 	err = cdc.retrieveCdcTask(ctx)
@@ -1023,7 +1035,7 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 	}
 
 	// start watermark updater
-	cdc.sunkWatermarkUpdater = cdc2.NewWatermarkUpdater(cdc.cdcTask.AccountId, cdc.cdcTask.TaskId, cdc.ie)
+	cdc.sunkWatermarkUpdater = cdc2.NewWatermarkUpdater(cdc.cdcTask.Accounts[0].GetId(), cdc.cdcTask.TaskId, cdc.ie)
 
 	count, err := cdc.sunkWatermarkUpdater.GetCountFromDb()
 	if err != nil {
@@ -1055,16 +1067,16 @@ func (cdc *CdcTask) Start(rootCtx context.Context, firstTime bool) (err error) {
 
 func (cdc *CdcTask) retrieveCdcTask(ctx context.Context) error {
 	cdcTaskId, _ := uuid.Parse(cdc.cdcTask.TaskId)
-	sql := getSqlForRetrievingCdcTask(cdc.cdcTask.AccountId, cdcTaskId)
+	sql := getSqlForRetrievingCdcTask(cdc.cdcTask.Accounts[0].GetId(), cdcTaskId)
 	res := cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
 	if res.Error() != nil {
 		return res.Error()
 	}
 
 	if res.RowCount() < 1 {
-		return moerr.NewInternalErrorf(ctx, "none cdc task for %d %s", cdc.cdcTask.AccountId, cdc.cdcTask.TaskId)
+		return moerr.NewInternalErrorf(ctx, "none cdc task for %d %s", cdc.cdcTask.Accounts[0].GetId(), cdc.cdcTask.TaskId)
 	} else if res.RowCount() > 1 {
-		return moerr.NewInternalErrorf(ctx, "duplicate cdc task for %d %s", cdc.cdcTask.AccountId, cdc.cdcTask.TaskId)
+		return moerr.NewInternalErrorf(ctx, "duplicate cdc task for %d %s", cdc.cdcTask.Accounts[0].GetId(), cdc.cdcTask.TaskId)
 	}
 
 	//sink_type
@@ -1139,7 +1151,7 @@ func (cdc *CdcTask) retrieveCdcTask(ctx context.Context) error {
 func (cdc *CdcTask) retrieveTable(ctx context.Context, dbName, tblName string) (*cdc2.DbTableInfo, error) {
 	var dbId, tblId uint64
 	var err error
-	sql := getSqlForDbIdAndTableId(cdc.cdcTask.AccountId, dbName, tblName)
+	sql := getSqlForDbIdAndTableId(cdc.cdcTask.Accounts[0].GetId(), dbName, tblName)
 	res := cdc.ie.Query(ctx, sql, ie.SessionOverrideOptions{})
 	if res.Error() != nil {
 		return nil, res.Error()
@@ -1312,7 +1324,7 @@ func updateCdc(ctx context.Context, ses *Session, st tree.Statement) (err error)
 
 func (cdc *CdcTask) addExecPipelineForTable(info *cdc2.DbTableInfo) error {
 	// reader --call--> sinker ----> remote db
-	ctx := defines.AttachAccountId(context.Background(), uint32(cdc.cdcTask.AccountId))
+	ctx := defines.AttachAccountId(context.Background(), uint32(cdc.cdcTask.Accounts[0].GetId()))
 
 	// add watermark to updater
 	watermark, err := cdc.sunkWatermarkUpdater.GetFromDb(info.SourceTblId)
