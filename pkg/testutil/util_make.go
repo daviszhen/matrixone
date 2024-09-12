@@ -43,7 +43,7 @@ var (
 	}
 
 	MakeTSVector = func(values []types.TS, nsp []uint64) *vector.Vector {
-		return makeVector(values, nsp, tSType)
+		return makeVector(values, nsp, tsType)
 	}
 
 	MakeInt8Vector = func(values []int8, nsp []uint64) *vector.Vector {
