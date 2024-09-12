@@ -383,8 +383,10 @@ var openDbConn = func(
 	return
 }
 
-func tryConn(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("mysql", dsn)
+var openDb = sql.Open
+
+var tryConn = func(dsn string) (*sql.DB, error) {
+	db, err := openDb("mysql", dsn)
 	if err != nil {
 		return nil, err
 	} else {

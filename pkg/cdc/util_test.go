@@ -21,6 +21,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/matrixorigin/matrixone/pkg/container/batch"
 	"github.com/matrixorigin/matrixone/pkg/container/bytejson"
 	"github.com/matrixorigin/matrixone/pkg/container/types"
@@ -28,6 +29,7 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/pb/plan"
 	"github.com/matrixorigin/matrixone/pkg/txn/client"
 	"github.com/matrixorigin/matrixone/pkg/vm/engine"
+	"github.com/prashantv/gostub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -649,52 +651,28 @@ func Test_generateSalt(t *testing.T) {
 }
 
 func Test_openDbConn(t *testing.T) {
-	type args struct {
-		user     string
-		password string
-		ip       string
-		port     int
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantDb  *sql.DB
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotDb, err := openDbConn(tt.args.user, tt.args.password, tt.args.ip, tt.args.port)
-			if !tt.wantErr(t, err, fmt.Sprintf("openDbConn(%v, %v, %v, %v)", tt.args.user, tt.args.password, tt.args.ip, tt.args.port)) {
-				return
-			}
-			assert.Equalf(t, tt.wantDb, gotDb, "openDbConn(%v, %v, %v, %v)", tt.args.user, tt.args.password, tt.args.ip, tt.args.port)
-		})
-	}
+	stub := gostub.Stub(&tryConn, func(_ string) (*sql.DB, error) {
+		return nil, nil
+	})
+	defer stub.Reset()
+
+	conn, err := openDbConn("user", "password", "host", 1234)
+	assert.Nil(t, err)
+	assert.Nil(t, conn)
 }
 
 func Test_tryConn(t *testing.T) {
-	type args struct {
-		dsn string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    *sql.DB
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tryConn(tt.args.dsn)
-			if !tt.wantErr(t, err, fmt.Sprintf("tryConn(%v)", tt.args.dsn)) {
-				return
-			}
-			assert.Equalf(t, tt.want, got, "tryConn(%v)", tt.args.dsn)
-		})
-	}
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	mock.ExpectPing()
+
+	stub := gostub.Stub(&openDb, func(_, _ string) (*sql.DB, error) {
+		return db, nil
+	})
+	defer stub.Reset()
+	got, err := tryConn("dsn")
+	assert.NoError(t, err)
+	assert.Equal(t, db, got)
 }
 
 func TestGetTxnOp(t *testing.T) {

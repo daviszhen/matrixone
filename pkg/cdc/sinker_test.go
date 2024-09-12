@@ -29,6 +29,75 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestNewSinker(t *testing.T) {
+	type args struct {
+		sinkUri          UriInfo
+		dbTblInfo        *DbTableInfo
+		watermarkUpdater *WatermarkUpdater
+		tableDef         *plan.TableDef
+		retryTimes       int
+		retryDuration    time.Duration
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    Sinker
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			args: args{
+				sinkUri: UriInfo{
+					SinkTyp: ConsoleSink,
+				},
+				dbTblInfo:        &DbTableInfo{},
+				watermarkUpdater: nil,
+				tableDef:         nil,
+				retryTimes:       0,
+				retryDuration:    0,
+			},
+			want: &consoleSinker{
+				dbTblInfo:        &DbTableInfo{},
+				watermarkUpdater: nil,
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			args: args{
+				sinkUri: UriInfo{
+					SinkTyp: MysqlSink,
+				},
+				dbTblInfo:        &DbTableInfo{},
+				watermarkUpdater: nil,
+				tableDef:         nil,
+				retryTimes:       0,
+				retryDuration:    0,
+			},
+			want:    nil,
+			wantErr: assert.NoError,
+		},
+	}
+
+	sinkStub := gostub.Stub(&NewMysqlSink, func(_, _, _ string, _, _ int, _ time.Duration) (Sink, error) {
+		return nil, nil
+	})
+	defer sinkStub.Reset()
+
+	sinkerStub := gostub.Stub(&NewMysqlSinker, func(_ Sink, _ *DbTableInfo, _ *WatermarkUpdater, _ *plan.TableDef) Sinker {
+		return nil
+	})
+	defer sinkerStub.Reset()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewSinker(tt.args.sinkUri, tt.args.dbTblInfo, tt.args.watermarkUpdater, tt.args.tableDef, tt.args.retryTimes, tt.args.retryDuration)
+			if !tt.wantErr(t, err, fmt.Sprintf("NewSinker(%v, %v, %v, %v, %v, %v)", tt.args.sinkUri, tt.args.dbTblInfo, tt.args.watermarkUpdater, tt.args.tableDef, tt.args.retryTimes, tt.args.retryDuration)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "NewSinker(%v, %v, %v, %v, %v, %v)", tt.args.sinkUri, tt.args.dbTblInfo, tt.args.watermarkUpdater, tt.args.tableDef, tt.args.retryTimes, tt.args.retryDuration)
+		})
+	}
+}
+
 func TestNewConsoleSinker(t *testing.T) {
 	type args struct {
 		dbTblInfo        *DbTableInfo
@@ -39,11 +108,48 @@ func TestNewConsoleSinker(t *testing.T) {
 		args args
 		want Sinker
 	}{
-		// TODO: Add test cases.
+		{
+			args: args{
+				dbTblInfo:        &DbTableInfo{},
+				watermarkUpdater: nil,
+			},
+			want: &consoleSinker{
+				dbTblInfo:        &DbTableInfo{},
+				watermarkUpdater: nil,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equalf(t, tt.want, NewConsoleSinker(tt.args.dbTblInfo, tt.args.watermarkUpdater), "NewConsoleSinker(%v, %v)", tt.args.dbTblInfo, tt.args.watermarkUpdater)
+		})
+	}
+}
+
+func Test_consoleSinker_Sink(t *testing.T) {
+	type fields struct {
+		dbTblInfo        *DbTableInfo
+		watermarkUpdater *WatermarkUpdater
+	}
+	type args struct {
+		ctx  context.Context
+		data *DecoderOutput
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &consoleSinker{
+				dbTblInfo:        tt.fields.dbTblInfo,
+				watermarkUpdater: tt.fields.watermarkUpdater,
+			}
+			tt.wantErr(t, s.Sink(tt.args.ctx, tt.args.data), fmt.Sprintf("Sink(%v, %v)", tt.args.ctx, tt.args.data))
 		})
 	}
 }
@@ -100,6 +206,42 @@ func TestNewMysqlSink(t *testing.T) {
 	}
 }
 
+func Test_mysqlSink_Close(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	mock.ExpectClose()
+
+	sink := &mysqlSink{
+		user:          "root",
+		password:      "123456",
+		ip:            "127.0.0.1",
+		port:          3306,
+		retryTimes:    3,
+		retryDuration: 3 * time.Second,
+		conn:          db,
+	}
+	sink.Close()
+	assert.Nil(t, sink.conn)
+}
+
+func Test_mysqlSink_Send(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	mock.ExpectExec("sql").WillReturnResult(sqlmock.NewResult(1, 1))
+
+	sink := &mysqlSink{
+		user:          "root",
+		password:      "123456",
+		ip:            "127.0.0.1",
+		port:          3306,
+		retryTimes:    DefaultRetryTimes,
+		retryDuration: DefaultRetryDuration,
+		conn:          db,
+	}
+	err = sink.Send(context.Background(), "sql")
+	assert.NoError(t, err)
+}
+
 func TestNewMysqlSinker(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -133,165 +275,6 @@ func TestNewMysqlSinker(t *testing.T) {
 		},
 	}
 	NewMysqlSinker(sink, dbTblInfo, nil, tableDef)
-}
-
-func TestNewSinker(t *testing.T) {
-	type args struct {
-		sinkUri          UriInfo
-		dbTblInfo        *DbTableInfo
-		watermarkUpdater *WatermarkUpdater
-		tableDef         *plan.TableDef
-		retryTimes       int
-		retryDuration    time.Duration
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    Sinker
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewSinker(tt.args.sinkUri, tt.args.dbTblInfo, tt.args.watermarkUpdater, tt.args.tableDef, tt.args.retryTimes, tt.args.retryDuration)
-			if !tt.wantErr(t, err, fmt.Sprintf("NewSinker(%v, %v, %v, %v, %v, %v)", tt.args.sinkUri, tt.args.dbTblInfo, tt.args.watermarkUpdater, tt.args.tableDef, tt.args.retryTimes, tt.args.retryDuration)) {
-				return
-			}
-			assert.Equalf(t, tt.want, got, "NewSinker(%v, %v, %v, %v, %v, %v)", tt.args.sinkUri, tt.args.dbTblInfo, tt.args.watermarkUpdater, tt.args.tableDef, tt.args.retryTimes, tt.args.retryDuration)
-		})
-	}
-}
-
-func Test_consoleSinker_Sink(t *testing.T) {
-	type fields struct {
-		dbTblInfo        *DbTableInfo
-		watermarkUpdater *WatermarkUpdater
-	}
-	type args struct {
-		ctx  context.Context
-		data *DecoderOutput
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &consoleSinker{
-				dbTblInfo:        tt.fields.dbTblInfo,
-				watermarkUpdater: tt.fields.watermarkUpdater,
-			}
-			tt.wantErr(t, s.Sink(tt.args.ctx, tt.args.data), fmt.Sprintf("Sink(%v, %v)", tt.args.ctx, tt.args.data))
-		})
-	}
-}
-
-func Test_mysqlSink_Close(t *testing.T) {
-	type fields struct {
-		conn          *sql.DB
-		user          string
-		password      string
-		ip            string
-		port          int
-		retryTimes    int
-		retryDuration time.Duration
-	}
-	tests := []struct {
-		name   string
-		fields fields
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &mysqlSink{
-				conn:          tt.fields.conn,
-				user:          tt.fields.user,
-				password:      tt.fields.password,
-				ip:            tt.fields.ip,
-				port:          tt.fields.port,
-				retryTimes:    tt.fields.retryTimes,
-				retryDuration: tt.fields.retryDuration,
-			}
-			s.Close()
-		})
-	}
-}
-
-func Test_mysqlSink_Send(t *testing.T) {
-	type fields struct {
-		conn          *sql.DB
-		user          string
-		password      string
-		ip            string
-		port          int
-		retryTimes    int
-		retryDuration time.Duration
-	}
-	type args struct {
-		ctx context.Context
-		sql string
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &mysqlSink{
-				conn:          tt.fields.conn,
-				user:          tt.fields.user,
-				password:      tt.fields.password,
-				ip:            tt.fields.ip,
-				port:          tt.fields.port,
-				retryTimes:    tt.fields.retryTimes,
-				retryDuration: tt.fields.retryDuration,
-			}
-			tt.wantErr(t, s.Send(tt.args.ctx, tt.args.sql), fmt.Sprintf("Send(%v, %v)", tt.args.ctx, tt.args.sql))
-		})
-	}
-}
-
-func Test_mysqlSink_connect(t *testing.T) {
-	type fields struct {
-		conn          *sql.DB
-		user          string
-		password      string
-		ip            string
-		port          int
-		retryTimes    int
-		retryDuration time.Duration
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &mysqlSink{
-				conn:          tt.fields.conn,
-				user:          tt.fields.user,
-				password:      tt.fields.password,
-				ip:            tt.fields.ip,
-				port:          tt.fields.port,
-				retryTimes:    tt.fields.retryTimes,
-				retryDuration: tt.fields.retryDuration,
-			}
-			tt.wantErr(t, s.connect(), fmt.Sprintf("connect()"))
-		})
-	}
 }
 
 func Test_mysqlSinker_Sink(t *testing.T) {
@@ -353,175 +336,102 @@ func Test_mysqlSinker_Sink(t *testing.T) {
 }
 
 func Test_mysqlSinker_appendSqlBuf(t *testing.T) {
-	type fields struct {
-		mysql            Sink
-		dbTblInfo        *DbTableInfo
-		watermarkUpdater *WatermarkUpdater
-		maxAllowedPacket uint64
-		sqlBuf           []byte
-		rowBuf           []byte
-		insertPrefix     []byte
-		deletePrefix     []byte
-		tsInsertPrefix   []byte
-		tsDeletePrefix   []byte
-		insertIters      []RowIterator
-		deleteIters      []RowIterator
-		insertTypes      []*types.Type
-		deleteTypes      []*types.Type
-		insertRow        []any
-		deleteRow        []any
-		preRowType       RowType
+	tsInsertPrefix := "/* tsInsertPrefix */REPLACE INTO `db`.`table` VALUES "
+	tsDeletePrefix := "/* tsDeletePrefix */DELETE FROM `db`.`table` WHERE a IN ("
+
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	mock.ExpectExec(".*").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(".*").WillReturnResult(sqlmock.NewResult(1, 1))
+
+	sink := &mysqlSink{
+		user:          "root",
+		password:      "123456",
+		ip:            "127.0.0.1",
+		port:          3306,
+		retryTimes:    DefaultRetryTimes,
+		retryDuration: DefaultRetryDuration,
+		conn:          db,
 	}
-	type args struct {
-		ctx     context.Context
-		rowType RowType
+
+	s := &mysqlSinker{
+		mysql:          sink,
+		sqlBuf:         make([]byte, 0, len(tsDeletePrefix)+len("delete")+2),
+		tsInsertPrefix: []byte(tsInsertPrefix),
+		tsDeletePrefix: []byte(tsDeletePrefix),
+		preRowType:     NoOp,
 	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &mysqlSinker{
-				mysql:            tt.fields.mysql,
-				dbTblInfo:        tt.fields.dbTblInfo,
-				watermarkUpdater: tt.fields.watermarkUpdater,
-				maxAllowedPacket: tt.fields.maxAllowedPacket,
-				sqlBuf:           tt.fields.sqlBuf,
-				rowBuf:           tt.fields.rowBuf,
-				insertPrefix:     tt.fields.insertPrefix,
-				deletePrefix:     tt.fields.deletePrefix,
-				tsInsertPrefix:   tt.fields.tsInsertPrefix,
-				tsDeletePrefix:   tt.fields.tsDeletePrefix,
-				insertIters:      tt.fields.insertIters,
-				deleteIters:      tt.fields.deleteIters,
-				insertTypes:      tt.fields.insertTypes,
-				deleteTypes:      tt.fields.deleteTypes,
-				insertRow:        tt.fields.insertRow,
-				deleteRow:        tt.fields.deleteRow,
-				preRowType:       tt.fields.preRowType,
-			}
-			tt.wantErr(t, s.appendSqlBuf(tt.args.ctx, tt.args.rowType), fmt.Sprintf("appendSqlBuf(%v, %v)", tt.args.ctx, tt.args.rowType))
-		})
-	}
+
+	// test insert
+	s.sqlBuf = append(s.sqlBuf[:0], s.tsInsertPrefix...)
+	s.rowBuf = []byte("insert")
+	// not exceed cap
+	err = s.appendSqlBuf(context.Background(), InsertRow)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(tsInsertPrefix+"insert"), s.sqlBuf)
+	// exceed cap
+	err = s.appendSqlBuf(context.Background(), InsertRow)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(tsInsertPrefix+"insert"), s.sqlBuf)
+
+	// test delete
+	s.sqlBuf = append(s.sqlBuf[:0], s.tsDeletePrefix...)
+	s.rowBuf = []byte("delete")
+	// not exceed cap
+	err = s.appendSqlBuf(context.Background(), DeleteRow)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(tsDeletePrefix+"delete"), s.sqlBuf)
+	// exceed cap
+	err = s.appendSqlBuf(context.Background(), DeleteRow)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(tsDeletePrefix+"delete"), s.sqlBuf)
 }
 
 func Test_mysqlSinker_getDeleteRowBuf(t *testing.T) {
-	type fields struct {
-		mysql            Sink
-		dbTblInfo        *DbTableInfo
-		watermarkUpdater *WatermarkUpdater
-		maxAllowedPacket uint64
-		sqlBuf           []byte
-		rowBuf           []byte
-		insertPrefix     []byte
-		deletePrefix     []byte
-		tsInsertPrefix   []byte
-		tsDeletePrefix   []byte
-		insertIters      []RowIterator
-		deleteIters      []RowIterator
-		insertTypes      []*types.Type
-		deleteTypes      []*types.Type
-		insertRow        []any
-		deleteRow        []any
-		preRowType       RowType
+	// single col pk
+	s := &mysqlSinker{
+		rowBuf:    make([]byte, 0, 1024),
+		deleteRow: []any{uint64(1)},
+		deleteTypes: []*types.Type{
+			{Oid: types.T_uint64},
+		},
 	}
-	type args struct {
-		ctx context.Context
+	err := s.getDeleteRowBuf(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("(1)"), s.rowBuf)
+
+	// multi cols pk
+	s = &mysqlSinker{
+		rowBuf:    make([]byte, 0, 1024),
+		deleteRow: []any{[]byte{}},
+		deleteTypes: []*types.Type{
+			{Oid: types.T_uint64},
+			{Oid: types.T_uint64},
+		},
 	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &mysqlSinker{
-				mysql:            tt.fields.mysql,
-				dbTblInfo:        tt.fields.dbTblInfo,
-				watermarkUpdater: tt.fields.watermarkUpdater,
-				maxAllowedPacket: tt.fields.maxAllowedPacket,
-				sqlBuf:           tt.fields.sqlBuf,
-				rowBuf:           tt.fields.rowBuf,
-				insertPrefix:     tt.fields.insertPrefix,
-				deletePrefix:     tt.fields.deletePrefix,
-				tsInsertPrefix:   tt.fields.tsInsertPrefix,
-				tsDeletePrefix:   tt.fields.tsDeletePrefix,
-				insertIters:      tt.fields.insertIters,
-				deleteIters:      tt.fields.deleteIters,
-				insertTypes:      tt.fields.insertTypes,
-				deleteTypes:      tt.fields.deleteTypes,
-				insertRow:        tt.fields.insertRow,
-				deleteRow:        tt.fields.deleteRow,
-				preRowType:       tt.fields.preRowType,
-			}
-			tt.wantErr(t, s.getDeleteRowBuf(tt.args.ctx), fmt.Sprintf("getDeleteRowBuf(%v)", tt.args.ctx))
-		})
-	}
+
+	stub := gostub.Stub(&unpackWithSchema, func(_ []byte) (types.Tuple, []types.T, error) {
+		return types.Tuple{uint64(1), uint64(2)}, nil, nil
+	})
+	defer stub.Reset()
+
+	err = s.getDeleteRowBuf(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("(1,2)"), s.rowBuf)
 }
 
 func Test_mysqlSinker_getInsertRowBuf(t *testing.T) {
-	type fields struct {
-		mysql            Sink
-		dbTblInfo        *DbTableInfo
-		watermarkUpdater *WatermarkUpdater
-		maxAllowedPacket uint64
-		sqlBuf           []byte
-		rowBuf           []byte
-		insertPrefix     []byte
-		deletePrefix     []byte
-		tsInsertPrefix   []byte
-		tsDeletePrefix   []byte
-		insertIters      []RowIterator
-		deleteIters      []RowIterator
-		insertTypes      []*types.Type
-		deleteTypes      []*types.Type
-		insertRow        []any
-		deleteRow        []any
-		preRowType       RowType
+	s := &mysqlSinker{
+		rowBuf:    make([]byte, 0, 1024),
+		insertRow: []any{uint64(1), []byte("a")},
+		insertTypes: []*types.Type{
+			{Oid: types.T_uint64},
+			{Oid: types.T_varchar},
+		},
 	}
-	type args struct {
-		ctx context.Context
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &mysqlSinker{
-				mysql:            tt.fields.mysql,
-				dbTblInfo:        tt.fields.dbTblInfo,
-				watermarkUpdater: tt.fields.watermarkUpdater,
-				maxAllowedPacket: tt.fields.maxAllowedPacket,
-				sqlBuf:           tt.fields.sqlBuf,
-				rowBuf:           tt.fields.rowBuf,
-				insertPrefix:     tt.fields.insertPrefix,
-				deletePrefix:     tt.fields.deletePrefix,
-				tsInsertPrefix:   tt.fields.tsInsertPrefix,
-				tsDeletePrefix:   tt.fields.tsDeletePrefix,
-				insertIters:      tt.fields.insertIters,
-				deleteIters:      tt.fields.deleteIters,
-				insertTypes:      tt.fields.insertTypes,
-				deleteTypes:      tt.fields.deleteTypes,
-				insertRow:        tt.fields.insertRow,
-				deleteRow:        tt.fields.deleteRow,
-				preRowType:       tt.fields.preRowType,
-			}
-			tt.wantErr(t, s.getInsertRowBuf(tt.args.ctx), fmt.Sprintf("getInsertRowBuf(%v)", tt.args.ctx))
-		})
-	}
+	err := s.getInsertRowBuf(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("(1,'a')"), s.rowBuf)
 }
 
 func Test_mysqlSinker_sinkCkp(t *testing.T) {
@@ -810,24 +720,6 @@ func Test_mysqlSinker_sinkTail(t *testing.T) {
 				preRowType:       tt.fields.preRowType,
 			}
 			tt.wantErr(t, s.sinkTail(tt.args.ctx, tt.args.insertBatch, tt.args.deleteBatch), fmt.Sprintf("sinkTail(%v, %v, %v)", tt.args.ctx, tt.args.insertBatch, tt.args.deleteBatch))
-		})
-	}
-}
-
-func Test_genPrimaryKeyStr(t *testing.T) {
-	type args struct {
-		tableDef *plan.TableDef
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, genPrimaryKeyStr(tt.args.tableDef), "genPrimaryKeyStr(%v)", tt.args.tableDef)
 		})
 	}
 }
