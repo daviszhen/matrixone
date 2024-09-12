@@ -100,29 +100,28 @@ type DecoderOutput struct {
 	checkpointBat  *batch.Batch
 	insertAtmBatch *AtomicBatch
 	deleteAtmBatch *AtomicBatch
-	err            error
 }
 
-func (d *DecoderOutput) ckpBatSize() int {
-	if d.checkpointBat == nil {
-		return 0
-	}
-	return d.checkpointBat.RowCount()
-}
-
-func (d *DecoderOutput) insertBatSize() int {
-	if d.insertAtmBatch == nil || d.insertAtmBatch.Rows == nil {
-		return 0
-	}
-	return d.insertAtmBatch.Rows.Len()
-}
-
-func (d *DecoderOutput) deleteBatSize() int {
-	if d.deleteAtmBatch == nil || d.deleteAtmBatch.Rows == nil {
-		return 0
-	}
-	return d.deleteAtmBatch.Rows.Len()
-}
+//func (d *DecoderOutput) ckpBatSize() int {
+//	if d.checkpointBat == nil {
+//		return 0
+//	}
+//	return d.checkpointBat.RowCount()
+//}
+//
+//func (d *DecoderOutput) insertBatSize() int {
+//	if d.insertAtmBatch == nil || d.insertAtmBatch.Rows == nil {
+//		return 0
+//	}
+//	return d.insertAtmBatch.Rows.Len()
+//}
+//
+//func (d *DecoderOutput) deleteBatSize() int {
+//	if d.deleteAtmBatch == nil || d.deleteAtmBatch.Rows == nil {
+//		return 0
+//	}
+//	return d.deleteAtmBatch.Rows.Len()
+//}
 
 type RowType int
 

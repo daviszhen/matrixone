@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -381,7 +380,7 @@ func openDbConn(
 		}
 		time.Sleep(time.Second)
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "^^^^^ openDbConn failed\n")
+	logutil.Error("^^^^^ openDbConn failed")
 	return
 }
 
@@ -452,7 +451,7 @@ func TrimSpace(values []string) []string {
 	ForEach[string](values, func(v string) {
 		res := strings.TrimSpace(v)
 		if len(res) > 0 {
-			ret = append(ret)
+			ret = append(ret, res)
 		}
 	})
 	return ret

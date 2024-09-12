@@ -23,7 +23,6 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1589,19 +1588,19 @@ func tableNameIsLegal(name string) bool {
 	return isLegal(name, createTableSqls)
 }
 
-func tableNameIsRegexpr(s string) bool {
-	if len(s) < 2 {
-		return false
-	}
-	if strings.HasPrefix(s, "/") && strings.HasSuffix(s, "/") {
-		_, err := regexp.Compile(s)
-		if err != nil {
-			return false
-		}
-		return true
-	}
-	return false
-}
+//func tableNameIsRegexpr(s string) bool {
+//	if len(s) < 2 {
+//		return false
+//	}
+//	if strings.HasPrefix(s, "/") && strings.HasSuffix(s, "/") {
+//		_, err := regexp.Compile(s)
+//		if err != nil {
+//			return false
+//		}
+//		return true
+//	}
+//	return false
+//}
 
 // compositedUriInfo uri according to the format: mysql://root:111@127.0.0.1:6001
 // if valid, return true and extracted info
@@ -1637,7 +1636,7 @@ func compositedUriInfo(uri string, uriPrefix string) (bool, cdc.UriInfo) {
 	ip := sep3[0]
 	port := sep3[1]
 	portInt32, err := strconv.ParseUint(port, 10, 32)
-	if err != nil || portInt32 < 0 || portInt32 > 65535 {
+	if err != nil || portInt32 > 65535 {
 		return false, cdc.UriInfo{}
 	}
 	return true, cdc.UriInfo{
