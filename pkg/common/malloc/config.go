@@ -17,8 +17,9 @@ package malloc
 import (
 	"sync/atomic"
 
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"go.uber.org/zap"
+
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 )
 
 type Config struct {
@@ -47,7 +48,7 @@ var defaultConfig = func() *atomic.Pointer[Config] {
 
 	// default config
 	ret.Store(&Config{
-		CheckFraction:     ptrTo(uint32(4096)),
+		CheckFraction:     ptrTo(uint32(1)),
 		EnableMetrics:     ptrTo(true),
 		FullStackFraction: ptrTo(uint32(10)),
 		HashmapSoftLimit:  ptrTo(uint64(48 * (1 << 30))),
