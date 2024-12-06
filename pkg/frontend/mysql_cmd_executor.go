@@ -451,7 +451,7 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 			tblNames = append(tblNames, tableName)
 			tblIdxes = append(tblIdxes, i)
 		} else if r.GetTableDef(ctx).TableType == catalog.SystemViewRel {
-			for i := 0; i < 16; i++ {
+			for i := 0; i < 17; i++ {
 				// only remain name and created_time
 				if i == 0 || i == 10 {
 					continue
@@ -459,14 +459,14 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 				row[i] = nil
 			}
 			// comment
-			row[16] = "VIEW"
+			row[17] = "VIEW"
 		}
-		roleId := row[17].(uint32)
+		roleId := row[18].(uint32)
 		// role name
 		if tableName == catalog.MO_DATABASE || tableName == catalog.MO_TABLES || tableName == catalog.MO_COLUMNS {
-			row[18] = moAdminRoleName
+			row[19] = moAdminRoleName
 		} else {
-			if row[18], err = getRoleName(roleId); err != nil {
+			if row[19], err = getRoleName(roleId); err != nil {
 				return err
 			}
 		}
@@ -480,8 +480,8 @@ func handleShowTableStatus(ses *Session, execCtx *ExecCtx, stmt *tree.ShowTableS
 	}
 	for i, tblName := range tblNames {
 		idx := tblIdxes[i]
-		ses.data[idx][3] = rows[tblName]
-		ses.data[idx][5] = sizes[tblName]
+		ses.data[idx][4] = rows[tblName]
+		ses.data[idx][6] = sizes[tblName]
 	}
 	return nil
 }

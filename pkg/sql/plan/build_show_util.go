@@ -302,7 +302,7 @@ func ConstructCreateTableSQL(ctx CompilerContext, tableDef *plan.TableDef, snaps
 		createStr += "\n"
 	}
 	createStr += ")"
-	createStr += " ENGINE=Tae DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"
+	createStr += " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"
 
 	var comment string
 	var partition string
