@@ -607,7 +607,7 @@ func buildShowColumns(stmt *tree.ShowColumns, ctx CompilerContext) (*Plan, error
 		accountClause := fmt.Sprintf("col.account_id = %v or (col.account_id = 0 and (%s))", accountId, mustShowTable+clusterTable)
 		sql = "SELECT col.attname `Field`, CASE WHEN LENGTH(col.attr_enum) > 0 THEN mo_show_visible_bin_enum(col.atttyp, col.attr_enum) ELSE mo_show_visible_bin(col.atttyp, 3) END AS `Type`, iff(col.attnotnull = 0, 'YES', 'NO') `Null`, %s, mo_show_visible_bin(col.att_default, 4) `Default`, CASE WHEN tbl.relkind = 'r' and col.att_is_auto_increment = 1 THEN 'auto_increment' ELSE '' END AS `Extra`,  col.att_comment `Comment` FROM %s.mo_columns col left join %s.mo_tables tbl ON col.att_relname_id = tbl.rel_id WHERE col.att_database = '%s' AND col.att_relname = '%s' AND (%s) AND col.att_is_hidden = 0 ORDER BY col.attnum"
 		if stmt.Full {
-			sql = "SELECT col.attname `Field`, CASE WHEN LENGTH(col.attr_enum) > 0 THEN mo_show_visible_bin_enum(col.atttyp, col.attr_enum) ELSE mo_show_visible_bin(col.atttyp, 3) END AS `Type`, null `Collation`, iff(col.attnotnull = 0, 'YES', 'NO') `Null`, %s, mo_show_visible_bin(col.att_default, 4) `Default`, CASE WHEN tbl.relkind = 'r' and col.att_is_auto_increment = 1 THEN 'auto_increment' ELSE '' END AS `Extra`,'select,insert,update,references' `Privileges`, col.att_comment `Comment` FROM %s.mo_columns col left join %s.mo_tables tbl ON col.att_relname_id = tbl.rel_id WHERE col.att_database = '%s' AND col.att_relname = '%s' AND (%s) AND col.att_is_hidden = 0 ORDER BY col.attnum"
+			sql = "SELECT col.attname `Field`, CASE WHEN LENGTH(col.attr_enum) > 0 THEN mo_show_visible_bin_enum(col.atttyp, col.attr_enum) ELSE mo_show_visible_bin(col.atttyp, 3) END AS `Type`, 'utf8mb4_bin' `Collation`, iff(col.attnotnull = 0, 'YES', 'NO') `Null`, %s, mo_show_visible_bin(col.att_default, 4) `Default`, CASE WHEN tbl.relkind = 'r' and col.att_is_auto_increment = 1 THEN 'auto_increment' ELSE '' END AS `Extra`,'select,insert,update,references' `Privileges`, col.att_comment `Comment` FROM %s.mo_columns col left join %s.mo_tables tbl ON col.att_relname_id = tbl.rel_id WHERE col.att_database = '%s' AND col.att_relname = '%s' AND (%s) AND col.att_is_hidden = 0 ORDER BY col.attnum"
 		}
 		sql = fmt.Sprintf(sql, keyStr, MO_CATALOG_DB_NAME, MO_CATALOG_DB_NAME, dbName, tblName, accountClause)
 	} else {
@@ -833,15 +833,15 @@ func buildShowIndex(stmt *tree.ShowIndex, ctx CompilerContext) (*Plan, error) {
 		"`idx`.`ordinal_position` as `Seq_in_index`, " +
 		"`idx`.`column_name` as `Column_name`, " +
 		"'A' as `Collation`, 0 as `Cardinality`, " +
-		"'NULL' as `Sub_part`, " +
+		"'    NULL' as `Sub_part`, " +
 		"'NULL' as `Packed`, " +
 		"if(`tcl`.`attnotnull` = 0, 'YES', '') as `Null`, " +
-		"`idx`.`algo` as 'Index_type', " +
+		"'BTREE' as 'Index_type', " +
 		"'' as `Comment`, " +
 		"`idx`.`comment` as `Index_comment`, " +
-		"`idx`.`algo_params` as `Index_params`, " +
 		"if(`idx`.`is_visible` = 1, 'YES', 'NO') as `Visible`, " +
-		"'NULL' as `Expression` " +
+		"'NULL' as `Expression`, " +
+		"`idx`.`algo_params` as `Index_params` " +
 		"from `%s`.`mo_indexes` `idx` left join `%s`.`mo_columns` `tcl` " +
 		"on (`idx`.`table_id` = `tcl`.`att_relname_id` and `idx`.`column_name` = `tcl`.`attname`) " +
 		"where `tcl`.`att_database` = '%s' AND " +
