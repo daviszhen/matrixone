@@ -3705,21 +3705,21 @@ func doDropAccount(ctx context.Context, ses *Session, da *dropAccount) (err erro
 		// 	}
 		// }
 
-		// ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, getPubInfoSql)
-		// // unpublish all publications
-		// pubInfos, rtnErr := getPubInfos(deleteCtx, bh, "")
-		// if rtnErr != nil {
-		// 	return
-		// }
-		// for _, pubInfo := range pubInfos {
-		// 	ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, pubInfo.PubName)
-		// 	if rtnErr = dropPublication(deleteCtx, bh, true, da.Name, pubInfo.PubName); rtnErr != nil {
-		// 		if isDisallowedError(rtnErr) {
-		// 			ses.Infof(ctx, "[EOF] dropAccount %s sql: %s, error: %s", da.Name, pubInfo.PubName, rtnErr.Error())
-		// 		}
-		// 		return
-		// 	}
-		// }
+		ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, getPubInfoSql)
+		// unpublish all publications
+		pubInfos, rtnErr := getPubInfos(deleteCtx, bh, "")
+		if rtnErr != nil {
+			return
+		}
+		for _, pubInfo := range pubInfos {
+			ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, pubInfo.PubName)
+			if rtnErr = dropPublication(deleteCtx, bh, true, da.Name, pubInfo.PubName); rtnErr != nil {
+				if isDisallowedError(rtnErr) {
+					ses.Infof(ctx, "[EOF] dropAccount %s sql: %s, error: %s", da.Name, pubInfo.PubName, rtnErr.Error())
+				}
+				return
+			}
+		}
 
 		//drop databases created by user
 		databases = make(map[string]int8)
@@ -3789,35 +3789,35 @@ func doDropAccount(ctx context.Context, ses *Session, da *dropAccount) (err erro
 			}
 		}
 
-		// ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, getSubsSql)
-		// // alter sub_account field in mo_pubs which contains accountName
-		// subInfos, rtnErr := getSubInfosFromSub(deleteCtx, bh, "")
-		// if rtnErr != nil {
-		// 	return rtnErr
-		// }
-		// for _, subInfo := range subInfos {
-		// 	//pubAccInfo, ok := nameInfoMap[subInfo.PubAccountName]
-		// 	//if !ok {
-		// 	//	continue
-		// 	//}
+		ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, getSubsSql)
+		// alter sub_account field in mo_pubs which contains accountName
+		subInfos, rtnErr := getSubInfosFromSub(deleteCtx, bh, "")
+		if rtnErr != nil {
+			return rtnErr
+		}
+		for _, subInfo := range subInfos {
+			//pubAccInfo, ok := nameInfoMap[subInfo.PubAccountName]
+			//if !ok {
+			//	continue
+			//}
 
-		// 	ses.Infof(ctx, "dropAccount %s sql: %s %s", da.Name, updatePubInfoAccountListFormat, subInfo.PubName)
-		// 	if rtnErr = dropSubAccountNameInSubAccounts(deleteCtx, bh, subInfo.PubAccountName, subInfo.PubName, da.Name); rtnErr != nil {
-		// 		if isDisallowedError(rtnErr) {
-		// 			ses.Infof(ctx, "[EOF] dropAccount %s sql: %s %s", da.Name, updatePubInfoAccountListFormat, subInfo.PubName)
-		// 		}
-		// 		return rtnErr
-		// 	}
-		// }
+			ses.Infof(ctx, "dropAccount %s sql: %s %s", da.Name, updatePubInfoAccountListFormat, subInfo.PubName)
+			if rtnErr = dropSubAccountNameInSubAccounts(deleteCtx, bh, subInfo.PubAccountName, subInfo.PubName, da.Name); rtnErr != nil {
+				if isDisallowedError(rtnErr) {
+					ses.Infof(ctx, "[EOF] dropAccount %s sql: %s %s", da.Name, updatePubInfoAccountListFormat, subInfo.PubName)
+				}
+				return rtnErr
+			}
+		}
 
-		// ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, deleteMoSubsRecordsBySubAccountIdFormat)
-		// // delete records in mo_subs
-		// if rtnErr = deleteMoSubsBySubAccountId(deleteCtx, bh); rtnErr != nil {
-		// 	if isDisallowedError(rtnErr) {
-		// 		ses.Infof(ctx, "[EOF] dropAccount %s sql: %s", da.Name, deleteMoSubsRecordsBySubAccountIdFormat)
-		// 	}
-		// 	return rtnErr
-		// }
+		ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, deleteMoSubsRecordsBySubAccountIdFormat)
+		// delete records in mo_subs
+		if rtnErr = deleteMoSubsBySubAccountId(deleteCtx, bh); rtnErr != nil {
+			if isDisallowedError(rtnErr) {
+				ses.Infof(ctx, "[EOF] dropAccount %s sql: %s", da.Name, deleteMoSubsRecordsBySubAccountIdFormat)
+			}
+			return rtnErr
+		}
 
 		// ses.Infof(ctx, "dropAccount %s sql: %s", da.Name, dropMoMysqlCompatibilityModeSql)
 		// // drop table mo_mysql_compatibility_mode
