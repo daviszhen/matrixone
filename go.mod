@@ -63,6 +63,7 @@ require (
 	github.com/parquet-go/parquet-go v0.23.0
 	github.com/petermattis/goid v0.0.0-20241025130422-66cb2e6d7274
 	github.com/pierrec/lz4/v4 v4.1.21
+	github.com/pingcap/tidb/pkg/parser v0.0.0-20250226145231-ba9f6ff3167b
 	github.com/pkg/errors v0.9.1
 	github.com/plar/go-adaptive-radix-tree v1.0.5
 	github.com/prashantv/gostub v1.1.0
@@ -72,6 +73,8 @@ require (
 	github.com/samber/lo v1.38.1
 	github.com/segmentio/encoding v0.4.0
 	github.com/shirou/gopsutil/v3 v3.23.12
+	github.com/shopspring/decimal v1.4.0
+	github.com/siddontang/go v0.0.0-20180604090527-bdc77568d726
 	github.com/smartystreets/goconvey v1.7.2
 	github.com/spf13/cobra v1.8.0
 	github.com/spkg/bom v1.0.0
@@ -83,7 +86,7 @@ require (
 	github.com/tidwall/pretty v1.2.1
 	go.uber.org/automaxprocs v1.5.3
 	go.uber.org/ratelimit v0.2.0
-	go.uber.org/zap v1.24.0
+	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
 	golang.org/x/sync v0.8.0
 	golang.org/x/sys v0.26.0
@@ -128,6 +131,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
+	github.com/pingcap/log v1.1.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
@@ -182,7 +186,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
-	github.com/klauspost/compress v1.17.11 // indirect
+	github.com/klauspost/compress v1.17.11
 	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -190,7 +194,7 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/miekg/dns v1.1.53 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
-	github.com/pingcap/errors v0.11.5-0.20201029093017-5a7df2af2ac7 // indirect
+	github.com/pingcap/errors v0.11.5-0.20240311024730-e056997136bb // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/common v0.44.0 // indirect
