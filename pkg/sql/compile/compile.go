@@ -24,9 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/panjf2000/ants/v2"
-	"go.uber.org/zap"
-
 	"github.com/matrixorigin/matrixone/pkg/catalog"
 	"github.com/matrixorigin/matrixone/pkg/cnservice/cnclient"
 	"github.com/matrixorigin/matrixone/pkg/common/moerr"
@@ -90,6 +87,8 @@ import (
 	"github.com/matrixorigin/matrixone/pkg/vm/engine/readutil"
 	"github.com/matrixorigin/matrixone/pkg/vm/message"
 	"github.com/matrixorigin/matrixone/pkg/vm/process"
+	"github.com/panjf2000/ants/v2"
+	"go.uber.org/zap"
 )
 
 // Note: Now the cost going from stat is actually the number of rows, so we can only estimate a number for the size of each row.
@@ -182,7 +181,7 @@ func (c *Compile) Reset(proc *process.Process, startAt time.Time, fill func(*bat
 	c.fill = fill
 	c.sql = sql
 	c.affectRows.Store(0)
-	c.anal.Reset()
+	c.anal.Reset(c.isPrepare, c.IsTpQuery())
 
 	if c.lockMeta != nil {
 		c.lockMeta.reset(c.proc)
@@ -2120,6 +2119,7 @@ func (c *Compile) compileTableScanDataSource(s *Scope) error {
 	s.DataSource.AccountId = node.ObjRef.GetPubInfo()
 	s.DataSource.RuntimeFilterSpecs = node.RuntimeFilterProbeList
 	s.DataSource.OrderBy = node.OrderBy
+	s.DataSource.RecvMsgList = node.RecvMsgList
 
 	return nil
 }
@@ -2791,6 +2791,9 @@ func (c *Compile) compileApply(node, right *plan.Node, rs []*Scope) []*Scope {
 	case plan.Node_CROSSAPPLY:
 		for i := range rs {
 			op := constructApply(node, right, apply.CROSS, c.proc)
+			if op.TableFunction.IsSingle {
+				rs[i].NodeInfo.Mcpu = 1
+			}
 			op.SetIdx(c.anal.curNodeIdx)
 			rs[i].setRootOperator(op)
 		}
@@ -4241,9 +4244,9 @@ func (c *Compile) generateNodes(n *plan.Node) (engine.Nodes, error) {
 			forceSingle = true
 		}
 	}
-	if len(n.OrderBy) > 0 {
-		forceSingle = true
-	}
+	//if len(n.OrderBy) > 0 {
+	//	forceSingle = true
+	//}
 
 	var nodes engine.Nodes
 	// scan on current CN
