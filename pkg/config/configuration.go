@@ -155,6 +155,11 @@ var (
 
 	defaultSelectThreshold = 200 * time.Millisecond
 
+	// Whether to enable the tcp connection check function
+	defaultIsCheckTCPConnection = false
+	// Interval for checking TCP connection status
+	defaultCheckInterval = 1
+
 	// defaultLongQueryTime
 	defaultLongQueryTime = 1.0
 	// defaultSkipRunningStmt
@@ -303,6 +308,12 @@ type FrontendParameters struct {
 	// KeyEncryptionKey is the key for encrypt key
 	KeyEncryptionKey string `toml:"key-encryption-key"`
 
+	// Whether to enable the tcp connection check function
+	IsCheckTCPConnection bool `toml:"is-check-tcp-connection"`
+
+	// Interval for checking TCP connection status
+	CheckInterval time.Duration `toml:"checkInterval"`
+
 	// timeout of create txn.
 	// txnclient.New
 	// txnclient.RestartTxn
@@ -434,6 +445,10 @@ func (fp *FrontendParameters) SetDefaultValues() {
 
 	if fp.ConnectTimeout.Duration == 0 {
 		fp.ConnectTimeout.Duration = defaultConnectTimeout
+	}
+
+	if fp.CheckInterval == 0 {
+		fp.CheckInterval = time.Duration(defaultCheckInterval)
 	}
 }
 
