@@ -585,8 +585,6 @@ func (c *Controller) AssembleDB(ctx context.Context) (err error) {
 			IncrementalInterval:         db.Opts.CheckpointCfg.IncrementalInterval,
 			GlobalMinCount:              db.Opts.CheckpointCfg.GlobalMinCount,
 			GlobalHistoryDuration:       db.Opts.CheckpointCfg.GlobalVersionInterval,
-			SizeHint:                    db.Opts.CheckpointCfg.Size,
-			BlockMaxRowsHint:            db.Opts.CheckpointCfg.BlockRows,
 		},
 	)
 	db.BGCheckpointRunner.Start()
@@ -652,9 +650,10 @@ func (c *Controller) AssembleDB(ctx context.Context) (err error) {
 			db.ReplayCtl = replayCtl
 		}
 	}()
-	if checkpointed, ckpLSN, releaseReplayPinned, err = c.replayFromCheckpoints(); err != nil {
+	if checkpointed, ckpLSN, releaseReplayPinned, err = c.replayFromCheckpoints(ctx); err != nil {
 		return
 	}
+	db.TxnMgr.TryUpdateMaxCommittedTS(checkpointed)
 
 	if replayCtl, err = db.ReplayWal(
 		ctx, checkpointed, ckpLSN, releaseReplayPinned,
@@ -694,7 +693,7 @@ func (c *Controller) AssembleDB(ctx context.Context) (err error) {
 	return
 }
 
-func (c *Controller) replayFromCheckpoints() (
+func (c *Controller) replayFromCheckpoints(ctx context.Context) (
 	checkpointed types.TS,
 	ckpLSN uint64,
 	release func(),
@@ -742,6 +741,6 @@ func (c *Controller) replayFromCheckpoints() (
 	}
 
 	// 3. replay other tables' objectlist
-	err = ckpReplayer.ReplayObjectlist(Phase_Open)
+	err = ckpReplayer.ReplayObjectlist(ctx, Phase_Open)
 	return
 }
