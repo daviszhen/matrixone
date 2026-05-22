@@ -17,6 +17,7 @@ package lockservice
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -173,6 +174,9 @@ func (l *localLockTable) doLock(
 		}
 		waitStart := time.Now()
 		v := c.w.wait(waitCtx, l.logger)
+		lockWaitTimeoutHit := leftTimeout > 0 &&
+			errors.Is(v.err, context.DeadlineExceeded) &&
+			context.Cause(waitCtx) == ErrLockTimeout
 		if cancel != nil {
 			cancel()
 		}
@@ -188,6 +192,8 @@ func (l *localLockTable) doLock(
 				leftTimeout -= waited
 			} else {
 				leftTimeout = 0
+			}
+			if lockWaitTimeoutHit {
 				// lock_wait_timeout expired: return ErrLockTimeout directly
 				// (not errors.Join) so upper layers can recognize it via
 				// moerr.IsMoErrCode(err, moerr.ErrInvalidState).
