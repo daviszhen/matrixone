@@ -269,3 +269,37 @@ create table d1 (i1 int);
 insert into d1 select * from generate_series(0, 999) g;
 select avg(distinct i1) from d1;
 drop table d1;
+
+
+drop table if exists t_bigint_avg_decimal128_state;
+create table t_bigint_avg_decimal128_state(id int, grp varchar(8), v bigint, u bigint unsigned);
+insert into t_bigint_avg_decimal128_state values
+  (1,'P',9223372036854775807,1),
+  (2,'P',1,18446744073709551615),
+  (3,'P',-2,3),
+  (4,'N',-9223372036854775807,4),
+  (5,'N',-2,5),
+  (6,'N',2,6);
+select 'plain_avg_int_pos' q, avg(v) v from t_bigint_avg_decimal128_state where grp = 'P';
+select 'plain_avg_int_neg' q, avg(v) v from t_bigint_avg_decimal128_state where grp = 'N';
+select 'plain_avg_uint_pos' q, avg(u) v from t_bigint_avg_decimal128_state where grp = 'P';
+select 'group_avg' q, grp, avg(v) av, avg(u) au from t_bigint_avg_decimal128_state group by grp order by grp;
+select 'window_avg_partition' q, id, grp,
+  avg(v) over (partition by grp) av,
+  avg(u) over (partition by grp) au
+from t_bigint_avg_decimal128_state
+order by grp, id;
+select 'window_avg_running' q, id, grp,
+  avg(v) over (
+    partition by grp
+    order by id
+    rows between unbounded preceding and current row
+  ) av,
+  avg(u) over (
+    partition by grp
+    order by id
+    rows between unbounded preceding and current row
+  ) au
+from t_bigint_avg_decimal128_state
+order by grp, id;
+drop table t_bigint_avg_decimal128_state;

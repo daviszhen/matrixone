@@ -474,7 +474,7 @@ var supportedAggInNewFramework = []FuncNew{
 			{
 				overloadId: 0,
 				isAgg:      true,
-				retType:    aggexec.AvgReturnType,
+				retType:    aggexec.VarStdDevReturnType,
 				aggFramework: aggregationLogicOfOverload{
 					str:         "var_pop",
 					aggRegister: aggexec.RegisterVarPop,
@@ -495,7 +495,7 @@ var supportedAggInNewFramework = []FuncNew{
 			{
 				overloadId: 0,
 				isAgg:      true,
-				retType:    aggexec.AvgReturnType,
+				retType:    aggexec.VarStdDevReturnType,
 				aggFramework: aggregationLogicOfOverload{
 					str:         "stddev_pop",
 					aggRegister: aggexec.RegisterStdDevPop,
@@ -516,7 +516,7 @@ var supportedAggInNewFramework = []FuncNew{
 			{
 				overloadId: 0,
 				isAgg:      true,
-				retType:    aggexec.AvgReturnType,
+				retType:    aggexec.VarStdDevReturnType,
 				aggFramework: aggregationLogicOfOverload{
 					str:         "var_sample",
 					aggRegister: aggexec.RegisterVarSample,
@@ -537,7 +537,7 @@ var supportedAggInNewFramework = []FuncNew{
 			{
 				overloadId: 0,
 				isAgg:      true,
-				retType:    aggexec.AvgReturnType,
+				retType:    aggexec.VarStdDevReturnType,
 				aggFramework: aggregationLogicOfOverload{
 					str:         "stddev_sample",
 					aggRegister: aggexec.RegisterStdDevSample,
