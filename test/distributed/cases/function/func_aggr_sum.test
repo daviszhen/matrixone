@@ -187,4 +187,8 @@ select 'window_sum_running' q, id, grp,
   ) su
 from t_bigint_sum_decimal128_state
 order by grp, id;
+insert into t_bigint_sum_decimal128_state values
+  (7,'P',1,1),
+  (8,'N',-2,4);
+select 'group_sum_distinct' q, grp, sum(distinct v) sv, sum(distinct u) su from t_bigint_sum_decimal128_state group by grp order by grp;
 drop table t_bigint_sum_decimal128_state;

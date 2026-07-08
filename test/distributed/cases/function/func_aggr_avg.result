@@ -284,7 +284,8 @@ insert into t1 values (3,4,"E");
 insert into t1 values (3,5,"C");
 insert into t1 values (3,6,"D");
 select sum(all a),count(all a),avg(all a),std(all a),variance(all a),bit_or(all a),bit_and(all a),min(all a),max(all a),min(all c),max(all c) from t1;
-[unknown result because it is related to issue#3344]
+➤ sum(all a)[3,39,0]  ¦  count(all a)[-5,64,0]  ¦  avg(all a)[3,38,4]  ¦  std(all a)[8,54,0]  ¦  variance(all a)[8,54,0]  ¦  bit_or(all a)[-5,64,0]  ¦  bit_and(all a)[-5,64,0]  ¦  min(all a)[-5,64,0]  ¦  max(all a)[-5,64,0]  ¦  min(all c)[1,10,0]  ¦  max(all c)[1,10,0]  𝄀
+21  ¦  6  ¦  3.5000  ¦  1.707825127659933  ¦  2.916666666666666  ¦  7  ¦  0  ¦  1  ¦  6  ¦  C  ¦  c
 select grp, sum(a),count(a),avg(a),std(a),variance(a),bit_or(a),bit_and(a),min(a),max(a),min(c),max(c) from t1 group by grp;
 ➤ grp[4,32,0]  ¦  sum(a)[3,39,0]  ¦  count(a)[-5,64,0]  ¦  avg(a)[3,38,4]  ¦  std(a)[8,54,0]  ¦  variance(a)[8,54,0]  ¦  bit_or(a)[-5,64,0]  ¦  bit_and(a)[-5,64,0]  ¦  min(a)[-5,64,0]  ¦  max(a)[-5,64,0]  ¦  min(c)[1,10,0]  ¦  max(c)[1,10,0]  𝄀
 1  ¦  1  ¦  1  ¦  1.0000  ¦  0.0  ¦  0.0  ¦  1  ¦  1  ¦  1  ¦  1  ¦  a  ¦  a  𝄀
@@ -392,4 +393,11 @@ window_avg_running  ¦  6  ¦  N  ¦  -3074457345618258602.3333  ¦  5.0000  �
 window_avg_running  ¦  1  ¦  P  ¦  9223372036854775807.0000  ¦  1.0000  𝄀
 window_avg_running  ¦  2  ¦  P  ¦  4611686018427387904.0000  ¦  9223372036854775808.0000  𝄀
 window_avg_running  ¦  3  ¦  P  ¦  3074457345618258602.0000  ¦  6148914691236517206.3333
+insert into t_bigint_avg_decimal128_state values
+(7,'P',1,1),
+(8,'N',-2,4);
+select 'group_avg_distinct' q, grp, avg(distinct v) av, avg(distinct u) au from t_bigint_avg_decimal128_state group by grp order by grp;
+➤ q[12,-1,0]  ¦  grp[12,-1,0]  ¦  av[3,38,4]  ¦  au[3,38,4]  𝄀
+group_avg_distinct  ¦  N  ¦  -3074457345618258602.3333  ¦  5.0000  𝄀
+group_avg_distinct  ¦  P  ¦  3074457345618258602.0000  ¦  6148914691236517206.3333
 drop table t_bigint_avg_decimal128_state;

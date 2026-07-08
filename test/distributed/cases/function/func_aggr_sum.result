@@ -250,4 +250,11 @@ window_sum_running  ¦  6  ¦  N  ¦  -9223372036854775807  ¦  15  𝄀
 window_sum_running  ¦  1  ¦  P  ¦  9223372036854775807  ¦  1  𝄀
 window_sum_running  ¦  2  ¦  P  ¦  9223372036854775808  ¦  18446744073709551616  𝄀
 window_sum_running  ¦  3  ¦  P  ¦  9223372036854775806  ¦  18446744073709551619
+insert into t_bigint_sum_decimal128_state values
+(7,'P',1,1),
+(8,'N',-2,4);
+select 'group_sum_distinct' q, grp, sum(distinct v) sv, sum(distinct u) su from t_bigint_sum_decimal128_state group by grp order by grp;
+➤ q[12,-1,0]  ¦  grp[12,-1,0]  ¦  sv[3,39,0]  ¦  su[3,39,0]  𝄀
+group_sum_distinct  ¦  N  ¦  -9223372036854775807  ¦  15  𝄀
+group_sum_distinct  ¦  P  ¦  9223372036854775806  ¦  18446744073709551619
 drop table t_bigint_sum_decimal128_state;

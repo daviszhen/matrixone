@@ -268,6 +268,24 @@ func TestSumAvgBigIntOverflowUsesDecimal128State(t *testing.T) {
 			wantRetTyp: types.T_decimal128,
 		},
 		{
+			name:       "avg_int64_positive_over_int64",
+			isSum:      false,
+			typ:        types.T_int64.ToType(),
+			vec:        testutil.NewInt64Vector(3, types.T_int64.ToType(), mp, false, nil, []int64{math.MaxInt64, 1, -2}),
+			want:       "3074457345618258602.0000",
+			wantScale:  4,
+			wantRetTyp: types.T_decimal128,
+		},
+		{
+			name:       "avg_int64_negative_under_int64",
+			isSum:      false,
+			typ:        types.T_int64.ToType(),
+			vec:        testutil.NewInt64Vector(3, types.T_int64.ToType(), mp, false, nil, []int64{math.MinInt64, -1, 2}),
+			want:       "-3074457345618258602.3333",
+			wantScale:  4,
+			wantRetTyp: types.T_decimal128,
+		},
+		{
 			name:       "avg_uint64_over_uint64",
 			isSum:      false,
 			typ:        types.T_uint64.ToType(),
@@ -288,6 +306,89 @@ func TestSumAvgBigIntOverflowUsesDecimal128State(t *testing.T) {
 			exec := makeSumAvgExec(mp, tc.isSum, aggID, false, tc.typ)
 			require.NoError(t, exec.GroupGrow(1))
 			require.NoError(t, exec.BatchFill(0, []uint64{1, 1, 1}, []*vector.Vector{tc.vec}))
+
+			results, err := exec.Flush()
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			require.Equal(t, tc.wantRetTyp, results[0].GetType().Oid)
+			require.Equal(t, tc.wantScale, results[0].GetType().Scale)
+
+			got := vector.MustFixedColNoTypeCheck[types.Decimal128](results[0])[0]
+			want, err := types.ParseDecimal128(tc.want, 38, tc.wantScale)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+
+			exec.Free()
+			for _, result := range results {
+				result.Free(mp)
+			}
+			tc.vec.Free(mp)
+			require.Equal(t, curNB, mp.CurrNB())
+		})
+	}
+}
+
+func TestSumAvgDistinctBigIntOverflowUsesDecimal128State(t *testing.T) {
+	mp := mpool.MustNewZero()
+	defer mpool.DeleteMPool(mp)
+
+	cases := []struct {
+		name       string
+		isSum      bool
+		typ        types.Type
+		vec        *vector.Vector
+		want       string
+		wantScale  int32
+		wantRetTyp types.T
+	}{
+		{
+			name:       "sum_distinct_int64_positive_over_int64",
+			isSum:      true,
+			typ:        types.T_int64.ToType(),
+			vec:        testutil.NewInt64Vector(4, types.T_int64.ToType(), mp, false, nil, []int64{math.MaxInt64, 1, 1, -2}),
+			want:       "9223372036854775806",
+			wantScale:  0,
+			wantRetTyp: types.T_decimal128,
+		},
+		{
+			name:       "sum_distinct_uint64_over_uint64",
+			isSum:      true,
+			typ:        types.T_uint64.ToType(),
+			vec:        testutil.NewUInt64Vector(4, types.T_uint64.ToType(), mp, false, nil, []uint64{1, math.MaxUint64, 1, 3}),
+			want:       "18446744073709551619",
+			wantScale:  0,
+			wantRetTyp: types.T_decimal128,
+		},
+		{
+			name:       "avg_distinct_int64_negative_under_int64",
+			isSum:      false,
+			typ:        types.T_int64.ToType(),
+			vec:        testutil.NewInt64Vector(4, types.T_int64.ToType(), mp, false, nil, []int64{math.MinInt64, -1, -1, 2}),
+			want:       "-3074457345618258602.3333",
+			wantScale:  4,
+			wantRetTyp: types.T_decimal128,
+		},
+		{
+			name:       "avg_distinct_uint64_over_uint64",
+			isSum:      false,
+			typ:        types.T_uint64.ToType(),
+			vec:        testutil.NewUInt64Vector(4, types.T_uint64.ToType(), mp, false, nil, []uint64{1, math.MaxUint64, 1, 3}),
+			want:       "6148914691236517206.3333",
+			wantScale:  4,
+			wantRetTyp: types.T_decimal128,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			curNB := mp.CurrNB()
+			aggID := AggIdOfSum
+			if !tc.isSum {
+				aggID = AggIdOfAvg
+			}
+			exec := makeSumAvgExec(mp, tc.isSum, aggID, true, tc.typ)
+			require.NoError(t, exec.GroupGrow(1))
+			require.NoError(t, exec.BatchFill(0, []uint64{1, 1, 1, 1}, []*vector.Vector{tc.vec}))
 
 			results, err := exec.Flush()
 			require.NoError(t, err)
