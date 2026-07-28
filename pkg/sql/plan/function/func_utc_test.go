@@ -28,6 +28,9 @@ import (
 func newUTCFunctionTestProcess(t *testing.T) *process.Process {
 	t.Helper()
 	proc := testutil.NewProcess(t)
+	proc.GetSessionInfo().TimeZone = time.FixedZone("UTC-5", -5*60*60)
+	// This UTC instant is still the previous calendar day in the session zone.
+	// It ensures UTC functions cannot accidentally use the session time zone.
 	proc.Base.UnixTime = time.Date(2024, time.January, 2, 3, 4, 5, 123456789, time.UTC).UnixNano()
 	return proc
 }

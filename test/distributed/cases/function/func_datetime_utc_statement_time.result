@@ -1,0 +1,20 @@
+set @old_time_zone = @@time_zone;
+set time_zone = '+08:00';
+select timestampdiff(second, utc_timestamp(6), now(6)) = 28800 as utc_timestamp_offset;
+➤ utc_timestamp_offset[-7,1,0]  𝄀
+1
+select time_to_sec(timediff(curtime(6), utc_time(6))) = 28800 as utc_time_offset,
+microsecond(utc_time(3)) % 1000 = 0 as utc_time_fsp3_truncated,
+microsecond(utc_timestamp(3)) % 1000 = 0 as utc_timestamp_fsp3_truncated;
+➤ utc_time_offset[-7,1,0]  ¦  utc_time_fsp3_truncated[-7,1,0]  ¦  utc_timestamp_fsp3_truncated[-7,1,0]  𝄀
+1  ¦  1  ¦  1
+set time_zone = '-05:00';
+select timestampdiff(second, utc_timestamp(6), now(6)) = -18000 as utc_timestamp_offset;
+➤ utc_timestamp_offset[-7,1,0]  𝄀
+1
+select time_to_sec(timediff(curtime(6), utc_time(6))) = -18000 as utc_time_offset,
+microsecond(utc_time(3)) % 1000 = 0 as utc_time_fsp3_truncated,
+microsecond(utc_timestamp(3)) % 1000 = 0 as utc_timestamp_fsp3_truncated;
+➤ utc_time_offset[-7,1,0]  ¦  utc_time_fsp3_truncated[-7,1,0]  ¦  utc_timestamp_fsp3_truncated[-7,1,0]  𝄀
+1  ¦  1  ¦  1
+set time_zone = @old_time_zone;
