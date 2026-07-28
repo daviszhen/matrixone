@@ -782,18 +782,15 @@ func CurrentDate(_ []*vector.Vector, result vector.FunctionResultWrapper, proc *
 	})
 }
 
-func UtcDate(_ []*vector.Vector, result vector.FunctionResultWrapper, proc *process.Process, length int, selectList *FunctionSelectList) error {
-	var err error
+// utcCurrentDatetime converts the statement timestamp to a UTC wall-clock value.
+// Current-time functions must use proc.GetUnixTime() so every occurrence in one
+// statement observes the same instant.
+func utcCurrentDatetime(proc *process.Process) types.Datetime {
+	return types.UnixNanoToTimestamp(proc.GetUnixTime()).ToDatetime(time.UTC)
+}
 
-	// Use UTC timezone instead of session timezone
-	loc := time.UTC
-	ts := types.UnixNanoToTimestamp(proc.GetUnixTime())
-	dateTimes := make([]types.Datetime, 1)
-	dateTimes, err = types.TimestampToDatetime(loc, []types.Timestamp{ts}, dateTimes)
-	if err != nil {
-		return err
-	}
-	r := dateTimes[0].ToDate()
+func UtcDate(_ []*vector.Vector, result vector.FunctionResultWrapper, proc *process.Process, length int, selectList *FunctionSelectList) error {
+	r := utcCurrentDatetime(proc).ToDate()
 
 	return opNoneParamToFixed[types.Date](result, proc, length, func() types.Date {
 		return r
@@ -7027,7 +7024,7 @@ func UTCTimestamp(ivecs []*vector.Vector, result vector.FunctionResultWrapper, p
 	}
 	rs.TempSetType(types.New(types.T_datetime, 0, scale))
 
-	resultValue := types.UTC().TruncateToScale(scale)
+	resultValue := utcCurrentDatetime(proc).TruncateToScale(scale)
 	for i := uint64(0); i < uint64(length); i++ {
 		if err := rs.Append(resultValue, false); err != nil {
 			return err
