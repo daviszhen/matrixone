@@ -174,6 +174,7 @@ While the main benchmark uses a specific machine configuration for reproducibili
 - [x] GreptimeDB
 - [x] FerretDB
 - [x] Apache Doris
+- [ ] MatrixOne (adapter under [`matrixone/`](./matrixone); benchmark result pending)
 - [ ] Quickwit
 - [ ] Meilisearch
 - [ ] Sneller

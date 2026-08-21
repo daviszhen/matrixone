@@ -1,0 +1,56 @@
+SELECT
+    JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) AS event,
+    COUNT(*) AS count
+FROM bluesky
+GROUP BY event
+ORDER BY count DESC;
+
+SELECT
+    JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) AS event,
+    COUNT(*) AS count,
+    COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(data, '$.did'))) AS users
+FROM bluesky
+WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.kind')) = 'commit'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.operation')) = 'create'
+GROUP BY event
+ORDER BY count DESC;
+
+SELECT
+    JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) AS event,
+    HOUR(FROM_UNIXTIME(CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$.time_us')) AS DECIMAL(20,0)) / 1000000)) AS hour_of_day,
+    COUNT(*) AS count
+FROM bluesky
+WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.kind')) = 'commit'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.operation')) = 'create'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) IN (
+      'app.bsky.feed.post',
+      'app.bsky.feed.repost',
+      'app.bsky.feed.like')
+GROUP BY event, hour_of_day
+ORDER BY hour_of_day, event;
+
+SELECT
+    JSON_UNQUOTE(JSON_EXTRACT(data, '$.did')) AS user_id,
+    MIN(FROM_UNIXTIME(CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$.time_us')) AS DECIMAL(20,0)) / 1000000)) AS first_post_ts
+FROM bluesky
+WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.kind')) = 'commit'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.operation')) = 'create'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) = 'app.bsky.feed.post'
+GROUP BY user_id
+ORDER BY first_post_ts ASC
+LIMIT 3;
+
+SELECT
+    JSON_UNQUOTE(JSON_EXTRACT(data, '$.did')) AS user_id,
+    TIMESTAMPDIFF(
+        MICROSECOND,
+        MIN(FROM_UNIXTIME(CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$.time_us')) AS DECIMAL(20,0)) / 1000000)),
+        MAX(FROM_UNIXTIME(CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$.time_us')) AS DECIMAL(20,0)) / 1000000))
+    ) AS activity_span
+FROM bluesky
+WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.kind')) = 'commit'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.operation')) = 'create'
+  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) = 'app.bsky.feed.post'
+GROUP BY user_id
+ORDER BY activity_span DESC
+LIMIT 3;
