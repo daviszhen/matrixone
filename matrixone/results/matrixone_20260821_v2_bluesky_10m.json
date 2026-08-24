@@ -1,0 +1,45 @@
+{
+  "system": "MatrixOne",
+  "version": "8.0.30-MatrixOne-v",
+  "os": "Linux Mint 22.3",
+  "date": "2026-08-21",
+  "machine": "local-64c-256g",
+  "topology": "local-cluster",
+  "retains_structure": "yes",
+  "tags": [
+    "native_json",
+    "no_json_path_index"
+  ],
+  "dataset_size": 10000000,
+  "num_loaded_documents": 9999997,
+  "total_size": 2204612586,
+  "data_size": 2204612586,
+  "index_size": 0,
+  "result": [
+    [
+      2.349,
+      2.185,
+      2.265
+    ],
+    [
+      136.655,
+      124.920,
+      118.160
+    ],
+    [
+      5.574,
+      5.700,
+      5.100
+    ],
+    [
+      3.336,
+      3.437,
+      3.402
+    ],
+    [
+      3.858,
+      3.693,
+      3.597
+    ]
+  ]
+}

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 
-set -u -o pipefail
+set -euo pipefail
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <DB_NAME> [OUTPUT_FILE]" >&2
     exit 2
 fi
 
 DB_NAME="$1"
-OUTPUT_FILE="${2:-${MATRIXONE_DIR}/physical_query_plans.txt}"
 source "$(dirname "$0")/_common.sh"
+OUTPUT_FILE="${2:-${MATRIXONE_DIR}/physical_query_plans.txt}"
 require_tools || exit 2
 
-mapfile -t QUERIES < <(awk 'NF { print }' "$MATRIXONE_DIR/queries.sql")
+load_benchmark_queries
 : >"$OUTPUT_FILE"
-for query_index in "${!QUERIES[@]}"; do
-    query="${QUERIES[$query_index]}"
+for query_index in "${!BENCHMARK_QUERIES[@]}"; do
+    query="${BENCHMARK_QUERIES[$query_index]}"
     query="${query%;}"
     {
         echo "------------------------------------------------------------------------------------------------------------------------"

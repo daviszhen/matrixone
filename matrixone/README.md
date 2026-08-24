@@ -35,6 +35,10 @@ The query port casts Bluesky's 16-digit `time_us` values to `DECIMAL(20,0)`
 before dividing by one million. A scale-bearing `DECIMAL(20,6)` is too narrow
 for this integer epoch and would clamp the value before `FROM_UNIXTIME`.
 
+The benchmark queries use MatrixOne's MySQL JSON operators: `->` extracts a
+JSON value and `->>` extracts an unquoted scalar. Operands use full MySQL JSON
+paths, for example `data -> '$.commit' ->> '$.collection'`.
+
 ## Smoke test
 
 ```bash

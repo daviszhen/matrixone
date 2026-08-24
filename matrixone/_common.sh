@@ -43,8 +43,15 @@ sql_ident() {
 }
 
 sql_literal() {
-    local value="$1"
-    printf "'%s'" "${value//\'/\'\'}"
+    local escaped="$1"
+    # MatrixOne receives these values as MySQL string literals. Escape
+    # backslashes before quotes so file paths containing either character do
+    # not change the SQL literal sent to the server.
+    escaped="${escaped//\\/\\\\}"
+    escaped="${escaped//\'/\'\'}"
+    escaped="${escaped//$'\n'/\\n}"
+    escaped="${escaped//$'\r'/\\r}"
+    printf "'%s'" "$escaped"
 }
 
 require_tools() {
@@ -56,18 +63,22 @@ require_tools() {
         echo "MatrixOne JSONBench requires jq" >&2
         return 1
     }
-    command -v gzip >/dev/null 2>&1 || {
-        echo "MatrixOne JSONBench requires gzip" >&2
+    if [[ "$MO_LOAD_MODE" == "local" ]] && ! command -v gzip >/dev/null 2>&1; then
+        echo "MatrixOne JSONBench local loading requires gzip" >&2
         return 1
-    }
-    [[ -x /usr/bin/time ]] || {
-        echo "MatrixOne JSONBench requires /usr/bin/time" >&2
-        return 1
-    }
+    fi
 }
 
 check_connection() {
     mo_sql 'SELECT 1' >/dev/null
+}
+
+load_benchmark_queries() {
+    mapfile -t BENCHMARK_QUERIES < <(awk 'NF { print }' "$MATRIXONE_DIR/queries.sql")
+    if (( ${#BENCHMARK_QUERIES[@]} != 5 )); then
+        echo "expected exactly 5 benchmark queries, found ${#BENCHMARK_QUERIES[@]}" >&2
+        return 2
+    fi
 }
 
 load_file_sql() {
@@ -113,20 +124,18 @@ load_file_sql() {
 drop_page_cache() {
     [[ "${MO_DROP_CACHES:-1}" == "0" ]] && return 0
 
-    if [[ -w /proc/sys/vm/drop_caches ]]; then
-        printf '3\n' >/proc/sys/vm/drop_caches 2>/dev/null || true
+    if [[ -w /proc/sys/vm/drop_caches ]] &&
+        printf '3\n' >/proc/sys/vm/drop_caches 2>/dev/null; then
         return 0
     fi
 
-    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-        printf '3\n' | sudo -n tee /proc/sys/vm/drop_caches >/dev/null 2>&1 || true
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1 &&
+        printf '3\n' | sudo -n tee /proc/sys/vm/drop_caches >/dev/null 2>&1; then
         return 0
     fi
 
-    if [[ "${MO_CACHE_WARNING_SHOWN:-0}" != "1" ]]; then
-        echo "warning: cannot drop host page cache; set MO_DROP_CACHES=0 to acknowledge" >&2
-        MO_CACHE_WARNING_SHOWN=1
-    fi
+    echo "cannot drop host page cache; set MO_DROP_CACHES=0 to explicitly run without cache dropping" >&2
+    return 1
 }
 
 last_field() {
@@ -155,7 +164,8 @@ table_status_sizes() {
         sleep 1
     done
 
-    if [[ "$data_size" =~ ^[0-9]+$ && "$index_size" =~ ^[0-9]+$ ]]; then
+    if [[ "$data_size" =~ ^[0-9]+$ && "$index_size" =~ ^[0-9]+$ ]] &&
+        (( data_size > 0 || index_size > 0 )); then
         printf '%s\t%s\n' "$data_size" "$index_size"
         return 0
     fi

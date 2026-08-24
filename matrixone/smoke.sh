@@ -30,7 +30,7 @@ if [[ ! "$count" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 echo "checking nested JSON extraction"
-mo_sql "SELECT JSON_UNQUOTE(JSON_EXTRACT(data, '$.commit.collection')) FROM $(sql_ident "$DB_NAME").bluesky LIMIT 1;"
+mo_sql "SELECT data -> '$.commit' ->> '$.collection' FROM $(sql_ident "$DB_NAME").bluesky LIMIT 1;"
 echo "checking fractional epoch conversion"
 mo_sql "SELECT FROM_UNIXTIME(1705319696.123456), TIMESTAMPDIFF(MICROSECOND, FROM_UNIXTIME(1705319696.123456), FROM_UNIXTIME(1705319697.123456));"
 "$MATRIXONE_DIR/query_results.sh" "$DB_NAME" "$MATRIXONE_DIR/smoke_query_results.txt"

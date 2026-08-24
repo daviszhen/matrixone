@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -u -o pipefail
+set -euo pipefail
 if [[ $# -lt 2 ]]; then
     echo "Usage: $0 <DB_NAME> <RESULT_FILE_RUNTIMES> [ERROR_LOG]" >&2
     exit 2
@@ -15,18 +15,14 @@ require_tools || exit 2
 check_connection || { echo "cannot connect to MatrixOne at $MO_HOST:$MO_PORT" >&2; exit 1; }
 
 QUERY_FILE="$MATRIXONE_DIR/queries.sql"
-mapfile -t QUERIES < <(awk 'NF { print }' "$QUERY_FILE")
-[[ ${#QUERIES[@]} -eq 5 ]] || {
-    echo "expected exactly 5 benchmark queries, found ${#QUERIES[@]}" >&2
-    exit 2
-}
+load_benchmark_queries
 
 mkdir -p "$(dirname "$RESULT_FILE")" "$(dirname "$ERROR_LOG")"
 : >"$ERROR_LOG"
 
 rows=()
-for query_index in "${!QUERIES[@]}"; do
-    query="${QUERIES[$query_index]}"
+for query_index in "${!BENCHMARK_QUERIES[@]}"; do
+    query="${BENCHMARK_QUERIES[$query_index]}"
     runtimes=()
     echo "Running query Q$((query_index + 1))"
     drop_page_cache

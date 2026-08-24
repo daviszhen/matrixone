@@ -1,0 +1,62 @@
+------------------------------------------------------------------------------------------------------------------------
+Physical query plan for query Q1:
+
+AP QUERY PLAN ON ONE CN(16 core)
+Project
+  ->  Sort
+        Sort Key: COUNT(*) DESC
+        ->  Aggregate
+              Group Key: json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.collection'))
+              Aggregate Functions: starcount(1)
+              ->  Table Scan on bluesky_1m.bluesky
+------------------------------------------------------------------------------------------------------------------------
+Physical query plan for query Q2:
+
+AP QUERY PLAN ON ONE CN(16 core)
+Project
+  ->  Sort
+        Sort Key: COUNT(*) DESC
+        ->  Aggregate
+              Group Key: json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.collection'))
+              Aggregate Functions: starcount(1), count(json_unquote(json_extract(bluesky.data, '$.did')))
+              ->  Table Scan on bluesky_1m.bluesky
+                    Filter Cond: (json_unquote(json_extract(bluesky.data, '$.kind')) = 'commit'), (json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.operation')) = 'create')
+------------------------------------------------------------------------------------------------------------------------
+Physical query plan for query Q3:
+
+AP QUERY PLAN ON ONE CN(16 core)
+Project
+  ->  Sort
+        Sort Key: HOUR(FROM_UNIXTIME(cast(json_unquote(json_extract(bluesky.data, $.time_us)) as decimal(20)) / 1000000)) INTERNAL, json_unquote(json_extract(json_extract(bluesky.data, $.commit), $.collection)) INTERNAL
+        ->  Aggregate
+              Group Key: json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.collection')), hour(from_unixtime(cast((cast(json_unquote(json_extract(bluesky.data, '$.time_us')) AS DECIMAL128(20, 0)) / 1000000) AS DOUBLE)))
+              Aggregate Functions: starcount(1)
+              ->  Table Scan on bluesky_1m.bluesky
+                    Filter Cond: (json_unquote(json_extract(bluesky.data, '$.kind')) = 'commit'), (json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.operation')) = 'create'), json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.collection')) in ([app.bsky.feed.like app.bsky.feed.post app.bsky.feed.repost])
+------------------------------------------------------------------------------------------------------------------------
+Physical query plan for query Q4:
+
+AP QUERY PLAN ON ONE CN(16 core)
+Project
+  ->  Sort
+        Sort Key: MIN(FROM_UNIXTIME(cast(json_unquote(json_extract(bluesky.data, $.time_us)) as decimal(20)) / 1000000)) ASC
+        Limit: 3
+        ->  Aggregate
+              Group Key: json_unquote(json_extract(bluesky.data, '$.did'))
+              Aggregate Functions: min(from_unixtime(cast((cast(json_unquote(json_extract(bluesky.data, '$.time_us')) AS DECIMAL128(20, 0)) / 1000000) AS DOUBLE)))
+              ->  Table Scan on bluesky_1m.bluesky
+                    Filter Cond: (json_unquote(json_extract(bluesky.data, '$.kind')) = 'commit'), (json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.operation')) = 'create'), (json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.collection')) = 'app.bsky.feed.post')
+------------------------------------------------------------------------------------------------------------------------
+Physical query plan for query Q5:
+
+AP QUERY PLAN ON ONE CN(16 core)
+Project
+  ->  Sort
+        Sort Key: TIMESTAMPDIFF(microsecond, MIN(FROM_UNIXTIME(cast(json_unquote(json_extract(bluesky.data, $.time_us)) as decimal(20)) / 1000000)), MAX(FROM_UNIXTIME(cast(json_unquote(json_extract(bluesky.data, $.time_us)) as decimal(20)) / 1000000))) DESC
+        Limit: 3
+        ->  Project
+              ->  Aggregate
+                    Group Key: json_unquote(json_extract(bluesky.data, '$.did'))
+                    Aggregate Functions: min(from_unixtime(cast((cast(json_unquote(json_extract(bluesky.data, '$.time_us')) AS DECIMAL128(20, 0)) / 1000000) AS DOUBLE))), max(from_unixtime(cast((cast(json_unquote(json_extract(bluesky.data, '$.time_us')) AS DECIMAL128(20, 0)) / 1000000) AS DOUBLE)))
+                    ->  Table Scan on bluesky_1m.bluesky
+                          Filter Cond: (json_unquote(json_extract(bluesky.data, '$.kind')) = 'commit'), (json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.operation')) = 'create'), (json_unquote(json_extract(json_extract(bluesky.data, '$.commit'), '$.collection')) = 'app.bsky.feed.post')
