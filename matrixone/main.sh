@@ -3,9 +3,9 @@
 set -euo pipefail
 
 DEFAULT_CHOICE=ask
-DEFAULT_DATA_DIRECTORY="${HOME}/data/bluesky"
+DEFAULT_DATA_SOURCE="${HOME}/data/bluesky"
 CHOICE="${1:-$DEFAULT_CHOICE}"
-DATA_DIRECTORY="${2:-$DEFAULT_DATA_DIRECTORY}"
+DATA_SOURCE="${2:-$DEFAULT_DATA_SOURCE}"
 SUCCESS_LOG="${3:-success.log}"
 ERROR_LOG="${4:-error.log}"
 OUTPUT_PREFIX="${5:-_m6i.8xlarge}"
@@ -17,10 +17,12 @@ check_connection || {
     exit 1
 }
 
-[[ -d "$DATA_DIRECTORY" ]] || {
-    echo "data directory does not exist: $DATA_DIRECTORY" >&2
-    exit 2
-}
+if [[ "$MO_LOAD_MODE" != "oss" ]]; then
+    [[ -d "$DATA_SOURCE" ]] || {
+        echo "data directory does not exist: $DATA_SOURCE" >&2
+        exit 2
+    }
+fi
 
 if [[ "$CHOICE" == "ask" ]]; then
     echo "Select the dataset size to benchmark:"
@@ -35,15 +37,27 @@ fi
 benchmark() {
     local size="$1"
     local file_count
-    file_count=$(find "$DATA_DIRECTORY" -maxdepth 1 -type f -name '*.json.gz' | wc -l)
+    if [[ "$MO_LOAD_MODE" == "oss" ]]; then
+        file_count="${MO_REMOTE_FILE_COUNT:-$size}"
+    else
+        file_count=$(find "$DATA_SOURCE" -maxdepth 1 -type f -name '*.json.gz' | wc -l)
+    fi
+    if [[ ! "$file_count" =~ ^[0-9]+$ ]]; then
+        echo "remote file count must be a non-negative integer: $file_count" >&2
+        return 2
+    fi
     if (( file_count < size )); then
         echo "not enough data files: need $size, found $file_count" >&2
         return 2
     fi
 
-    local db_name="bluesky_${size}m"
+    # Keep the historical database names by default. The dev wrapper uses a
+    # separate prefix because this benchmark drops the database after each
+    # size and must not collide with another tenant's JSONBench run.
+    local db_prefix="${MO_DB_NAME_PREFIX:-bluesky}"
+    local db_name="${db_prefix}_${size}m"
     local artifact_prefix="${OUTPUT_PREFIX}_bluesky_${size}m"
-    "$MATRIXONE_DIR/create_and_load.sh" "$db_name" bluesky "$DATA_DIRECTORY" "$size" "$SUCCESS_LOG" "$ERROR_LOG"
+    "$MATRIXONE_DIR/create_and_load.sh" "$db_name" bluesky "$DATA_SOURCE" "$size" "$SUCCESS_LOG" "$ERROR_LOG"
     "$MATRIXONE_DIR/count.sh" "$db_name" bluesky | tee "${artifact_prefix}.count"
     "$MATRIXONE_DIR/total_size.sh" "$db_name" bluesky | tee "${artifact_prefix}.total_size"
     "$MATRIXONE_DIR/data_size.sh" "$db_name" bluesky | tee "${artifact_prefix}.data_size"

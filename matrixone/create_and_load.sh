@@ -3,13 +3,13 @@
 set -euo pipefail
 
 if [[ $# -lt 6 ]]; then
-    echo "Usage: $0 <DB_NAME> <TABLE_NAME> <DATA_DIRECTORY> <NUM_FILES> <SUCCESS_LOG> <ERROR_LOG>" >&2
+    echo "Usage: $0 <DB_NAME> <TABLE_NAME> <DATA_SOURCE> <NUM_FILES> <SUCCESS_LOG> <ERROR_LOG>" >&2
     exit 2
 fi
 
 DB_NAME="$1"
 TABLE_NAME="$2"
-DATA_DIRECTORY="$3"
+DATA_SOURCE="$3"
 NUM_FILES="$4"
 SUCCESS_LOG="$5"
 ERROR_LOG="$6"
@@ -26,4 +26,4 @@ mo_sql "DROP DATABASE IF EXISTS $(sql_ident "$DB_NAME"); CREATE DATABASE $(sql_i
 echo "Creating table $DB_NAME.$TABLE_NAME"
 mo_mysql --database="$DB_NAME" --batch --skip-column-names --raw <"$MATRIXONE_DIR/ddl.sql"
 echo "Loading $NUM_FILES file(s) into $DB_NAME.$TABLE_NAME"
-"$MATRIXONE_DIR/load_data.sh" "$DATA_DIRECTORY" "$DB_NAME" "$TABLE_NAME" "$NUM_FILES" "$SUCCESS_LOG" "$ERROR_LOG"
+"$MATRIXONE_DIR/load_data.sh" "$DATA_SOURCE" "$DB_NAME" "$TABLE_NAME" "$NUM_FILES" "$SUCCESS_LOG" "$ERROR_LOG"

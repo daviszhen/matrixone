@@ -11,10 +11,12 @@ check_connection || {
     exit 1
 }
 
-[[ -d "$DATA_DIRECTORY" ]] || {
-    echo "data directory does not exist: $DATA_DIRECTORY" >&2
-    exit 2
-}
+if [[ "$MO_LOAD_MODE" != "oss" ]]; then
+    [[ -d "$DATA_DIRECTORY" ]] || {
+        echo "data directory does not exist: $DATA_DIRECTORY" >&2
+        exit 2
+    }
+fi
 
 success_log="$(mktemp "${TMPDIR:-/tmp}/jsonbench-mo-smoke-success.XXXXXX")"
 error_log="$(mktemp "${TMPDIR:-/tmp}/jsonbench-mo-smoke-error.XXXXXX")"

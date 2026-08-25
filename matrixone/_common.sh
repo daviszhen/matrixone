@@ -13,6 +13,12 @@ MO_USER="${MO_USER:-root}"
 MO_PASSWORD="${MO_PASSWORD:-}"
 MO_INIT_COMMAND="${MO_INIT_COMMAND:-SET time_zone='+00:00'}"
 MO_LOAD_MODE="${MO_LOAD_MODE:-direct}"
+MO_OSS_CONFIG="${MO_OSS_CONFIG:-${OSS_CONFIG_FILE:-}}"
+OSS_ENDPOINT="${OSS_ENDPOINT:-}"
+OSS_REGION="${OSS_REGION:-}"
+OSS_ACCESS_KEY_ID="${OSS_ACCESS_KEY_ID:-}"
+OSS_SECRET_ACCESS_KEY="${OSS_SECRET_ACCESS_KEY:-${OSS_ACCESS_KEY_SECRET:-}}"
+MO_LOAD_PARALLEL="${MO_LOAD_PARALLEL:-true}"
 
 if [[ -n "$MO_PASSWORD" ]]; then
     export MYSQL_PWD="$MO_PASSWORD"
@@ -54,6 +60,80 @@ sql_literal() {
     printf "'%s'" "$escaped"
 }
 
+read_oss_config_value() {
+    local wanted="$1"
+    awk -F= -v wanted="$wanted" '
+        function trim(value) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            return value
+        }
+        /^[[:space:]]*(#|;|$)/ { next }
+        {
+            key = trim($1)
+            sub(/^export[[:space:]]+/, "", key)
+            if (key == wanted) {
+                value = trim(substr($0, index($0, "=") + 1))
+                if (substr(value, 1, 1) == "\"" && substr(value, length(value), 1) == "\"") {
+                    value = substr(value, 2, length(value) - 2)
+                } else {
+                    single_quote = sprintf("%c", 39)
+                    if (substr(value, 1, 1) == single_quote && substr(value, length(value), 1) == single_quote) {
+                        value = substr(value, 2, length(value) - 2)
+                    }
+                }
+                print value
+                exit
+            }
+        }
+    ' "$MO_OSS_CONFIG"
+}
+
+load_oss_config() {
+    if [[ -n "$MO_OSS_CONFIG" ]]; then
+        if [[ -r "$MO_OSS_CONFIG" ]]; then
+            if [[ -z "$OSS_ENDPOINT" ]]; then
+                OSS_ENDPOINT="$(read_oss_config_value OSS_ENDPOINT)"
+            fi
+            if [[ -z "$OSS_ACCESS_KEY_ID" ]]; then
+                OSS_ACCESS_KEY_ID="$(read_oss_config_value OSS_ACCESS_KEY_ID)"
+            fi
+            if [[ -z "$OSS_SECRET_ACCESS_KEY" ]]; then
+                OSS_SECRET_ACCESS_KEY="$(read_oss_config_value OSS_SECRET_ACCESS_KEY)"
+            fi
+            if [[ -z "$OSS_SECRET_ACCESS_KEY" ]]; then
+                OSS_SECRET_ACCESS_KEY="$(read_oss_config_value OSS_ACCESS_KEY_SECRET)"
+            fi
+        elif [[ -z "$OSS_ENDPOINT" || -z "$OSS_ACCESS_KEY_ID" || -z "$OSS_SECRET_ACCESS_KEY" ]]; then
+            echo "MO_OSS_CONFIG is not readable and OSS credentials are incomplete: $MO_OSS_CONFIG" >&2
+            return 2
+        fi
+    fi
+    if [[ -z "$OSS_REGION" && -n "$OSS_ENDPOINT" ]]; then
+        local endpoint_host="${OSS_ENDPOINT#*://}"
+        endpoint_host="${endpoint_host%%/*}"
+        OSS_REGION="${endpoint_host%%.*}"
+    fi
+
+    [[ -n "$OSS_ENDPOINT" ]] || { echo "OSS endpoint is not configured" >&2; return 2; }
+    [[ -n "$OSS_REGION" ]] || { echo "OSS region is not configured" >&2; return 2; }
+    [[ -n "$OSS_ACCESS_KEY_ID" ]] || { echo "OSS access key ID is not configured" >&2; return 2; }
+    [[ -n "$OSS_SECRET_ACCESS_KEY" ]] || { echo "OSS access key secret is not configured" >&2; return 2; }
+    [[ "$MO_LOAD_PARALLEL" == "true" || "$MO_LOAD_PARALLEL" == "false" ]] || {
+        echo "MO_LOAD_PARALLEL must be true or false, got: $MO_LOAD_PARALLEL" >&2
+        return 2
+    }
+}
+
+parse_oss_uri() {
+    local uri="$1"
+    [[ "$uri" =~ ^oss://([^/]+)/(.+)$ ]] || {
+        echo "OSS source must be an oss://bucket/path URI: $uri" >&2
+        return 2
+    }
+    OSS_BUCKET="${BASH_REMATCH[1]}"
+    OSS_FILEPATH="${BASH_REMATCH[2]}"
+}
+
 require_tools() {
     command -v "$MYSQL_BIN" >/dev/null 2>&1 || {
         echo "MatrixOne JSONBench requires mysql client: $MYSQL_BIN" >&2
@@ -66,6 +146,9 @@ require_tools() {
     if [[ "$MO_LOAD_MODE" == "local" ]] && ! command -v gzip >/dev/null 2>&1; then
         echo "MatrixOne JSONBench local loading requires gzip" >&2
         return 1
+    fi
+    if [[ "$MO_LOAD_MODE" == "oss" ]]; then
+        load_oss_config || return 2
     fi
 }
 
@@ -90,6 +173,23 @@ load_file_sql() {
     local table_sql
     table_sql="$(sql_ident "$db").$(sql_ident "$table")"
 
+    if [[ "$MO_LOAD_MODE" == "oss" ]]; then
+        parse_oss_uri "$file" || return
+        local endpoint_sql region_sql key_sql secret_sql bucket_sql filepath_sql parallel_sql
+        endpoint_sql="$(sql_literal "$OSS_ENDPOINT")"
+        region_sql="$(sql_literal "$OSS_REGION")"
+        key_sql="$(sql_literal "$OSS_ACCESS_KEY_ID")"
+        secret_sql="$(sql_literal "$OSS_SECRET_ACCESS_KEY")"
+        bucket_sql="$(sql_literal "$OSS_BUCKET")"
+        filepath_sql="$(sql_literal "$OSS_FILEPATH")"
+        parallel_sql="$(sql_literal "$MO_LOAD_PARALLEL")"
+        # The server reads the compressed NDJSON object directly from OSS. A
+        # tab delimiter makes each JSON line one CSV field, while disabling
+        # CSV escaping preserves JSON backslashes byte-for-byte.
+        mo_sql "LOAD DATA URL S3OPTION {'endpoint'=${endpoint_sql}, 'region'=${region_sql}, 'access_key_id'=${key_sql}, 'secret_access_key'=${secret_sql}, 'bucket'=${bucket_sql}, 'filepath'=${filepath_sql}, 'compression'='gzip', 'format'='csv'} INTO TABLE ${table_sql} FIELDS TERMINATED BY '\\t' ESCAPED BY '' LINES TERMINATED BY '\\n' PARALLEL ${parallel_sql};"
+        return
+    fi
+
     if [[ "$MO_LOAD_MODE" == "direct" ]]; then
         # JSONBench is newline-delimited JSON.  A literal tab cannot occur in
         # valid JSON, so it is a safe one-field delimiter.  Disabling CSV
@@ -99,7 +199,7 @@ load_file_sql() {
     fi
 
     if [[ "$MO_LOAD_MODE" != "local" ]]; then
-        echo "MO_LOAD_MODE must be direct or local, got: $MO_LOAD_MODE" >&2
+        echo "MO_LOAD_MODE must be direct, local, or oss, got: $MO_LOAD_MODE" >&2
         return 2
     fi
 
