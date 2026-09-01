@@ -2515,28 +2515,20 @@ func (v *Vector) preflightPrepareParamKindCopy(
 	return nil
 }
 
-// PreflightUnionOnePrepareParamKinds reserves all provenance state that a
-// subsequent UnionOne can require. Batch uses it for every column before any
-// column publishes a row.
+// PreflightUnionOnePrepareParamKinds reserves the prepared-parameter state that
+// a subsequent UnionOne can require. This diagnostic variant intentionally
+// leaves string-source provenance out of the per-row UnionOne path so that the
+// cost of commit 7848df18f7 can be measured in isolation.
 func (v *Vector) PreflightUnionOnePrepareParamKinds(
 	w *Vector,
 	sel int64,
 	mp *mpool.MPool,
 ) error {
-	if err := v.preflightStringSourceAppend(
-		v.length+1, summarizeStringSourceOne(w, sel), mp); err != nil {
-		return err
-	}
-	v.RetainStringSourcePreflight()
-	if err := v.preflightPrepareParamKindAppend(
+	return v.preflightPrepareParamKindAppend(
 		v.length+1,
 		summarizePrepareParamKindOne(w, sel),
 		mp,
-	); err != nil {
-		v.FinalizeStringSourcePreflight()
-		return err
-	}
-	return nil
+	)
 }
 
 // PreflightUnionPrepareParamKinds is the batch-level preflight for Union.
@@ -7824,7 +7816,6 @@ func (v *Vector) UnionOne(w *Vector, sel int64, mp *mpool.MPool) error {
 	if err := v.PreflightUnionOnePrepareParamKinds(w, sel, mp); err != nil {
 		return err
 	}
-	defer v.FinalizeStringSourcePreflight()
 	if err := v.PreflightUnionOneBinaryString(w, sel, mp); err != nil {
 		return err
 	}
@@ -7843,9 +7834,6 @@ func (v *Vector) UnionOne(w *Vector, sel int64, mp *mpool.MPool) error {
 
 	oldLen := v.length
 	v.setLengthAfterExtend(v.length + 1)
-	if err := v.appendStringSourceAt(oldLen, oldLen, w.GetStringSourceAt(int(sel)), mp); err != nil {
-		return err
-	}
 	sourceHasValue := !sourceNull
 	if sourceGrouping {
 		nulls.Add(&v.gsp, uint64(oldLen))

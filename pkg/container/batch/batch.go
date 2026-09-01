@@ -2203,7 +2203,6 @@ func (bat *Batch) UnionWindow(bat2 *Batch, offset, cnt int, m *mpool.MPool) erro
 }
 
 func (bat *Batch) UnionOne(bat2 *Batch, pos int64, m *mpool.MPool) error {
-	defer finalizeStringSourcePreflights(bat.Vecs)
 	for i, vec := range bat.Vecs {
 		if err := vec.PreflightUnionOnePrepareParamKinds(bat2.Vecs[i], pos, m); err != nil {
 			return err
