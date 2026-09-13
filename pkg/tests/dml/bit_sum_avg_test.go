@@ -16,17 +16,36 @@ package dml
 
 import (
 	"context"
-	"github.com/matrixorigin/matrixone/pkg/clusterservice"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/matrixorigin/matrixone/pkg/clusterservice"
 	"github.com/matrixorigin/matrixone/pkg/embed"
 	"github.com/matrixorigin/matrixone/pkg/pb/metadata"
 	"github.com/matrixorigin/matrixone/pkg/sql/plan"
 	"github.com/matrixorigin/matrixone/pkg/tests/testutils"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func updateCNWorkState(
+	t *testing.T,
+	inventory clusterservice.MOCluster,
+	refresher clusterservice.AuthoritativeRefresher,
+	serviceID string,
+	state metadata.WorkState,
+) {
+	t.Helper()
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		if !assert.NoError(collect, inventory.DebugUpdateCNWorkState(serviceID, int(state))) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		assert.NoError(collect, refresher.Refresh(ctx))
+	}, 30*time.Second, 500*time.Millisecond)
+}
 
 // Reuse the shared two-CN fixture; two persisted rows force the real remote
 // consumer without introducing a large workload or an additional cluster.
@@ -64,14 +83,10 @@ func TestBitSumAvgExactRemote(t *testing.T) {
 		execSQLDB(t, ctx, db, "create table src(id int,b bit(64))")
 		execSQLDB(t, ctx, db, "insert into src values(1,9223372036854775808),(2,18446744073709551615)")
 		execSQLDB(t, ctx, db, "select mo_ctl('dn','flush','"+name+".src')")
-		require.NoError(t, inventory.DebugUpdateCNWorkState(cn.ServiceID(), int(metadata.WorkState_Draining)))
+		updateCNWorkState(t, inventory, refresher, cn.ServiceID(), metadata.WorkState_Draining)
 		defer func() {
-			restore, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			require.NoError(t, inventory.DebugUpdateCNWorkState(cn.ServiceID(), int(metadata.WorkState_Working)))
-			require.NoError(t, refresher.Refresh(restore))
+			updateCNWorkState(t, inventory, refresher, cn.ServiceID(), metadata.WorkState_Working)
 		}()
-		require.NoError(t, refresher.Refresh(ctx))
 		oldForce := plan.GetForceScanOnMultiCN()
 		plan.SetForceScanOnMultiCN(true)
 		defer plan.SetForceScanOnMultiCN(oldForce)
