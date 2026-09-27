@@ -57,7 +57,7 @@ func TestApplyLoadAssignmentCasts(t *testing.T) {
 		"n":    makeCol(intType, 1),
 	}
 
-	require.NoError(t, builder.applyLoadAssignmentCasts(tableDef, exprs, false))
+	require.NoError(t, builder.applyLoadAssignmentCasts(tableDef, exprs, false, false))
 	require.Equal(t, "cast_assign", exprs["txt"].GetF().GetFunc().GetObjName())
 	require.Equal(t, int32(2), exprs["txt"].GetF().GetArgs()[0].GetCol().GetColPos())
 	require.Equal(t, "cast_assign", exprs["blob"].GetF().GetFunc().GetObjName())
@@ -65,6 +65,14 @@ func TestApplyLoadAssignmentCasts(t *testing.T) {
 	require.Nil(t, exprs["n"].GetF())
 
 	ignored := map[string]*planpb.Expr{"txt": makeCol(tinyText, 4)}
-	require.NoError(t, builder.applyLoadAssignmentCasts(tableDef, ignored, true))
+	require.NoError(t, builder.applyLoadAssignmentCasts(tableDef, ignored, true, false))
 	require.Equal(t, "cast_ignore", ignored["txt"].GetF().GetFunc().GetObjName())
+
+	parquetSameType := map[string]*planpb.Expr{
+		"txt":  makeCol(tinyText, 0),
+		"blob": makeCol(tinyBlob, 1),
+	}
+	require.NoError(t, builder.applyLoadAssignmentCasts(tableDef, parquetSameType, false, true))
+	require.Nil(t, parquetSameType["txt"].GetF())
+	require.Nil(t, parquetSameType["blob"].GetF())
 }

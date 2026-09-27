@@ -156,7 +156,11 @@ func (builder *QueryBuilder) bindExternalScan(
 
 	// External scans expose target-typed columns. For BLOB/TEXT, equal type
 	// metadata does not prove that the runtime payload fits the target family.
-	if err = builder.applyLoadAssignmentCasts(tableDef, insertColToExpr, assignmentIgnore); err != nil {
+	// This experiment keeps the compatibility cast for CSV/other formats, but
+	// lets Parquet LOAD DATA measure the cost of same-type BLOB/TEXT copies in
+	// isolation. Cross-type assignments still use the normal cast path.
+	skipSameTypeParquetCast := stmt.Param != nil && stmt.Param.Format == tree.PARQUET
+	if err = builder.applyLoadAssignmentCasts(tableDef, insertColToExpr, assignmentIgnore, skipSameTypeParquetCast); err != nil {
 		return -1, nil, err
 	}
 
@@ -247,10 +251,14 @@ func (builder *QueryBuilder) applyLoadAssignmentCasts(
 	tableDef *plan.TableDef,
 	insertColToExpr map[string]*plan.Expr,
 	assignmentIgnore bool,
+	skipSameTypeParquetCast bool,
 ) error {
 	for _, col := range tableDef.Cols {
 		expr, ok := insertColToExpr[col.Name]
 		if !ok || (col.Typ.Id != int32(types.T_blob) && col.Typ.Id != int32(types.T_text)) {
+			continue
+		}
+		if skipSameTypeParquetCast && makeTypeByPlan2Expr(expr).Eq(makeTypeByPlan2Type(col.Typ)) {
 			continue
 		}
 		casted, err := builder.forceAssignmentCastExpr(expr, col.Typ, assignmentIgnore)
