@@ -1260,6 +1260,9 @@ func computeStringJsonArrayAppend(json []byte, paths []*bytejson.Path, newVal []
 	return bj.Modify(paths, newVal, bytejson.JsonModifyArrayAppend)
 }
 
+/*
+	Experiment for issue #29753: keep the PR #29519 compute functions out of
+	the execution path for this stage.
 func computeJsonArrayInsert(json []byte, paths []*bytejson.Path, newVal []bytejson.ByteJson) (bytejson.ByteJson, error) {
 	bj := types.DecodeJson(json)
 	return bj.Modify(paths, newVal, bytejson.JsonModifyArrayInsert)
@@ -1272,6 +1275,7 @@ func computeStringJsonArrayInsert(json []byte, paths []*bytejson.Path, newVal []
 	}
 	return bj.Modify(paths, newVal, bytejson.JsonModifyArrayInsert)
 }
+*/
 
 func computeJsonRemove(json []byte, paths []*bytejson.Path) (bytejson.ByteJson, error) {
 	bj := types.DecodeJson(json)
@@ -1806,9 +1810,12 @@ func (op *opBuiltInJsonSet) buildJsonArrayAppend(parameters []*vector.Vector, re
 	return op.buildJsonFunction(parameters, result, proc, length, selectList, bytejson.JsonModifyArrayAppend)
 }
 
+/*
+	Experiment for issue #29753: disable the PR #29519 SQL execution wrapper.
 func (op *opBuiltInJsonSet) buildJsonArrayInsert(parameters []*vector.Vector, result vector.FunctionResultWrapper, proc *process.Process, length int, selectList *FunctionSelectList) error {
 	return op.buildJsonFunction(parameters, result, proc, length, selectList, bytejson.JsonModifyArrayInsert)
 }
+*/
 
 func (op *opBuiltInJsonRemove) buildJsonRemove(parameters []*vector.Vector, result vector.FunctionResultWrapper, proc *process.Process, length int, selectList *FunctionSelectList) error {
 	var fn computeFn
@@ -2089,12 +2096,15 @@ func (op *opBuiltInJsonSet) buildJsonFunction(parameters []*vector.Vector, resul
 		} else {
 			fn = computeStringJsonArrayAppend
 		}
-	case bytejson.JsonModifyArrayInsert:
-		if jsonVec.GetType().Oid == types.T_json {
-			fn = computeJsonArrayInsert
-		} else {
-			fn = computeStringJsonArrayInsert
-		}
+	/*
+			Experiment for issue #29753: disable the PR #29519 execution dispatch.
+		case bytejson.JsonModifyArrayInsert:
+			if jsonVec.GetType().Oid == types.T_json {
+				fn = computeJsonArrayInsert
+			} else {
+				fn = computeStringJsonArrayInsert
+			}
+	*/
 	default:
 		return moerr.NewInvalidInput(proc.Ctx, "invalid json function type")
 	}
@@ -2162,7 +2172,8 @@ rowLoop:
 		if err != nil {
 			return err
 		}
-		if out.IsNull() && jsonFuncType != bytejson.JsonModifyArrayAppend && jsonFuncType != bytejson.JsonModifyArrayInsert {
+		// Experiment for issue #29753: restore the pre-PR null handling.
+		if out.IsNull() && jsonFuncType != bytejson.JsonModifyArrayAppend {
 			if err = rs.AppendBytes(nil, true); err != nil {
 				return err
 			}
@@ -2185,8 +2196,11 @@ func jsonModifyFunctionName(jsonFuncType bytejson.JsonModifyType) string {
 		return "json_replace"
 	case bytejson.JsonModifyArrayAppend:
 		return "json_array_append"
-	case bytejson.JsonModifyArrayInsert:
-		return "json_array_insert"
+	/*
+			Experiment for issue #29753: disable the PR #29519 function-name path.
+		case bytejson.JsonModifyArrayInsert:
+			return "json_array_insert"
+	*/
 	default:
 		return "json_modify"
 	}

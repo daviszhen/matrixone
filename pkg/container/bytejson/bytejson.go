@@ -1302,8 +1302,12 @@ func (bj ByteJson) Modify(pathList []*Path, valList []ByteJson, modifyType JsonM
 			bj, err = modifier.replace(path, val)
 		case JsonModifyArrayAppend:
 			bj, err = modifier.arrayAppend(path, val)
-		case JsonModifyArrayInsert:
-			bj, err = modifier.arrayInsert(path, val)
+		/*
+				Experiment for issue #29753: disable the PR #29519 ByteJSON
+				execution dispatch in this stage.
+			case JsonModifyArrayInsert:
+				bj, err = modifier.arrayInsert(path, val)
+		*/
 		default:
 			return Null, moerr.NewInvalidInputNoCtx("invalid modify type")
 		}
