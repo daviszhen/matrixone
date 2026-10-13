@@ -5295,7 +5295,9 @@ func collectPreparedJSONComparisonParamPositions(
 			for i, arg := range impl.F.Args {
 				valueArg := functionName == "json_array" ||
 					(functionName == "json_object" && i%2 == 1) ||
-					((functionName == "json_set" || functionName == "json_insert" || functionName == "json_replace" || functionName == "json_array_append" || functionName == "json_array_insert") && i >= 2 && i%2 == 0)
+					// Experiment for issue #29753: JSON_ARRAY_INSERT is not
+					// registered in this stage, so retain the pre-PR set here.
+					((functionName == "json_set" || functionName == "json_insert" || functionName == "json_replace" || functionName == "json_array_append") && i >= 2 && i%2 == 0)
 				if valueArg {
 					if param := arg.GetP(); param != nil {
 						positions[param.Pos] = struct{}{}
