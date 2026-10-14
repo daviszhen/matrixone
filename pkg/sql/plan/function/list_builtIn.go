@@ -2972,29 +2972,25 @@ var supportedStringBuiltIns = []FuncNew{
 		},
 	},
 
-	/*
-			Experiment for issue #29753: disable the SQL registration introduced by
-			PR #29519 while keeping its implementation available for later stages.
-		// function `json_array_insert`
-		{
-			functionId: JSON_ARRAY_INSERT,
-			class:      plan.Function_STRICT,
-			layout:     STANDARD_FUNCTION,
-			checkFn:    jsonSetCheckFn,
-			Overloads: []overload{
-				{
-					overloadId: 0,
-					args:       []types.T{types.T_json, types.T_varchar, types.T_any},
-					retType: func(parameters []types.Type) types.Type {
-						return types.T_json.ToType()
-					},
-					newOp: func() executeLogicOfOverload {
-						return newOpBuiltInJsonSet().buildJsonArrayInsert
-					},
+	// function `json_array_insert`
+	{
+		functionId: JSON_ARRAY_INSERT,
+		class:      plan.Function_STRICT,
+		layout:     STANDARD_FUNCTION,
+		checkFn:    jsonSetCheckFn,
+		Overloads: []overload{
+			{
+				overloadId: 0,
+				args:       []types.T{types.T_json, types.T_varchar, types.T_any},
+				retType: func(parameters []types.Type) types.Type {
+					return types.T_json.ToType()
+				},
+				newOp: func() executeLogicOfOverload {
+					return newOpBuiltInJsonSet().buildJsonArrayInsert
 				},
 			},
 		},
-	*/
+	},
 
 	// function `json_remove`
 	{

@@ -1810,12 +1810,11 @@ func (op *opBuiltInJsonSet) buildJsonArrayAppend(parameters []*vector.Vector, re
 	return op.buildJsonFunction(parameters, result, proc, length, selectList, bytejson.JsonModifyArrayAppend)
 }
 
-/*
-	Experiment for issue #29753: disable the PR #29519 SQL execution wrapper.
+// Experiment for issue #29753: registration must reference a method, but the
+// downstream modify dispatch below remains disabled in this stage.
 func (op *opBuiltInJsonSet) buildJsonArrayInsert(parameters []*vector.Vector, result vector.FunctionResultWrapper, proc *process.Process, length int, selectList *FunctionSelectList) error {
 	return op.buildJsonFunction(parameters, result, proc, length, selectList, bytejson.JsonModifyArrayInsert)
 }
-*/
 
 func (op *opBuiltInJsonRemove) buildJsonRemove(parameters []*vector.Vector, result vector.FunctionResultWrapper, proc *process.Process, length int, selectList *FunctionSelectList) error {
 	var fn computeFn
