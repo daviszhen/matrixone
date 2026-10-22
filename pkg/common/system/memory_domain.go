@@ -700,8 +700,8 @@ func readCgroupAccounting(path string) (reclaimable, kernel, nonGo uint64) {
 	}
 	if kernel == 0 {
 		for _, name := range []string{
-			"kernel_stack", "pagetables", "percpu", "sock", "slab",
-			"total_kernel_stack", "total_pagetables", "total_percpu", "total_sock", "total_slab",
+			"kernel_stack", "pagetables", "percpu", "slab",
+			"total_kernel_stack", "total_pagetables", "total_percpu", "total_slab",
 		} {
 			if v1 && !strings.HasPrefix(name, "total_") {
 				continue
@@ -713,6 +713,18 @@ func readCgroupAccounting(path string) (reclaimable, kernel, nonGo uint64) {
 			if part <= ^uint64(0)-kernel {
 				kernel += part
 			}
+		}
+	}
+	// Socket buffers are charged to the domain but are never part of the v2
+	// aggregate kernel counter (kernel_stack+pagetables+percpu+vmalloc+slab),
+	// and the zero-kernel fallback above now lists slab-side names only. Count
+	// them exactly once on both controller versions, or large listener fan-outs
+	// grow the charged usage without growing the protective reserve.
+	if part := value("sock"); part > 0 {
+		if part <= ^uint64(0)-kernel {
+			kernel += part
+		} else {
+			kernel = ^uint64(0)
 		}
 	}
 
